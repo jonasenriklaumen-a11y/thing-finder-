@@ -1,0 +1,64 @@
+[project]
+name = "scoutr"
+version = "0.1.0"
+description = "Ein KI-Agent fuer die Kommandozeile, der eigenstaendig das Web durchsucht, Seiten liest und die Ergebnisse ausgewertet zurueckgibt."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "scoutr contributors" }]
+keywords = ["cli", "agent", "llm", "research", "web-search"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "litellm>=1.55",
+    "typer>=0.12",
+    "rich>=13.7",
+    "httpx>=0.27",
+    "selectolax>=0.3.21",
+    "trafilatura>=1.12",
+    "ddgs>=9.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.44"]
+images = ["term-image>=0.7"]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+scoutr = "scoutr.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jonasenriklaumen-a11y/thing-finder-"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scoutr"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["B008", "RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
