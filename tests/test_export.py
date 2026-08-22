@@ -111,3 +111,57 @@ def test_export_rejects_empty_session(tmp_path: Path) -> None:
 def test_default_filename_contains_topic(tmp_path: Path) -> None:
     path = export([_turn()], "md", directory=tmp_path)
     assert "laptop-bis-1200" in path.name
+
+
+def test_download_images_writes_files_and_rewrites_links(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--download-images` legt die Bilder neben der Exportdatei ab."""
+    import httpx
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def get(self, url: str) -> httpx.Response:
+            return httpx.Response(200, content=b"BILD", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    target = tmp_path / "recherche.html"
+    export([_turn()], "html", path=target, with_images=True)
+
+    files = list((tmp_path / "recherche" / "bilder").glob("*"))
+    assert files and files[0].read_bytes() == b"BILD"
+    html = target.read_text(encoding="utf-8")
+    assert 'src="recherche/bilder/' in html
+    assert "https://cdn.shop.de/yoga.jpg" not in html
+
+
+def test_failed_image_download_keeps_the_link(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import httpx
+
+    class FailingClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> FailingClient:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def get(self, url: str) -> httpx.Response:
+            raise httpx.ConnectError("kein Netz", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "Client", FailingClient)
+    target = tmp_path / "recherche.md"
+    export([_turn()], "md", path=target, with_images=True)
+    assert "https://cdn.shop.de/yoga.jpg" in target.read_text(encoding="utf-8")

@@ -261,3 +261,47 @@ def test_known_subcommand_is_not_rerouted(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
     cli.main()
     assert called[0] == ["scoutr", "config"]
+
+
+def test_bare_flags_are_routed_to_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["scoutr", "--location", "Köln", "--lang", "de"])
+    called: list[list[str]] = []
+    monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
+    cli.main()
+    assert called[0][1] == "chat"
+
+
+def test_location_flag_reaches_the_search_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--location/--lang landen in Suchanfrage und API-Parametern."""
+    captured: dict[str, Any] = {}
+
+    def fake_search(query, count, country, lang, backend, api_key=""):
+        captured.update(country=country, lang=lang)
+        return [SearchResult(title="T", url="https://a.de/")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+
+    tool_call = SimpleNamespace(
+        id="c1",
+        type="function",
+        index=0,
+        function=SimpleNamespace(name="web_search", arguments='{"query": "cafés köln"}'),
+    )
+    responses = [
+        SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tool_call]))]
+        ),
+        SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Fertig", tool_calls=None))]
+        ),
+    ]
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: responses.pop(0))
+
+    result = runner.invoke(
+        cli.app,
+        ["chat", "Cafés?", "--location", "Köln", "--lang", "at", "--no-stream"],
+    )
+    assert result.exit_code == 0
+    assert captured == {"country": "at", "lang": "at"}
