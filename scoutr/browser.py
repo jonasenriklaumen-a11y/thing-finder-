@@ -18,6 +18,7 @@ Datenschutz-Voreinstellungen dieses Moduls:
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 from typing import Any, Protocol
 
@@ -27,6 +28,12 @@ from scoutr.fetch import SiteRules, load_rules
 NETWORK_IDLE_TIMEOUT_MS = 6_000
 #: Wie lange darf ein einzelner Klick brauchen?
 CLICK_TIMEOUT_MS = 2_500
+
+#: Chromium-Argumente fuer den Betrieb im Container. Dort steht der eigene
+#: Sandbox-Mechanismus des Browsers meist nicht zur Verfuegung -- was
+#: vertretbar ist, weil der ganze Prozess bereits im Container isoliert
+#: laeuft. Ausserhalb eines Containers bleibt die Browser-Sandbox aktiv.
+CONTAINER_ARGS = ("--no-sandbox", "--disable-dev-shm-usage")
 
 #: Entfernt Overlays und loest die Scroll-Sperre.
 REMOVE_OVERLAYS_JS = """
@@ -151,6 +158,16 @@ def dismiss_consent(page: Any, rules: SiteRules | None = None) -> str:
     return f"removed:{removed}" if removed else "nothing"
 
 
+def launch_args() -> list[str]:
+    """Zusaetzliche Chromium-Argumente aus der Umgebung.
+
+    `SCOUTR_BROWSER_NO_SANDBOX=1` schaltet die Browser-eigene Sandbox ab --
+    im Container-Image ist das gesetzt, auf dem blanken System nicht.
+    """
+    flag = os.environ.get("SCOUTR_BROWSER_NO_SANDBOX", "").strip().lower()
+    return list(CONTAINER_ARGS) if flag in {"1", "true", "yes", "on", "ja"} else []
+
+
 def playwright_available() -> bool:
     """Ist Playwright installiert?"""
     try:
@@ -180,7 +197,7 @@ def render_page(
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(headless=True, args=launch_args())
             try:
                 # Frischer Kontext je Abruf -- nichts wird uebernommen.
                 context = browser.new_context(

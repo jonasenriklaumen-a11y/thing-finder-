@@ -1,0 +1,28 @@
+# Minimale SearXNG-Konfiguration fuer scoutr.
+#
+# Entscheidend ist der Eintrag `json` unter `search.formats` -- ohne den
+# antwortet SearXNG nur mit HTML und scoutr kann nichts damit anfangen.
+
+use_default_settings: true
+
+general:
+  instance_name: "scoutr"
+  # Keine Nutzungsstatistik nach draussen.
+  donation_url: false
+  contact_url: false
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  # Ersetzen: `openssl rand -hex 32`
+  secret_key: "bitte-aendern-openssl-rand-hex-32"
+  limiter: false
+  image_proxy: false
+
+ui:
+  static_use_hash: true

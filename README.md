@@ -193,6 +193,66 @@ Ein Vision-Modell beschreibt, was auf dem Bild zu sehen ist (Produkt, Logo, Schi
 Text), daraus werden Suchbegriffe — danach läuft die normale Recherche. Im Chat geht
 dasselbe mit `/image pfad.jpg`.
 
+## Im Container laufen lassen
+
+Wer scoutr nicht direkt aufs System installieren will, lässt es in einem Container
+laufen. Der isoliert das **Dateisystem**, nicht die Verbindung: das Netz bleibt
+uneingeschränkt offen, sonst könnte der Agent nicht recherchieren.
+
+```bash
+./scoutr-box --setup            # einmalig: fragt Modell und Key ab, schreibt ./.env
+./scoutr-box                    # Chat
+./scoutr-box "deine Frage"      # einmalige Recherche
+./scoutr-box search "test"      # nur die Suche, ohne LLM
+```
+
+Oder direkt mit Compose, ohne den Wrapper:
+
+```bash
+docker compose run --rm scoutr                 # Chat
+docker compose run --rm scoutr "deine Frage"
+docker compose build scoutr                    # nach Codeänderungen
+```
+
+### Was der Container sieht — und was nicht
+
+| | |
+|---|---|
+| **Netz** | vollständig offen, keine Einschränkung — nötig für Suche und Seitenabruf |
+| **Dateisystem** | nur `/data` (Cache + Verlauf, Docker-Volume) und `/work` (→ `./exports`) |
+| **Benutzer** | nicht `root`, sondern `scoutr` (UID 1000) |
+| **Rechte** | `no-new-privileges`, keine Zugriffe aufs Home-Verzeichnis des Hosts |
+| **Keys** | kommen aus `./.env`, werden als Umgebungsvariablen hineingereicht |
+
+Exporte (`/export html`) landen in `./exports` und sind damit direkt auf dem Host
+lesbar. Cache und Verlauf überleben im Volume `scoutr-data`.
+
+### Zwei Varianten des Images
+
+```bash
+docker compose build scoutr                                  # mit Chromium (Default)
+SCOUTR_IMAGE_TARGET=slim docker compose build scoutr         # ohne, ~700 MB kleiner
+```
+
+Das `browser`-Image bringt Chromium für den JavaScript-Fallback (Stufe 3) mit. Darin
+läuft Chromium ohne seine eigene Sandbox (`SCOUTR_BROWSER_NO_SANDBOX=1`) — die Isolation
+übernimmt der Container. Bei einer normalen Installation aufs System bleibt die
+Browser-Sandbox aktiv.
+
+### Alles im Haus: mit eigener Suchmaschine
+
+Zusammen mit SearXNG geht auch die Suche über keinen fremden Dienst mehr:
+
+```bash
+docker compose --profile searxng up -d searxng
+echo 'SCOUTR_SEARCH_BACKEND=searxng' >> .env
+docker compose --profile searxng run --rm scoutr
+```
+
+Die mitgelieferte `docker/searxng/settings.yml` hat die JSON-Ausgabe bereits aktiviert.
+Ersetze darin vor dem ersten Start den `secret_key` durch etwas Eigenes
+(`openssl rand -hex 32`).
+
 ## Suchmaschine — ohne API-Key
 
 Die Suche kostet nichts und braucht **kein Konto**. Standard ist eine offene Metasuche:
@@ -409,6 +469,10 @@ scoutr/
   cache.py       # SQLite-Cache und Verlauf
   config.py      # Settings aus .env
   selectors.yaml # Selektor- und Marker-Listen, ohne Code erweiterbar
+
+Dockerfile       # zwei Ziele: slim (ohne Browser) und browser (mit Chromium)
+compose.yaml     # scoutr plus optionales SearXNG
+scoutr-box       # Wrapper: ./scoutr-box "deine Frage"
 ```
 
 ## Entwicklung

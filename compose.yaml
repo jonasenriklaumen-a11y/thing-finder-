@@ -1,0 +1,59 @@
+# scoutr im Container -- isoliert vom System, ohne Netzbeschraenkung.
+#
+#   docker compose run --rm scoutr                    # Chat
+#   docker compose run --rm scoutr "deine Frage"      # einmalig
+#   docker compose run --rm scoutr search "test"      # nur Suche
+#
+# Mit eigener Suchmaschine (SearXNG, kein API-Key noetig):
+#   docker compose --profile searxng up -d searxng
+#   docker compose --profile searxng run --rm scoutr
+
+services:
+  scoutr:
+    build:
+      context: .
+      target: ${SCOUTR_IMAGE_TARGET:-browser}
+    image: scoutr:local
+    # Laeuft unter der UID des Host-Nutzers, damit Exporte in ./exports
+    # dem richtigen Benutzer gehoeren. `scoutr-box` setzt die Werte; ohne
+    # Wrapper gilt der eingebaute Benutzer (UID 1000).
+    user: "${SCOUTR_UID:-1000}:${SCOUTR_GID:-1000}"
+    # Keys und Voreinstellungen kommen aus der .env im Projektverzeichnis.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SCOUTR_DATA_DIR: /data
+      # Wird nur benutzt, wenn SCOUTR_SEARCH_BACKEND=searxng gesetzt ist.
+      SCOUTR_SEARXNG_URL: ${SCOUTR_SEARXNG_URL:-http://searxng:8080}
+    volumes:
+      # Cache und Verlauf ueberleben den Container.
+      - scoutr-data:/data
+      # Exporte landen im Projektverzeichnis unter ./exports.
+      - ./exports:/work
+    stdin_open: true
+    tty: true
+    init: true
+    # Volles Netz nach draussen -- ohne das kann scoutr nicht recherchieren.
+    # Isoliert wird das Dateisystem, nicht die Verbindung.
+    security_opt:
+      - no-new-privileges:true
+    # Chromium legt seine Shared-Memory-Segmente hier ab.
+    shm_size: 512m
+
+  # Optional: eigene Metasuchmaschine, damit auch die Suche im Haus bleibt.
+  searxng:
+    profiles: [searxng]
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./docker/searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8080/
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  scoutr-data:

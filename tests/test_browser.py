@@ -10,6 +10,7 @@ from scoutr.browser import (
     click_known_reject_button,
     click_reject_by_text,
     dismiss_consent,
+    launch_args,
     remove_overlays,
     render_page,
 )
@@ -252,3 +253,26 @@ def test_paywalls_never_trigger_the_browser(fixture_html, monkeypatch) -> None:
     page = fetcher.fetch("https://zeitung.example/artikel")
     assert calls == []
     assert page.skipped_reason == "paywall"
+
+
+# ---------------------------------------------------------------------------
+# Betrieb im Container
+# ---------------------------------------------------------------------------
+def test_browser_sandbox_stays_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auf dem blanken System behaelt Chromium seine eigene Sandbox."""
+    monkeypatch.delenv("SCOUTR_BROWSER_NO_SANDBOX", raising=False)
+    assert launch_args() == []
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "ja"])
+def test_container_flag_disables_the_browser_sandbox(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Im Container uebernimmt der Container die Isolation."""
+    monkeypatch.setenv("SCOUTR_BROWSER_NO_SANDBOX", value)
+    assert launch_args() == ["--no-sandbox", "--disable-dev-shm-usage"]
+
+
+def test_unset_like_values_keep_the_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCOUTR_BROWSER_NO_SANDBOX", "0")
+    assert launch_args() == []
