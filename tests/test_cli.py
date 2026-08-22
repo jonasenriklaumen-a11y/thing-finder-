@@ -305,3 +305,22 @@ def test_location_flag_reaches_the_search_api(monkeypatch: pytest.MonkeyPatch) -
     )
     assert result.exit_code == 0
     assert captured == {"country": "at", "lang": "at"}
+
+
+def test_version_flag(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["scoutr", "--version"])
+    monkeypatch.setattr(cli, "app", lambda: pytest.fail("app haette nicht laufen duerfen"))
+    cli.main()
+    assert "scoutr" in capsys.readouterr().out
+
+
+def test_help_is_not_rerouted(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["scoutr", "--help"])
+    called: list[list[str]] = []
+    monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
+    cli.main()
+    assert called[0] == ["scoutr", "--help"]

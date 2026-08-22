@@ -31,6 +31,7 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,
     help="scoutr -- KI-Rechercheagent fuer die Kommandozeile.",
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 console = Console()
 
@@ -718,7 +719,10 @@ COMMANDS = {
 def main() -> None:
     """Einstiegspunkt: `scoutr` und `scoutr "Frage"` landen im Chat."""
     argv = sys.argv[1:]
-    if not argv or (argv[0] not in COMMANDS and argv[0] not in ("--help", "-h", "--version")):
+    if argv and argv[0] in ("--version", "-V"):
+        console.print(f"scoutr {__version__}")
+        return
+    if not argv or (argv[0] not in COMMANDS and argv[0] not in ("--help", "-h")):
         sys.argv.insert(1, "chat")
     app()
 
