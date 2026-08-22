@@ -29,8 +29,10 @@ $ scoutr
 ## Quickstart in 3 Minuten
 
 ```bash
-# 1. Installieren
-uv tool install scoutr
+# 1. Installieren (aus diesem Repo -- scoutr liegt noch nicht auf PyPI)
+git clone https://github.com/jonasenriklaumen-a11y/thing-finder-
+cd thing-finder-
+uv tool install .
 
 # 2. Einrichten -- fragt nach Modell und API-Key, testet beide
 scoutr setup
@@ -38,6 +40,10 @@ scoutr setup
 # 3. Loslegen
 scoutr
 ```
+
+> Voraussetzungen: Python 3.11+ und [uv](https://docs.astral.sh/uv/). Sobald das Paket
+> veröffentlicht ist, genügt `uv tool install scoutr`. Zum Entwickeln stattdessen
+> `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run scoutr ...` aufrufen.
 
 `scoutr setup` fragt genau zwei Dinge ab:
 
