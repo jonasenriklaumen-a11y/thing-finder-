@@ -85,7 +85,7 @@ def toolbox(settings: Settings, fixture_html) -> Toolbox:
 def _stub_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "scoutr.tools.search_web",
-        lambda query, count, country, lang, backend, api_key="": [
+        lambda query, **kwargs: [
             SearchResult(title="Café Sonntag", url="https://cafe-sonntag.de/", snippet="WLAN")
         ],
     )

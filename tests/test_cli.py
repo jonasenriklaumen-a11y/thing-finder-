@@ -53,7 +53,7 @@ def test_config_reports_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_search_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "scoutr.tools.search_web",
-        lambda query, count, country, lang, backend, api_key="": [
+        lambda query, **kwargs: [
             SearchResult(
                 title="Café Nordwand", url="https://cafe-nordwand.de/", snippet="WLAN", rank=1
             )
@@ -112,7 +112,7 @@ def test_fetch_command_reports_skips(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_cache_command_shows_and_clears(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "scoutr.tools.search_web",
-        lambda query, count, country, lang, backend, api_key="": [
+        lambda query, **kwargs: [
             SearchResult(title="T", url="https://a.de/")
         ],
     )
@@ -277,8 +277,8 @@ def test_location_flag_reaches_the_search_api(monkeypatch: pytest.MonkeyPatch) -
     """--location/--lang landen in Suchanfrage und API-Parametern."""
     captured: dict[str, Any] = {}
 
-    def fake_search(query, count, country, lang, backend, api_key=""):
-        captured.update(country=country, lang=lang)
+    def fake_search(query, **kwargs):
+        captured.update(country=kwargs["country"], lang=kwargs["lang"])
         return [SearchResult(title="T", url="https://a.de/")]
 
     monkeypatch.setattr("scoutr.tools.search_web", fake_search)

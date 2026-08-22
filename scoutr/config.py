@@ -45,7 +45,10 @@ PROVIDER_KEYS: dict[str, str] = {
 }
 
 SEARCH_BACKEND_KEYS: dict[str, str] = {
-    "duckduckgo": "",  # kein Key noetig
+    "duckduckgo": "",  # offene Metasuche, kein Key noetig
+    "ddg": "",
+    "open": "",
+    "searxng": "",  # eigene Instanz, kein Key noetig
     "brave": "BRAVE_API_KEY",
     "tavily": "TAVILY_API_KEY",
 }
@@ -107,6 +110,10 @@ class Settings:
     vision_model: str = ""
     api_base: str = ""
     search_backend: str = "duckduckgo"
+    #: Komma-Liste offener Engines fuer die Metasuche (leer = alle).
+    search_engines: str = ""
+    #: Basis-URL der eigenen SearXNG-Instanz.
+    searxng_url: str = ""
     location: str = ""
     lang: str = "de"
     country: str = "de"
@@ -160,6 +167,8 @@ class Settings:
         backend_key = SEARCH_BACKEND_KEYS.get(self.search_backend, "")
         if backend_key and not _env_str(backend_key):
             problems.append(f"{backend_key} fehlt (fuer Suchmaschine {self.search_backend})")
+        if self.search_backend == "searxng" and not self.searxng_url:
+            problems.append("SCOUTR_SEARXNG_URL fehlt (fuer Suchmaschine searxng)")
         return problems
 
 
@@ -173,6 +182,8 @@ def get_settings() -> Settings:
         vision_model=_env_str("SCOUTR_VISION_MODEL"),
         api_base=_env_str("SCOUTR_API_BASE"),
         search_backend=_env_str("SCOUTR_SEARCH_BACKEND", "duckduckgo").lower(),
+        search_engines=_env_str("SCOUTR_SEARCH_ENGINES"),
+        searxng_url=_env_str("SCOUTR_SEARXNG_URL"),
         location=_env_str("SCOUTR_LOCATION"),
         lang=_env_str("SCOUTR_LANG", "de"),
         country=_env_str("SCOUTR_COUNTRY", "de"),

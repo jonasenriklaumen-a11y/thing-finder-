@@ -26,6 +26,7 @@ from scoutr.config import (
     reset_settings_cache,
     write_env_file,
 )
+from scoutr.search import OPEN_ENGINES
 
 app = typer.Typer(
     add_completion=False,
@@ -70,17 +71,26 @@ def _probe_llm(model: str, api_key: str, api_base: str) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def _probe_search(backend: str, api_key: str) -> tuple[bool, str]:
+def _probe_search(
+    backend: str, api_key: str = "", engines: str = "", instance_url: str = ""
+) -> tuple[bool, str]:
     """Schickt eine Testsuche an das gewaehlte Such-Backend."""
     try:
         from scoutr.search import search_web
 
-        results = search_web("scoutr test query", count=3, backend=backend, api_key=api_key)
+        results = search_web(
+            "wetter berlin",
+            count=3,
+            backend=backend,
+            api_key=api_key,
+            engines=engines,
+            instance_url=instance_url,
+        )
         if not results:
             return False, "Keine Treffer -- Backend erreichbar, aber ohne Ergebnis."
         return True, f"{len(results)} Treffer, erster: {results[0].title[:60]}"
     except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
+        return False, f"{exc}"
 
 
 @app.command("setup")
@@ -137,14 +147,51 @@ def setup_command(
 
     # -- Suche -------------------------------------------------------------
     console.print("\n[bold]2. Suchmaschine[/bold]")
-    console.print("  [cyan]1[/cyan] duckduckgo  [dim]kein Key noetig (Default)[/dim]")
-    console.print("  [cyan]2[/cyan] brave       [dim]BRAVE_API_KEY, https://brave.com/search/api/[/dim]")
-    console.print("  [cyan]3[/cyan] tavily      [dim]TAVILY_API_KEY, https://tavily.com/[/dim]")
+    console.print(
+        "  [cyan]1[/cyan] offene Metasuche  [green]kein Key[/green] "
+        f"[dim]({', '.join(OPEN_ENGINES[:4])} ...)[/dim]"
+    )
+    console.print(
+        "  [cyan]2[/cyan] SearXNG           [green]kein Key[/green] "
+        "[dim]eigene oder fremde Instanz[/dim]"
+    )
+    console.print(
+        "  [cyan]3[/cyan] Brave Search      [dim]BRAVE_API_KEY, https://brave.com/search/api/[/dim]"
+    )
+    console.print(
+        "  [cyan]4[/cyan] Tavily            [dim]TAVILY_API_KEY, https://tavily.com/[/dim]"
+    )
     backend_choice = typer.prompt("Auswahl", default="1").strip()
-    backend = {"1": "duckduckgo", "2": "brave", "3": "tavily"}.get(backend_choice, "duckduckgo")
+    backend = {"1": "duckduckgo", "2": "searxng", "3": "brave", "4": "tavily"}.get(
+        backend_choice, "duckduckgo"
+    )
+
     backend_key_name = SEARCH_BACKEND_KEYS.get(backend, "")
     backend_key = ""
-    if backend_key_name:
+    engines = ""
+    searxng_url = ""
+
+    if backend == "duckduckgo":
+        console.print(
+            "  [dim]Fragt mehrere offene Suchmaschinen an und mischt die Treffer. "
+            "Faellt eine aus, uebernehmen die anderen.[/dim]"
+        )
+        engines = typer.prompt(
+            f"  Engines einschraenken? ({', '.join(OPEN_ENGINES)}) -- leer = alle",
+            default="",
+        ).strip()
+    elif backend == "searxng":
+        console.print(
+            "  [dim]SearXNG ist eine freie Metasuchmaschine zum Selberhosten:[/dim]\n"
+            "  [dim]  docker run -d -p 8080:8080 searxng/searxng[/dim]\n"
+            "  [dim]In der settings.yml muss unter `search.formats` der Eintrag "
+            "`json` stehen.[/dim]"
+        )
+        searxng_url = typer.prompt(
+            "  Adresse der Instanz", default=os.environ.get("SCOUTR_SEARXNG_URL", "")
+            or "http://localhost:8080"
+        ).strip()
+    elif backend_key_name:
         current = os.environ.get(backend_key_name, "")
         console.print(f"  [dim]Wo bekomme ich den? {_key_hint(backend_key_name)}[/dim]")
         backend_key = typer.prompt(
@@ -170,7 +217,7 @@ def setup_command(
         console.print(f"  {'[green]OK[/green]' if llm_ok else '[red]FEHLER[/red]'}  LLM: {llm_msg}")
 
         with console.status("  Teste Suche ..."):
-            search_ok, search_msg = _probe_search(backend, backend_key)
+            search_ok, search_msg = _probe_search(backend, backend_key, engines, searxng_url)
         marker = "[green]OK[/green]" if search_ok else "[red]FEHLER[/red]"
         console.print(f"  {marker}  Suche: {search_msg}")
 
@@ -193,6 +240,10 @@ def setup_command(
         values[key_name] = api_key
     if backend_key_name and backend_key:
         values[backend_key_name] = backend_key
+    if engines:
+        values["SCOUTR_SEARCH_ENGINES"] = engines
+    if searxng_url:
+        values["SCOUTR_SEARXNG_URL"] = searxng_url
     if api_base:
         values["SCOUTR_API_BASE"] = api_base
 
@@ -236,7 +287,12 @@ def config_command() -> None:
     table.add_row(".env", str(settings.env_path or "(keine gefunden)"))
     table.add_row("Modell", settings.model)
     table.add_row("Vision-Modell", settings.effective_vision_model)
-    table.add_row("Suchmaschine", settings.search_backend)
+    table.add_row(
+        "Suchmaschine",
+        settings.search_backend
+        + (f" ({settings.search_engines})" if settings.search_engines else "")
+        + (f" @ {settings.searxng_url}" if settings.searxng_url else ""),
+    )
     table.add_row("Ort", settings.location or "(keiner)")
     table.add_row("Sprache / Land", f"{settings.lang} / {settings.country}")
     table.add_row("Max. Tool-Calls", str(settings.max_tool_calls))

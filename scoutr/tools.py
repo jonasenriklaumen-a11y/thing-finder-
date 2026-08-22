@@ -154,7 +154,15 @@ class Toolbox:
         if not query:
             return {"query": query, "results": [], "error": "Leere Suchanfrage."}
 
-        key = cache_key("search", self.settings.search_backend, query, count, country, lang)
+        key = cache_key(
+            "search",
+            self.settings.search_backend,
+            self.settings.search_engines,
+            query,
+            count,
+            country,
+            lang,
+        )
         cached = self.cache.get(key) if self.cache else None
         if cached is not None:
             results = [SearchResult(**item) for item in cached]
@@ -166,6 +174,8 @@ class Toolbox:
                     country=country,
                     lang=lang,
                     backend=self.settings.search_backend,
+                    engines=self.settings.search_engines,
+                    instance_url=self.settings.searxng_url,
                 )
             except SearchError as exc:
                 self._emit("error", message=str(exc))

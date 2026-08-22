@@ -50,7 +50,7 @@ scoutr
 | Was | Wo bekommt man es | Pflicht? |
 |---|---|---|
 | LLM-Anbieter + Key | [Anthropic](https://console.anthropic.com/settings/keys) · [OpenAI](https://platform.openai.com/api-keys) · [Google](https://aistudio.google.com/app/apikey) · oder lokal per [Ollama](https://ollama.com) ganz ohne Key | ja |
-| Suchmaschine | **DuckDuckGo** ist Standard und braucht **keinen Key**. Optional [Brave Search](https://brave.com/search/api/) oder [Tavily](https://app.tavily.com/home) | nein |
+| Suchmaschine | **Nichts.** Die offene Metasuche ist Standard und braucht weder Key noch Konto. | nein |
 
 Beide werden direkt mit einem Probe-Request getestet, bevor die `.env` geschrieben wird
 (nach `~/.config/scoutr/.env`, Rechte `600`).
@@ -193,6 +193,61 @@ Ein Vision-Modell beschreibt, was auf dem Bild zu sehen ist (Produkt, Logo, Schi
 Text), daraus werden Suchbegriffe — danach läuft die normale Recherche. Im Chat geht
 dasselbe mit `/image pfad.jpg`.
 
+## Suchmaschine — ohne API-Key
+
+Die Suche kostet nichts und braucht **kein Konto**. Standard ist eine offene Metasuche:
+`scoutr` fragt über [`ddgs`](https://pypi.org/project/ddgs/) mehrere freie Suchmaschinen
+per HTML ab und mischt die Treffer. Fällt eine aus (Rate-Limit, Umbau), übernehmen die
+anderen — genau deshalb ist die Metasuche robuster als eine einzelne Engine.
+
+Verfügbar ohne Key: `duckduckgo`, `mojeek`, `startpage`, `brave`, `yahoo`, `wikipedia`.
+
+```bash
+# alle offenen Engines (Default, nichts zu tun)
+SCOUTR_SEARCH_BACKEND=duckduckgo
+
+# gezielt einschränken, wenn eine Engine bei dir zickt
+SCOUTR_SEARCH_ENGINES=duckduckgo,mojeek
+```
+
+### Eigene Instanz: SearXNG
+
+Wer nichts von fremden Suchmaschinen abhängen will, hostet
+[SearXNG](https://docs.searxng.org/) selbst — freie Software, kein Key, keine
+Ratenbegrenzung von außen:
+
+```bash
+docker run -d -p 8080:8080 searxng/searxng
+```
+
+In der `settings.yml` der Instanz muss unter `search.formats` der Eintrag `json` stehen
+(sonst antwortet sie mit HTML oder 403). Dann:
+
+```bash
+SCOUTR_SEARCH_BACKEND=searxng
+SCOUTR_SEARXNG_URL=http://localhost:8080
+```
+
+Öffentliche SearXNG-Instanzen funktionieren auch, haben die JSON-Ausgabe aber oft
+abgeschaltet.
+
+### Kommerzielle APIs (optional)
+
+[Brave Search](https://brave.com/search/api/) und [Tavily](https://app.tavily.com/home)
+sind eingebaut, brauchen aber einen Key. Nur sinnvoll, wenn dir die offenen Engines nicht
+zuverlässig genug sind:
+
+```bash
+SCOUTR_SEARCH_BACKEND=brave
+BRAVE_API_KEY=...
+```
+
+Testen lässt sich jedes Backend ohne LLM:
+
+```bash
+scoutr search "cafés mönchengladbach" -n 5
+```
+
 ## Verhalten beim Seitenabruf
 
 * `robots.txt` wird respektiert (einmal je Origin geholt und zwischengespeichert)
@@ -317,7 +372,9 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_MODEL` | LiteLLM-Modell-ID | `anthropic/claude-sonnet-4-6` |
 | `SCOUTR_VISION_MODEL` | Modell für `--image` | wie `SCOUTR_MODEL` |
 | `SCOUTR_API_BASE` | eigene Basis-URL (Ollama, Proxy) | — |
-| `SCOUTR_SEARCH_BACKEND` | `duckduckgo`, `brave`, `tavily` | `duckduckgo` |
+| `SCOUTR_SEARCH_BACKEND` | `duckduckgo`, `searxng`, `brave`, `tavily` | `duckduckgo` |
+| `SCOUTR_SEARCH_ENGINES` | Engines der Metasuche einschränken | alle |
+| `SCOUTR_SEARXNG_URL` | Adresse der SearXNG-Instanz | — |
 | `SCOUTR_LOCATION` | Standard-Ortsfilter | — |
 | `SCOUTR_LANG` / `SCOUTR_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
 | `SCOUTR_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |

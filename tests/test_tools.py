@@ -43,22 +43,18 @@ def test_web_search_uses_settings_defaults(
 ) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_search(query, count, country, lang, backend, api_key=""):
-        captured.update(query=query, count=count, country=country, lang=lang, backend=backend)
+    def fake_search(query, **kwargs):
+        captured.update(query=query, **kwargs)
         return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
 
-    monkeypatch.setattr(
-        "scoutr.tools.search_web",
-        lambda query, count, country, lang, backend, api_key="": fake_search(
-            query, count, country, lang, backend
-        ),
-    )
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
     settings.country = "at"
     settings.lang = "de"
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     result = box.web_search("cafés")
     assert captured["country"] == "at"
     assert captured["count"] == settings.max_results_default
+    assert captured["backend"] == "duckduckgo"
     assert result["results"][0]["url"] == "https://a.de/"
     assert box.stats.searches == ["cafés"]
 
@@ -68,7 +64,7 @@ def test_web_search_result_is_cached(
 ) -> None:
     calls: list[str] = []
 
-    def fake_search(query, count, country, lang, backend, api_key=""):
+    def fake_search(query, **kwargs):
         calls.append(query)
         return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
 
