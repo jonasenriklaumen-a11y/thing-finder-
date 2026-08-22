@@ -1,0 +1,180 @@
+# Konfiguration der Seiten-Saeuberung (Stufe 1 der Cookie-Behandlung).
+# Erweiterbar ohne Codeaenderung -- die Datei wird beim Start eingelesen.
+
+# CSS-Selektoren, deren Knoten vor der Textextraktion aus dem DOM fliegen.
+strip_selectors:
+  # generische Consent-/Overlay-Muster
+  - '[id*="cookie" i]'
+  - '[class*="cookie" i]'
+  - '[id*="consent" i]'
+  - '[class*="consent" i]'
+  - '[id*="gdpr" i]'
+  - '[class*="gdpr" i]'
+  - '[class*="cmp" i]'
+  - '[class*="overlay" i]'
+  - '[class*="modal" i]'
+  - '[class*="newsletter" i]'
+  - '[class*="paywall" i]'
+  - '[role="dialog"]'
+  - '[aria-modal="true"]'
+  - 'dialog'
+  # konkrete Consent-Management-Plattformen
+  - '#onetrust-consent-sdk'
+  - '#onetrust-banner-sdk'
+  - '#usercentrics-root'
+  - '#uc-center-container'
+  - '#CybotCookiebotDialog'
+  - '#CybotCookiebotDialogBodyUnderlay'
+  - '#didomi-host'
+  - '#didomi-popup'
+  - '#sp_message_container_1'
+  - '[id^="sp_message_container"]'
+  - '.qc-cmp2-container'
+  - '#cmpbox'
+  - '#cmpbox2'
+  - '.fc-consent-root'
+  - '#truste-consent-track'
+  - '#iubenda-cs-banner'
+  - '#klaro'
+  - '#cookiescript_injected'
+  - '#BorlabsCookieBox'
+  # allgemeiner Ballast, den trafilatura gelegentlich mitnimmt
+  - 'script'
+  - 'style'
+  - 'noscript'
+  - 'template'
+  - 'svg'
+  - 'iframe'
+  - 'nav'
+  - 'header'
+  - 'footer'
+  - 'aside'
+  - '[role="banner"]'
+  - '[role="navigation"]'
+  - '[aria-hidden="true"]'
+
+# Textbausteine, die als Consent-Geschwaetz gelten. Absaetze, die im
+# Wesentlichen daraus bestehen, werden aus dem extrahierten Text gestrichen.
+consent_phrases:
+  - "wir verwenden cookies"
+  - "wir nutzen cookies"
+  - "diese website verwendet cookies"
+  - "diese webseite verwendet cookies"
+  - "cookies und aehnliche technologien"
+  - "cookies und ähnliche technologien"
+  - "alle akzeptieren"
+  - "alle cookies akzeptieren"
+  - "auswahl bestaetigen"
+  - "auswahl bestätigen"
+  - "nur notwendige"
+  - "nur essenzielle"
+  - "datenschutzeinstellungen"
+  - "privatsphaere-einstellungen"
+  - "privatsphäre-einstellungen"
+  - "cookie-einstellungen"
+  - "einwilligung"
+  - "zustimmen und weiter"
+  - "berechtigtes interesse"
+  - "ihre privatsphaere"
+  - "ihre privatsphäre"
+  - "consent management"
+  - "consent manager"
+  - "we use cookies"
+  - "this website uses cookies"
+  - "accept all cookies"
+  - "accept all"
+  - "reject all"
+  - "manage preferences"
+  - "your privacy"
+  - "privacy preferences"
+  - "legitimate interest"
+  - "personalised ads"
+  - "personalized ads"
+
+# Zusaetzliche Marker: stehen diese im HTML und ist kaum Text uebrig,
+# gilt die Seite als Consent-Wall (Stufe 2).
+consent_wall_markers:
+  - "onetrust"
+  - "cookiebot"
+  - "usercentrics"
+  - "didomi"
+  - "sourcepoint"
+  - "quantcast"
+  - "trustarc"
+  - "iubenda"
+  - "borlabs"
+  - "cookieyes"
+  - "klaro"
+  - "consentmanager"
+  - "cmpbox"
+  - "gdpr"
+  - "cookie-consent"
+  - "cookie_consent"
+  - "cookieconsent"
+
+# Marker fuer Blockaden (Bot-Schutz / Captcha) -- Seite wird uebersprungen.
+blocked_markers:
+  - "captcha"
+  - "are you a robot"
+  - "sind sie ein roboter"
+  - "enable javascript and cookies to continue"
+  - "unusual traffic from your computer network"
+  - "zugriff verweigert"
+  - "access denied"
+  - "request blocked"
+  - "cf-browser-verification"
+  - "cf-challenge"
+  - "just a moment..."
+  - "checking your browser before accessing"
+  - "px-captcha"
+  - "perimeterx"
+  - "datadome"
+  - "please verify you are a human"
+
+# Marker fuer Bezahl- und Login-Schranken -- werden nie umgangen.
+paywall_markers:
+  - "paywall"
+  - "jetzt abonnieren"
+  - "abo abschliessen"
+  - "abo abschließen"
+  - "weiterlesen mit"
+  - "nur fuer abonnenten"
+  - "nur für abonnenten"
+  - "subscribe to continue"
+  - "subscribers only"
+  - "this content is for subscribers"
+  - "melden sie sich an, um"
+  - "bitte melden sie sich an"
+  - "sign in to continue"
+  - "log in to continue"
+  - "create an account to continue"
+  - "altersverifikation"
+  - "age verification"
+
+# Domains, die einfache HTTP-Abrufe verlaesslich blocken. Sie werden erst gar
+# nicht abgerufen, sondern direkt als `blocked` markiert -- der Suchtreffer
+# bleibt aber als Kauf-/Referenzlink erhalten.
+known_blocking_domains:
+  - "amazon.de"
+  - "amazon.com"
+  - "amazon.co.uk"
+  - "amazon.fr"
+  - "amazon.it"
+  - "amazon.es"
+  - "zalando.de"
+  - "zalando.com"
+  - "otto.de"
+  - "ebay.de"
+  - "ebay.com"
+  - "instagram.com"
+  - "facebook.com"
+  - "tiktok.com"
+  - "x.com"
+  - "twitter.com"
+  - "linkedin.com"
+  - "pinterest.de"
+  - "pinterest.com"
+  - "booking.com"
+  - "tripadvisor.de"
+  - "tripadvisor.com"
+  - "idealo.de"

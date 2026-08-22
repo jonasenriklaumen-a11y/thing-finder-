@@ -261,6 +261,112 @@ def config_command() -> None:
         console.print("\n[green]Konfiguration vollstaendig.[/green]")
 
 
+@app.command("search")
+def search_command(
+    query: str = typer.Argument(..., help="Die Suchanfrage."),
+    count: int = typer.Option(8, "--count", "-n", help="Anzahl Treffer."),
+    country: str = typer.Option("", "--country", help="ISO-Laendercode, z.B. de."),
+    lang: str = typer.Option("", "--lang", help="ISO-Sprachcode, z.B. de."),
+    no_cache: bool = typer.Option(False, "--no-cache", help="Cache umgehen."),
+) -> None:
+    """Fuehrt `web_search` einmal direkt aus -- zum Testen ohne LLM."""
+    from scoutr.tools import Toolbox
+
+    settings = get_settings()
+    cache = None if no_cache else Cache(settings.db_path, settings.cache_ttl_hours)
+    box = Toolbox(settings, cache=cache)
+    try:
+        payload = box.web_search(query, count=count, country=country, lang=lang)
+    finally:
+        box.close()
+
+    if payload.get("error"):
+        console.print(f"[red]Fehler:[/red] {payload['error']}")
+        raise typer.Exit(code=1)
+
+    results = payload["results"]
+    console.print(
+        f"[dim]{len(results)} Treffer fuer[/dim] [bold]{query}[/bold] "
+        f"[dim]({payload['country']}/{payload['lang']})[/dim]\n"
+    )
+    for item in results:
+        console.print(f"[cyan]{item['rank']:>2}.[/cyan] [bold]{item['title']}[/bold]")
+        console.print(f"    [blue]{item['url']}[/blue]")
+        if item["snippet"]:
+            console.print(f"    [dim]{item['snippet'][:220]}[/dim]")
+        console.print()
+
+
+@app.command("fetch")
+def fetch_command(
+    url: str = typer.Argument(..., help="Die abzurufende URL."),
+    chars: int = typer.Option(2000, "--chars", "-c", help="Wie viel Text anzeigen?"),
+    no_cache: bool = typer.Option(False, "--no-cache", help="Cache umgehen."),
+    products: bool = typer.Option(True, "--products/--no-products", help="Produktdaten ziehen."),
+) -> None:
+    """Fuehrt `fetch_page` einmal direkt aus -- zum Testen ohne LLM."""
+    from scoutr.tools import Toolbox
+
+    settings = get_settings()
+    cache = None if no_cache else Cache(settings.db_path, settings.cache_ttl_hours)
+    box = Toolbox(settings, cache=cache)
+    try:
+        payload = box.fetch_page(url)
+    finally:
+        box.close()
+
+    if not payload.get("ok"):
+        console.print(
+            f"[yellow]uebersprungen[/yellow] ({payload.get('skipped_reason')}): "
+            f"{payload.get('note', '')}"
+        )
+        raise typer.Exit(code=2)
+
+    console.print(f"[bold]{payload['title']}[/bold]")
+    console.print(
+        f"[dim]{payload['url']} · {payload['domain']} · {payload['word_count']} Woerter "
+        f"· via {payload['via']}[/dim]\n"
+    )
+    if products and payload.get("products"):
+        for product in payload["products"]:
+            table = Table(title=product["name"], show_header=False, title_justify="left")
+            table.add_column(style="cyan", no_wrap=True)
+            table.add_column()
+            for key in ("price", "currency", "rating", "availability", "image_url"):
+                if product.get(key) is not None:
+                    table.add_row(key, str(product[key]))
+            for key, value in (product.get("specs") or {}).items():
+                table.add_row(key, value)
+            console.print(table)
+            console.print()
+    text = payload["text"]
+    console.print(text[:chars])
+    if len(text) > chars or payload.get("truncated"):
+        console.print(f"\n[dim]... gekuerzt (insgesamt {len(text)} Zeichen)[/dim]")
+
+
+@app.command("cache")
+def cache_command(
+    clear: bool = typer.Option(False, "--clear", help="Cache komplett leeren."),
+    kind: str = typer.Option("", "--kind", help="Nur eine Art leeren: search oder page."),
+) -> None:
+    """Zeigt oder leert den Response-Cache."""
+    settings = get_settings()
+    cache = Cache(settings.db_path, settings.cache_ttl_hours)
+    if clear:
+        removed = cache.clear(kind or None)
+        console.print(f"[green]{removed} Eintraege geloescht.[/green]")
+        return
+    purged = cache.purge_expired()
+    stats = cache.stats()
+    console.print(f"Datei: [cyan]{settings.db_path}[/cyan]")
+    console.print(f"TTL: {settings.cache_ttl_hours} h, abgelaufen entfernt: {purged}")
+    console.print(
+        "Gueltige Eintraege: "
+        + (", ".join(f"{name}={count}" for name, count in sorted(stats.items())) or "keine")
+    )
+
+
 @app.command("version")
 def version_command() -> None:
     """Gibt die Version aus."""
