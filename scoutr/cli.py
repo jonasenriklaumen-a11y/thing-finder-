@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -373,25 +376,350 @@ def version_command() -> None:
     console.print(f"scoutr {__version__}")
 
 
-def _echo_placeholder(settings: Settings) -> None:
-    console.print(
-        Panel.fit(
-            "Der Chat-Modus wird in einem spaeteren Schritt aktiviert.\n"
-            f"Aktives Modell: [cyan]{settings.model}[/cyan]",
-            border_style="yellow",
+# ---------------------------------------------------------------------------
+# history / install-browser
+# ---------------------------------------------------------------------------
+@app.command("history")
+def history_command(
+    limit: int = typer.Option(20, "--limit", "-n", help="Wie viele Eintraege?"),
+) -> None:
+    """Zeigt vergangene Recherchen."""
+    settings = get_settings()
+    entries = Cache(settings.db_path, settings.cache_ttl_hours).recent_history(limit=limit)
+    if not entries:
+        console.print("[dim]Noch keine Recherchen gespeichert.[/dim]")
+        return
+    for entry in entries:
+        when = datetime.fromtimestamp(entry.created_at).strftime("%d.%m.%Y %H:%M")
+        console.print(f"[dim]{when}[/dim]  [bold]{entry.question}[/bold]")
+        first_line = entry.answer.strip().splitlines()[0] if entry.answer.strip() else ""
+        console.print(f"    [dim]{first_line[:110]}[/dim]")
+
+
+@app.command("install-browser")
+def install_browser_command() -> None:
+    """Installiert Playwright samt Chromium fuer den JavaScript-Fallback (Stufe 3)."""
+    import subprocess
+
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        console.print("[yellow]Playwright fehlt.[/yellow] Installiere es mit:")
+        console.print('  [bold]uv tool install --with playwright scoutr[/bold]')
+        console.print("  [dim]oder: pip install \'scoutr[browser]\'[/dim]")
+        raise typer.Exit(code=1) from None
+
+    console.print("Lade Chromium herunter ...")
+    result = subprocess.run(
+        [sys.executable, "-m", "playwright", "install", "chromium"], check=False
+    )
+    if result.returncode == 0:
+        console.print("[green]Fertig.[/green] Der Browser-Fallback ist jetzt aktiv.")
+    else:
+        console.print("[red]Installation fehlgeschlagen.[/red]")
+        raise typer.Exit(code=result.returncode)
+
+
+# ---------------------------------------------------------------------------
+# Chat
+# ---------------------------------------------------------------------------
+HELP_TEXT = """\
+[bold]Slash-Befehle[/bold]
+  [cyan]/location <ort>[/cyan]      Ortsfilter setzen (leer = aufheben)
+  [cyan]/model <name>[/cyan]        Modell wechseln, z.B. openai/gpt-4o
+  [cyan]/export html|md|csv[/cyan]  Recherche dieser Sitzung speichern
+  [cyan]/image <pfad>[/cyan]        Bild beschreiben lassen und danach recherchieren
+  [cyan]/history[/cyan]             Frueherer Recherchen anzeigen
+  [cyan]/clear[/cyan]               Gespraechsverlauf verwerfen
+  [cyan]/help[/cyan]                Diese Uebersicht
+  [cyan]/quit[/cyan]                Beenden (auch Strg+D)
+"""
+
+
+def _banner(settings: Settings) -> Panel:
+    location = settings.location or "kein Ortsfilter"
+    return Panel.fit(
+        f"[bold]scoutr[/bold] [dim]{__version__}[/dim]\n"
+        f"[dim]Modell {settings.model} · Suche {settings.search_backend} · {location}[/dim]\n"
+        "[dim]Frag einfach los. /help zeigt die Befehle.[/dim]",
+        border_style="cyan",
+    )
+
+
+def _apply_overrides(
+    settings: Settings, location: str, lang: str, country: str, model: str, max_calls: int
+) -> None:
+    if location:
+        settings.location = location
+    if lang:
+        settings.lang = lang.lower()
+        if not country:
+            settings.country = lang.lower()
+    if country:
+        settings.country = country.lower()
+    if model:
+        settings.model = model
+    if max_calls:
+        settings.max_tool_calls = max_calls
+
+
+def _warn_if_unconfigured(settings: Settings) -> None:
+    problems = settings.missing_requirements()
+    if problems:
+        console.print(
+            Panel.fit(
+                "\n".join(problems) + "\n\nRichte scoutr mit [bold]scoutr setup[/bold] ein.",
+                title="Konfiguration unvollstaendig",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+
+
+def _record_turn(turns: list, question: str, result) -> None:
+    from scoutr.export import Turn
+
+    turns.append(
+        Turn(
+            question=question,
+            answer=result.answer,
+            sources=result.sources,
+            products=result.products,
+            searches=result.searches,
+            skipped=result.skipped,
         )
     )
 
 
-@app.callback(invoke_without_command=True)
-def main_callback(ctx: typer.Context) -> None:
-    """Ohne Unterbefehl: Chat starten (kommt in Schritt 5)."""
-    if ctx.invoked_subcommand is not None:
+def _do_export(turns: list, fmt: str, settings: Settings) -> None:
+    from scoutr.export import export
+
+    try:
+        path = export(
+            turns,
+            fmt,
+            directory=Path.cwd(),
+            with_images=settings.download_images,
+        )
+    except ValueError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
         return
-    _echo_placeholder(get_settings())
+    console.print(f"[green]Gespeichert:[/green] {path}")
+
+
+def _run_turn(agent, renderer, question: str, stream: bool, show_images: bool) -> object:
+    """Eine Frage durchlaufen lassen und die Ausgabe erzeugen."""
+    renderer.reset()
+    console.print()
+    result = agent.ask(question, stream=stream)
+    if not stream:
+        renderer.print_answer(result.answer)
+    if result.error:
+        console.print(f"[red]Fehler:[/red] {result.error}")
+        return result
+    if result.products:
+        from scoutr.render import print_products
+
+        print_products(console, result.products, show_images=show_images)
+    console.print()
+    return result
+
+
+@app.command("chat")
+def chat_command(
+    question: str | None = typer.Argument(
+        None, help="Einmalige Frage. Ohne Angabe startet der Chat."
+    ),
+    location: str = typer.Option("", "--location", "-L", help="Ortsfilter, z.B. Moenchengladbach."),
+    lang: str = typer.Option("", "--lang", help="Sprache der Suche, z.B. de."),
+    country: str = typer.Option("", "--country", help="Land der Suche, z.B. de."),
+    model: str = typer.Option("", "--model", "-m", help="Modell im LiteLLM-Format."),
+    image: Path | None = typer.Option(None, "--image", help="Bild als Ausgangspunkt."),
+    max_calls: int = typer.Option(0, "--max-calls", help="Werkzeug-Budget (Default 20)."),
+    stream: bool = typer.Option(True, "--stream/--no-stream", help="Antwort streamen."),
+    show_images: bool = typer.Option(
+        True, "--images/--no-images", help="Produktbilder im Terminal anzeigen."
+    ),
+    download_images: bool = typer.Option(
+        False, "--download-images", help="Bilder beim Export mitspeichern."
+    ),
+) -> None:
+    """Startet den Chat -- oder beantwortet mit Argument eine einzelne Frage."""
+    from scoutr.agent import Agent
+    from scoutr.render import ChatRenderer
+
+    settings = get_settings()
+    _apply_overrides(settings, location, lang, country, model, max_calls)
+    settings.download_images = download_images
+    _warn_if_unconfigured(settings)
+
+    cache = Cache(settings.db_path, settings.cache_ttl_hours)
+    renderer = ChatRenderer(console, show_images=show_images)
+    agent = Agent(settings, cache=cache, on_event=renderer.handle)
+    turns: list = []
+
+    try:
+        prefix = ""
+        if image is not None:
+            prefix = _describe_image(agent, image)
+            if prefix is None:
+                raise typer.Exit(code=1)
+
+        # -- Einmaliger Durchlauf ----------------------------------------
+        if question:
+            full = f"{prefix}\n\n{question}".strip() if prefix else question
+            result = _run_turn(agent, renderer, full, stream, show_images)
+            _record_turn(turns, question, result)
+            return
+
+        # -- Chat --------------------------------------------------------
+        console.print(_banner(settings))
+        if prefix:
+            result = _run_turn(agent, renderer, prefix, stream, show_images)
+            _record_turn(turns, "Bildrecherche", result)
+
+        _enable_readline()
+        while True:
+            try:
+                line = console.input("\n[bold cyan]>[/bold cyan] ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Bis dann.[/dim]")
+                break
+            if not line:
+                continue
+            if line.startswith("/"):
+                if _handle_slash(line, agent, settings, turns, renderer):
+                    break
+                continue
+            try:
+                result = _run_turn(agent, renderer, line, stream, show_images)
+            except KeyboardInterrupt:
+                renderer.reset()
+                console.print("\n[yellow]Abgebrochen.[/yellow]")
+                continue
+            _record_turn(turns, line, result)
+    finally:
+        renderer.reset()
+        agent.close()
+
+
+def _describe_image(agent, image: Path) -> str | None:
+    """Bild beschreiben lassen; `None` bei Fehler."""
+    try:
+        with console.status(f"  Sehe mir {image.name} an ..."):
+            description = agent.describe_image(image)
+    except (FileNotFoundError, RuntimeError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        return None
+    console.print(Panel(description, title=f"[Bild] {image.name}", border_style="cyan"))
+    return f"Auf dem Bild ist Folgendes zu sehen:\n{description}"
+
+
+def _handle_slash(line: str, agent, settings: Settings, turns: list, renderer) -> bool:
+    """Fuehrt einen Slash-Befehl aus. Gibt `True` zurueck, wenn beendet werden soll."""
+    command, _, argument = line[1:].partition(" ")
+    command = command.lower()
+    argument = argument.strip()
+
+    if command in ("quit", "exit", "q"):
+        console.print("[dim]Bis dann.[/dim]")
+        return True
+
+    if command == "help":
+        console.print(HELP_TEXT)
+    elif command == "location":
+        agent.set_location(argument)
+        console.print(
+            f"[green]Ortsfilter:[/green] {argument}"
+            if argument
+            else "[green]Ortsfilter aufgehoben.[/green]"
+        )
+    elif command == "model":
+        if not argument:
+            console.print(f"Aktuelles Modell: [bold]{settings.model}[/bold]")
+        else:
+            agent.set_model(argument)
+            console.print(f"[green]Modell:[/green] {argument}")
+    elif command == "export":
+        _do_export(turns, argument or "html", settings)
+    elif command == "image":
+        if not argument:
+            console.print("[yellow]Nutzung: /image pfad/zum/bild.jpg[/yellow]")
+        else:
+            description = _describe_image(agent, Path(argument))
+            if description:
+                result = _run_turn(agent, renderer, description, True, True)
+                _record_turn(turns, f"Bild: {argument}", result)
+    elif command == "history":
+        history_command(limit=15)
+    elif command == "clear":
+        agent.clear()
+        turns.clear()
+        console.print("[green]Verlauf verworfen.[/green]")
+    else:
+        console.print(f"[yellow]Unbekannter Befehl '/{command}'.[/yellow] /help zeigt alle.")
+    return False
+
+
+def _enable_readline() -> None:
+    """Pfeiltasten und Eingabe-History, wenn readline verfuegbar ist."""
+    with contextlib.suppress(ImportError):
+        import readline  # noqa: F401
+
+
+@app.command("export")
+def export_command(
+    fmt: str = typer.Argument("html", help="html, md oder csv."),
+    limit: int = typer.Option(1, "--limit", "-n", help="Wie viele Eintraege aus dem Verlauf?"),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Zieldatei."),
+) -> None:
+    """Exportiert die letzten Recherchen aus dem Verlauf."""
+    from scoutr.export import Turn, export
+
+    settings = get_settings()
+    entries = Cache(settings.db_path, settings.cache_ttl_hours).recent_history(limit=limit)
+    if not entries:
+        console.print("[yellow]Der Verlauf ist leer.[/yellow]")
+        raise typer.Exit(code=1)
+
+    turns = [
+        Turn(
+            question=entry.question,
+            answer=entry.answer,
+            sources=entry.meta.get("sources", []),
+            searches=entry.meta.get("searches", []),
+            skipped=entry.meta.get("skipped", {}),
+        )
+        for entry in entries
+    ]
+    try:
+        path = export(turns, fmt, path=out, directory=Path.cwd())
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(f"[green]Gespeichert:[/green] {path}")
+
+
+#: Alles, was kein Unterbefehl ist, gilt als Frage an den Chat.
+COMMANDS = {
+    "setup",
+    "config",
+    "search",
+    "fetch",
+    "cache",
+    "history",
+    "export",
+    "install-browser",
+    "chat",
+    "version",
+}
 
 
 def main() -> None:
+    """Einstiegspunkt: `scoutr` und `scoutr "Frage"` landen im Chat."""
+    argv = sys.argv[1:]
+    if not argv or (argv[0] not in COMMANDS and argv[0] not in ("--help", "-h", "--version")):
+        sys.argv.insert(1, "chat")
     app()
 
 

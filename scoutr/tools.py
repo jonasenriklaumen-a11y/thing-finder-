@@ -233,11 +233,12 @@ class Toolbox:
 
     def _maybe_llm_specs(self, page: PageResult) -> None:
         """LLM-Fallback (Quelle 5), wenn strukturierte Extraktion nichts hergab."""
-        if not (page.ok and self.spec_extractor):
+        if not (page.ok and self.spec_extractor and page.text):
+            return
+        if not page.product_hint:
+            # Kein Produkt in Sicht -- kein Grund, das LLM zu bemuehen.
             return
         if page.products and page.products[0].specs:
-            return
-        if not page.text:
             return
         specs = self.spec_extractor(page.text, page.final_url or page.url)
         if not specs:

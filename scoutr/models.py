@@ -74,6 +74,8 @@ class PageResult(BaseModel):
     source_domain: str = ""
     products: list[Product] = Field(default_factory=list)
     truncated: bool = False
+    #: Sieht die Seite ueberhaupt nach einem Produkt aus? Steuert den LLM-Fallback.
+    product_hint: bool = False
 
     @property
     def word_count(self) -> int:

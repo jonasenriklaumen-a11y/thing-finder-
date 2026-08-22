@@ -143,12 +143,42 @@ def test_consent_wall_is_skipped_with_reason(fixture_html, settings: Settings) -
     assert "nicht umgangen" in payload["note"]
 
 
-def test_llm_spec_fallback_is_used_when_structured_data_missing(
+PROSE_PRODUCT_PAGE = """
+<html><head><title>Nordlicht X1 im Ueberblick</title></head><body><main>
+<h1>Nordlicht X1</h1>
+<p>Das Nordlicht X1 ist ein kompaktes Notebook fuer unterwegs. Wir haben es ueber mehrere
+   Wochen benutzt und dabei vor allem auf Display und Akku geachtet. Der Eindruck ist gut,
+   auch wenn die Tastatur gewoehnungsbeduerftig bleibt und der Luefter unter Last hoerbar wird.</p>
+<h2>Technische Daten</h2>
+<p>Verbaut ist ein Achtkerner mit 32 GB Arbeitsspeicher; das Display misst 14 Zoll und loest
+   mit 2880 x 1800 Bildpunkten auf. Der Akku fasst 70 Wattstunden, das Gewicht liegt bei
+   1,2 Kilogramm. Alles steht hier als Fliesstext statt in einer Tabelle.</p>
+</main></body></html>
+"""
+
+
+def test_llm_spec_fallback_is_used_when_structured_data_missing(settings: Settings) -> None:
+    def extractor(text: str, url: str) -> dict[str, str]:
+        assert "Nordlicht X1" in text
+        return {"RAM": "32 GB", "Display": '14 Zoll, 2880 x 1800'}
+
+    box = Toolbox(
+        settings,
+        spec_extractor=extractor,
+        fetcher=_mock_fetcher(_html_handler(PROSE_PRODUCT_PAGE)),
+    )
+    payload = box.fetch_page("https://tests.example/nordlicht-x1")
+    assert payload["products"][0]["specs"]["RAM"] == "32 GB"
+
+
+def test_llm_spec_fallback_is_skipped_on_non_product_pages(
     fixture_html, settings: Settings
 ) -> None:
+    calls: list[str] = []
+
     def extractor(text: str, url: str) -> dict[str, str]:
-        assert "Franzbrötchen" in text
-        return {"Sitzplätze": "40"}
+        calls.append(url)
+        return {"egal": "wert"}
 
     box = Toolbox(
         settings,
@@ -156,7 +186,9 @@ def test_llm_spec_fallback_is_used_when_structured_data_missing(
         fetcher=_mock_fetcher(_html_handler(fixture_html("plain_article.html"))),
     )
     payload = box.fetch_page("https://cafe-sonntag.de/")
-    assert payload["products"][0]["specs"] == {"Sitzplätze": "40"}
+    assert payload["ok"] is True
+    assert calls == []
+    assert "products" not in payload
 
 
 def test_events_are_emitted(

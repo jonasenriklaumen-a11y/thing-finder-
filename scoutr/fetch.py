@@ -28,7 +28,7 @@ import trafilatura
 import yaml
 from selectolax.parser import HTMLParser
 
-from scoutr.extract import extract_product
+from scoutr.extract import extract_product, has_spec_heading
 from scoutr.models import PageResult, domain_of
 
 SELECTORS_PATH = Path(__file__).with_name("selectors.yaml")
@@ -395,6 +395,11 @@ class Fetcher:
             product = extract_product(html, result.final_url or result.url)
             if product is not None:
                 result.products = [product]
+                result.product_hint = True
+            elif has_spec_heading(HTMLParser(html)):
+                # Kein strukturierter Treffer, aber eine "Technische Daten"-Ueberschrift:
+                # hier lohnt sich der LLM-Fallback.
+                result.product_hint = True
         return result
 
     def _try_browser(self, url: str) -> str | None:

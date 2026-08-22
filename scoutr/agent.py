@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from scoutr.cache import Cache
@@ -72,6 +73,13 @@ BUDGET_PROMPT = """\
 Das Werkzeug-Budget ist aufgebraucht. Beantworte die Frage jetzt mit dem, was du bereits \
 gelesen hast. Kennzeichne offene Punkte ausdruecklich als "nicht gefunden" und weise in \
 einem Satz darauf hin, dass die Recherche am Limit abgebrochen wurde."""
+
+IMAGE_PROMPT = """\
+Beschreibe, was auf diesem Bild zu sehen ist -- mit Blick darauf, wonach man im Web \
+suchen wuerde. Nenne, wenn erkennbar: Produkt- oder Objektart, Marke, Modellbezeichnung, \
+Aufschriften, Logos, Text im Bild, Farbe und auffaellige Merkmale. Rate nicht: Was du \
+nicht sicher erkennst, laesst du weg. Antworte in hoechstens 120 Woertern auf Deutsch und \
+haenge eine Zeile "Suchbegriffe: ..." mit 3 bis 5 konkreten Suchbegriffen an."""
 
 SPEC_PROMPT = """\
 Aus dem folgenden Seitentext sollen technische Daten eines Produkts als JSON-Objekt \
@@ -370,6 +378,53 @@ class Agent:
             f"Land {self.settings.country}. Baue den Ort in die Suchanfragen ein, setze "
             f"country/lang entsprechend und sortiere Treffer ausserhalb des Gebiets aus.]"
         )
+
+    # -- Bild als Eingabe -------------------------------------------------
+    def describe_image(self, path: str | Path) -> str:
+        """Laesst ein Vision-Modell beschreiben, was auf dem Bild zu sehen ist.
+
+        Raises:
+            FileNotFoundError: Wenn *path* nicht existiert.
+            RuntimeError: Wenn das Modell nicht antwortet.
+        """
+        import base64
+        import mimetypes
+
+        import litellm
+
+        litellm.suppress_debug_info = True
+        image_path = Path(path).expanduser()
+        if not image_path.is_file():
+            raise FileNotFoundError(f"Bild nicht gefunden: {image_path}")
+
+        mime = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        self._emit("image", path=str(image_path))
+
+        kwargs = self.settings.llm_kwargs()
+        try:
+            response = litellm.completion(
+                model=self.settings.effective_vision_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": IMAGE_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime};base64,{encoded}"},
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=400,
+                **kwargs,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Bildbeschreibung fehlgeschlagen: {exc}") from exc
+        description = (response.choices[0].message.content or "").strip()
+        self._emit("image_done", description=description)
+        return description
 
     # -- LLM-Fallback fuer Specs (Quelle 5 der Produktextraktion) ---------
     def extract_specs(self, text: str, url: str) -> dict[str, str]:
