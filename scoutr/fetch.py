@@ -51,6 +51,10 @@ class SiteRules:
     blocked_markers: list[str] = field(default_factory=list)
     paywall_markers: list[str] = field(default_factory=list)
     known_blocking_domains: list[str] = field(default_factory=list)
+    # Stufe 3 (Playwright)
+    cmp_reject_selectors: list[str] = field(default_factory=list)
+    reject_text_pattern: str = ""
+    overlay_remove_selectors: list[str] = field(default_factory=list)
 
 
 @lru_cache(maxsize=4)
@@ -69,6 +73,9 @@ def load_rules(path: str | None = None) -> SiteRules:
         blocked_markers=[m.lower() for m in data.get("blocked_markers") or []],
         paywall_markers=[m.lower() for m in data.get("paywall_markers") or []],
         known_blocking_domains=[d.lower() for d in data.get("known_blocking_domains") or []],
+        cmp_reject_selectors=list(data.get("cmp_reject_selectors") or []),
+        reject_text_pattern=str(data.get("reject_text_pattern") or ""),
+        overlay_remove_selectors=list(data.get("overlay_remove_selectors") or []),
     )
 
 

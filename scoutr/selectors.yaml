@@ -178,3 +178,50 @@ known_blocking_domains:
   - "tripadvisor.de"
   - "tripadvisor.com"
   - "idealo.de"
+
+# --- Stufe 3: Playwright-Fallback ------------------------------------------
+# Ablehnen-Schaltflaechen bekannter Consent-Management-Plattformen. Es wird
+# ausschliesslich abgelehnt -- "Alle akzeptieren" wird nie geklickt.
+cmp_reject_selectors:
+  - '#onetrust-reject-all-handler'
+  - '#onetrust-pc-btn-handler + button'
+  - '#CybotCookiebotDialogBodyButtonDecline'
+  - '#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll'
+  - '[data-testid="uc-deny-all-button"]'
+  - '#uc-btn-deny-banner'
+  - '#didomi-notice-disagree-button'
+  - '.didomi-continue-without-agreeing'
+  - '.qc-cmp2-summary-buttons > button:first-child'
+  - '#cmpbntnotxt'
+  - '.fc-cta-do-not-consent'
+  - '#truste-consent-required'
+  - '.iubenda-cs-reject-btn'
+  - '#CookieBoxSaveButton'
+  - '.cmplz-deny'
+  - '[data-cy="reject-all"]'
+  - '[aria-label*="ablehnen" i]'
+  - '[aria-label*="reject" i]'
+
+# Generischer Fallback: sichtbarer Button, dessen Text hierauf passt.
+reject_text_pattern: 'ablehnen|nur notwendige|nur essenziell|nur erforderlich|ohne einwilligung|reject|decline|necessary only|refuse|continue without'
+
+# Diese Knoten werden im Browser nur entfernt -- niemals angeklickt.
+overlay_remove_selectors:
+  - '#onetrust-consent-sdk'
+  - '#usercentrics-root'
+  - '#CybotCookiebotDialog'
+  - '#CybotCookiebotDialogBodyUnderlay'
+  - '#didomi-host'
+  - '[id^="sp_message_container"]'
+  - '.qc-cmp2-container'
+  - '#cmpwrapper'
+  - '.fc-consent-root'
+  - '[role="dialog"]'
+  - '[aria-modal="true"]'
+  - '[class*="newsletter" i]'
+  - '[class*="app-banner" i]'
+  - '[class*="smartbanner" i]'
+  - '[class*="push-notification" i]'
+  - '[class*="cookie" i][class*="overlay" i]'
+  - '[class*="backdrop" i]'
+  - '[class*="modal-open" i] > [class*="modal" i]'
