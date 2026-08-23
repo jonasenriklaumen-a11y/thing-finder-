@@ -197,8 +197,13 @@ scoutr --location "Mönchengladbach" --lang de
 ## Bild als Eingabe
 
 ```bash
-scoutr --image foto.jpg
+scoutr --image foto.jpg              # eine Datei
+scoutr --image ~/hallo1234           # ein Ordner -- scoutr sucht das Bild darin
+scoutr --image ~/hallo1234 "wo kann ich das kaufen?"
 ```
+
+Zeigt der Pfad auf einen **Ordner**, nimmt scoutr das einzige Bild darin; sind es mehrere,
+listet er sie auf (neueste zuerst) und fragt, welches gemeint ist.
 
 Ein Vision-Modell beschreibt, was auf dem Bild zu sehen ist (Produkt, Logo, Schild,
 Text), daraus werden Suchbegriffe — danach läuft die normale Recherche. Im Chat geht

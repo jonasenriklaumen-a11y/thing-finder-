@@ -967,8 +967,69 @@ def chat_command(
         agent.close()
 
 
+#: Was scoutr als Bild akzeptiert.
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif")
+
+
+def _images_in(directory: Path) -> list[Path]:
+    """Bilddateien eines Ordners, neueste zuerst."""
+    found = [
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.suffix.lower() in IMAGE_SUFFIXES
+    ]
+    return sorted(found, key=lambda entry: entry.stat().st_mtime, reverse=True)
+
+
+def _resolve_image(path: Path) -> Path | None:
+    """Loest eine Bildangabe auf -- Datei oder Ordner.
+
+    Zeigt *path* auf einen Ordner, sucht scoutr darin nach Bildern: bei genau
+    einem nimmt er es, bei mehreren fragt er nach (neueste zuerst).
+    """
+    target = path.expanduser()
+
+    if target.is_file():
+        return target
+
+    if target.is_dir():
+        images = _images_in(target)
+        if not images:
+            console.print(f"[red]Keine Bilder in {target} gefunden.[/red]")
+            console.print(f"[dim]Gesucht wurde nach: {', '.join(IMAGE_SUFFIXES)}[/dim]")
+            return None
+        if len(images) == 1:
+            console.print(f"[dim]Ein Bild gefunden: {images[0].name}[/dim]")
+            return images[0]
+
+        console.print(f"[bold]{len(images)} Bilder in {target}[/bold] [dim](neueste zuerst)[/dim]")
+        table = Table(show_header=False, box=None, pad_edge=False)
+        table.add_column(style="cyan", no_wrap=True)
+        table.add_column()
+        table.add_column(style="dim", justify="right")
+        for index, image in enumerate(images[:15], start=1):
+            when = datetime.fromtimestamp(image.stat().st_mtime).strftime("%d.%m.%Y %H:%M")
+            table.add_row(str(index), image.name, when)
+        console.print(table)
+        answer = typer.prompt("  Welches Bild?", default="1").strip()
+        if not answer.isdigit() or not 1 <= int(answer) <= len(images[:15]):
+            console.print("[yellow]Keine gueltige Auswahl.[/yellow]")
+            return None
+        return images[int(answer) - 1]
+
+    console.print(f"[red]Bild nicht gefunden: {target}[/red]")
+    return None
+
+
 def _describe_image(agent, image: Path) -> str | None:
-    """Bild beschreiben lassen; `None` bei Fehler."""
+    """Bild beschreiben lassen; `None` bei Fehler.
+
+    *image* darf eine Datei oder ein Ordner sein -- siehe :func:`_resolve_image`.
+    """
+    resolved = _resolve_image(image)
+    if resolved is None:
+        return None
+    image = resolved
     try:
         with console.status(f"  Sehe mir {image.name} an ..."):
             description = agent.describe_image(image)

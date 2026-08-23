@@ -594,3 +594,112 @@ def test_no_vision_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     assert result.exit_code == 0, result.output
     assert state["pulled"] == ["qwen2.5:7b"]
     assert "SCOUTR_VISION_MODEL" not in target.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Bild aus einem Ordner
+# ---------------------------------------------------------------------------
+def _png(path: Path) -> Path:
+    from scoutr.local_model import solid_png
+
+    path.write_bytes(solid_png())
+    return path
+
+
+def _vision_llm(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Vision-Antwort, danach eine normale Antwort."""
+    seen: list[Any] = []
+
+    def completion(**kwargs: Any):
+        seen.append(kwargs["messages"])
+        text = (
+            "Ein rotes Fahrrad. Suchbegriffe: rotes Fahrrad"
+            if len(seen) == 1
+            else "Gefunden. Quelle: beispiel.de"
+        )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=text, tool_calls=None))]
+        )
+
+    monkeypatch.setattr("litellm.completion", completion)
+    return seen
+
+
+def test_single_image_in_a_folder_is_used(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--image ordner/` nimmt das eine Bild, ohne zu fragen."""
+    folder = tmp_path / "hallo1234"
+    folder.mkdir()
+    _png(folder / "foto.jpg")
+    _vision_llm(monkeypatch)
+
+    result = runner.invoke(
+        cli.app, ["chat", "Was ist das?", "--image", str(folder), "--no-stream"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Ein Bild gefunden: foto.jpg" in result.output
+    assert "Suchbegriffe" in result.output
+
+
+def test_several_images_are_offered_newest_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import os
+    import time
+
+    folder = tmp_path / "hallo1234"
+    folder.mkdir()
+    old = _png(folder / "alt.png")
+    new = _png(folder / "neu.png")
+    os.utime(old, (time.time() - 9000, time.time() - 9000))
+    _vision_llm(monkeypatch)
+
+    result = runner.invoke(
+        cli.app, ["chat", "Was ist das?", "--image", str(folder), "--no-stream"], input="1\n"
+    )
+    assert result.exit_code == 0, result.output
+    assert "2 Bilder" in result.output
+    # Das neuere steht oben und ist die Vorauswahl.
+    position_new = result.output.index(new.name)
+    position_old = result.output.index(old.name)
+    assert position_new < position_old
+
+
+def test_folder_without_images_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    folder = tmp_path / "leer"
+    folder.mkdir()
+    (folder / "notiz.txt").write_text("kein Bild", encoding="utf-8")
+    result = runner.invoke(cli.app, ["chat", "Frage", "--image", str(folder)])
+    assert result.exit_code == 1
+    assert "Keine Bilder" in result.output
+
+
+def test_missing_path_is_reported(tmp_path: Path) -> None:
+    result = runner.invoke(cli.app, ["chat", "Frage", "--image", str(tmp_path / "weg.jpg")])
+    assert result.exit_code == 1
+    assert "nicht gefunden" in result.output
+
+
+def test_slash_image_accepts_a_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    folder = tmp_path / "hallo1234"
+    folder.mkdir()
+    _png(folder / "ding.png")
+    _vision_llm(monkeypatch)
+
+    result = runner.invoke(cli.app, ["chat", "--no-stream"], input=f"/image {folder}\n/quit\n")
+    assert "Ein Bild gefunden: ding.png" in result.output
+
+
+def test_image_is_sent_as_data_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Das Bild geht als data:-URL ans Vision-Modell, nicht als Pfad."""
+    folder = tmp_path / "hallo1234"
+    folder.mkdir()
+    _png(folder / "foto.png")
+    seen = _vision_llm(monkeypatch)
+
+    runner.invoke(cli.app, ["chat", "Was ist das?", "--image", str(folder), "--no-stream"])
+    content = seen[0][0]["content"]
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
