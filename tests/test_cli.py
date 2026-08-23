@@ -324,3 +324,108 @@ def test_help_is_not_rerouted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
     cli.main()
     assert called[0] == ["scoutr", "--help"]
+
+
+# ---------------------------------------------------------------------------
+# install-model
+# ---------------------------------------------------------------------------
+def _fake_ollama(monkeypatch: pytest.MonkeyPatch, *, tool_calling: bool = True) -> dict[str, Any]:
+    """Stellt eine vollstaendig funktionierende Ollama-Umgebung nach."""
+    from types import SimpleNamespace
+
+    from scoutr import local_model as lm
+
+    state: dict[str, Any] = {"pulled": []}
+    monkeypatch.setattr(lm, "ollama_binary", lambda: "/usr/bin/ollama")
+    monkeypatch.setattr(lm, "server_running", lambda *a, **k: True)
+    monkeypatch.setattr(lm, "installed_models", lambda *a, **k: [])
+    monkeypatch.setattr(lm, "model_size_gb", lambda *a, **k: 4.7)
+    monkeypatch.setattr(lm, "total_memory_gb", lambda: 16.0)
+    monkeypatch.setattr(lm, "gpu_hint", lambda: "")
+
+    def pull(name: str, binary: str | None = None):
+        state["pulled"].append(name)
+        yield "pulling manifest"
+
+    monkeypatch.setattr(lm, "pull_model", pull)
+
+    call = SimpleNamespace(function=SimpleNamespace(name="web_search"))
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="" if tool_calling else "Einfach so geantwortet.",
+                        tool_calls=[call] if tool_calling else None,
+                    )
+                )
+            ]
+        ),
+    )
+    return state
+
+
+def test_install_model_writes_the_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    state = _fake_ollama(monkeypatch)
+    target = tmp_path / ".env"
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--model", "qwen2.5:7b", "--yes", "--env-file", str(target)],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["pulled"] == ["qwen2.5:7b"]
+    content = target.read_text(encoding="utf-8")
+    # Muss ollama_chat sein -- das nackte ollama kann kein Tool-Calling.
+    assert "SCOUTR_MODEL=ollama_chat/qwen2.5:7b" in content
+    assert "SCOUTR_API_BASE=http://localhost:11434" in content
+    assert "Werkzeug aufgerufen" in result.output
+
+
+def test_install_model_refuses_a_model_without_tool_calling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ein Modell, das nur redet, wird nicht stillschweigend eingetragen."""
+    _fake_ollama(monkeypatch, tool_calling=False)
+    target = tmp_path / ".env"
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--model", "kaputt:1b", "--env-file", str(target)],
+        input="n\n",
+    )
+    assert result.exit_code == 1
+    assert "kann keine Werkzeuge aufrufen" in result.output
+    assert not target.exists()
+
+
+def test_install_model_aborts_without_ollama(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scoutr import local_model as lm
+
+    monkeypatch.setattr(lm, "ollama_binary", lambda: None)
+    monkeypatch.setattr(lm.platform, "system", lambda: "Linux")
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--env-file", str(tmp_path / ".env")],
+        input="n\n",
+    )
+    assert result.exit_code == 1
+    # Der Befehl wird gezeigt, bevor irgendetwas laeuft.
+    assert "install.sh" in result.output
+
+
+def test_install_model_skips_an_already_loaded_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "installed_models", lambda *a, **k: ["qwen2.5:7b"])
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--model", "qwen2.5:7b", "--yes", "--env-file", str(tmp_path / ".env")],
+    )
+    assert result.exit_code == 0
+    assert state["pulled"] == []
+    assert "bereits geladen" in result.output

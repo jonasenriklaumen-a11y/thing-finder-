@@ -166,6 +166,7 @@ scoutr cache                             # Cache-Statistik, --clear leert ihn
 scoutr history                           # vergangene Recherchen
 scoutr export html -n 3                  # letzte 3 Recherchen exportieren
 scoutr config                            # aktive Konfiguration prüfen
+scoutr install-model                     # lokales Modell einrichten (ohne Key)
 scoutr install-browser                   # Playwright-Fallback aktivieren
 ```
 
@@ -443,6 +444,57 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
 | `SCOUTR_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
 
+### Ganz ohne API-Key: lokales Modell
+
+Ein Befehl, und scoutr richtet sich ein Modell auf deinem Rechner ein:
+
+```bash
+scoutr install-model
+```
+
+Der Befehl macht der Reihe nach:
+
+1. **Ollama suchen** — fehlt es, zeigt er den Installationsbefehl und fragt nach. Es
+   läuft nichts ungefragt.
+2. **Server starten**, falls er nicht schon läuft
+3. **Modell auswählen** — er schaut nach freiem Arbeitsspeicher und GPU und schlägt das
+   größte Modell vor, das passt
+4. **Modell laden** (`ollama pull`, mit Fortschritt)
+5. **Tool-Calling an einem echten Aufruf prüfen** — und das ist der Punkt: Ein Modell
+   ohne Werkzeugaufrufe würde aus dem Gedächtnis antworten statt aus dem Web. Besteht es
+   den Test nicht, wird es nicht eingetragen.
+
+Danach steht in der `.env`:
+
+```bash
+SCOUTR_MODEL=ollama_chat/qwen2.5:7b
+SCOUTR_API_BASE=http://localhost:11434
+```
+
+Ein bestimmtes Modell direkt:
+
+```bash
+scoutr install-model --model qwen2.5:14b
+```
+
+| Modell | ca. Größe | ab RAM |
+|---|---|---|
+| `qwen2.5:3b` | 1,9 GB | 4 GB |
+| `qwen2.5:7b` | 4,7 GB | 8 GB |
+| `llama3.1:8b` | 4,9 GB | 8 GB |
+| `qwen2.5:14b` | 9,0 GB | 16 GB |
+| `qwen2.5:32b` | 20,0 GB | 32 GB |
+
+Jedes andere Ollama-Modell mit Werkzeug-Unterstützung geht auch — `--model` nimmt jeden
+Namen aus dem [Ollama-Katalog](https://ollama.com/library).
+
+> **Das Präfix muss `ollama_chat/` lauten, nicht `ollama/`.** Nur ersteres reicht
+> Werkzeuge durch; mit `ollama/` bleibt der Agent stumm. `scoutr install-model` schreibt
+> automatisch das richtige.
+
+Zusammen mit SearXNG (siehe unten) läuft dann alles auf deinem Rechner — kein einziger
+Aufruf geht noch an einen fremden Dienst.
+
 ### LLM-Anbieter
 
 Da LiteLLM als LLM-Schicht dient, ist der Anbieter austauschbar:
@@ -450,7 +502,7 @@ Da LiteLLM als LLM-Schicht dient, ist der Anbieter austauschbar:
 ```bash
 scoutr --model openai/gpt-4o
 scoutr --model nvidia_nim/meta/llama-3.3-70b-instruct   # NVIDIA NIM
-scoutr --model ollama/llama3.1                          # dazu SCOUTR_API_BASE=...
+scoutr --model ollama_chat/qwen2.5:7b                   # lokal, siehe oben
 ```
 
 | Anbieter | Modell-Präfix | Key |
@@ -460,7 +512,7 @@ scoutr --model ollama/llama3.1                          # dazu SCOUTR_API_BASE=.
 | Google | `gemini/` | `GEMINI_API_KEY` |
 | [NVIDIA NIM](https://build.nvidia.com/) | `nvidia_nim/` | `NVIDIA_NIM_API_KEY` |
 | xAI · Together · Cerebras · Perplexity · Groq · DeepSeek · OpenRouter | siehe `.env.example` | jeweils eigener |
-| Ollama (lokal) | `ollama/` | — |
+| Ollama (lokal) | `ollama_chat/` | — |
 
 **Wichtig: Das Modell muss Tool-Calling (Function Calling) beherrschen.** Ohne das kann
 der Agent weder suchen noch Seiten lesen — er antwortet dann aus dem Gedächtnis statt aus
@@ -504,6 +556,7 @@ scoutr/
   extract.py     # Produktdaten aus JSON-LD, OG, Microdata, Tabellen
   render.py      # Live-Anzeige, Produktkarten, Bilder
   export.py      # HTML / Markdown / CSV
+  local_model.py # lokales Modell per Ollama einrichten
   cache.py       # SQLite-Cache und Verlauf
   config.py      # Settings aus .env
   selectors.yaml # Selektor- und Marker-Listen, ohne Code erweiterbar

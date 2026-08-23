@@ -42,8 +42,11 @@ MODEL_PRESETS: list[tuple[str, str]] = [
     ("openai/gpt-4o", "OpenAI GPT-4o"),
     ("gemini/gemini-2.0-flash", "Google Gemini 2.0 Flash"),
     ("nvidia_nim/meta/llama-3.3-70b-instruct", "NVIDIA NIM (build.nvidia.com)"),
-    ("ollama/llama3.1", "Lokal via Ollama (kein API-Key)"),
+    ("ollama_chat/qwen2.5:7b", "Lokal via Ollama -- kein API-Key noetig"),
 ]
+
+#: Position des lokalen Modells in MODEL_PRESETS (1-basiert).
+LOCAL_CHOICE = 5
 
 #: Modelle ohne Tool-Calling koennen den Agenten nicht fahren -- darauf
 #: weisen wir bei der Einrichtung hin.
@@ -122,6 +125,7 @@ def setup_command(
 
     # -- LLM ---------------------------------------------------------------
     console.print("\n[bold]1. LLM-Anbieter[/bold]")
+    local_api_base = ""
     table = Table(show_header=False, box=None, pad_edge=False)
     for index, (model_id, label) in enumerate(MODEL_PRESETS, start=1):
         table.add_row(f"  [cyan]{index}[/cyan]", f"[bold]{model_id}[/bold]", label)
@@ -134,6 +138,17 @@ def setup_command(
         model = typer.prompt(
             "Modell-ID im LiteLLM-Format, z.B. nvidia_nim/meta/llama-3.3-70b-instruct"
         )
+    elif choice.strip() == str(LOCAL_CHOICE):
+        # Lokales Modell: installieren, laden, pruefen -- danach ist der
+        # LLM-Teil erledigt und es geht direkt zur Suchmaschine weiter.
+        local_id = _run_local_setup()
+        if not local_id:
+            console.print("[yellow]Lokale Einrichtung abgebrochen.[/yellow]")
+            raise typer.Exit(code=1)
+        from scoutr.local_model import DEFAULT_OLLAMA_URL
+
+        model = local_id
+        local_api_base = DEFAULT_OLLAMA_URL
     else:
         try:
             model = MODEL_PRESETS[int(choice) - 1][0]
@@ -146,8 +161,10 @@ def setup_command(
 
     key_name = api_key_name_for(model)
     api_key = ""
-    api_base = ""
-    if key_name:
+    api_base = local_api_base
+    if local_api_base:
+        console.print("  [dim]Laeuft lokal -- kein API-Key noetig.[/dim]")
+    elif key_name:
         current = os.environ.get(key_name, "")
         hint = f" [dim](aktuell gesetzt: ...{current[-4:]})[/dim]" if current else ""
         console.print(f"  Benoetigter Key: [bold]{key_name}[/bold]{hint}")
@@ -497,6 +514,167 @@ def install_browser_command() -> None:
         raise typer.Exit(code=result.returncode)
 
 
+
+# ---------------------------------------------------------------------------
+# install-model
+# ---------------------------------------------------------------------------
+def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
+    """Richtet ein lokales Modell ein. Gibt die Modell-ID zurueck, sonst "".
+
+    Der Ablauf: Ollama finden oder installieren, Server starten, Modell laden,
+    Tool-Calling an einem echten Aufruf pruefen.
+    """
+    from scoutr import local_model as lm
+
+    console.print(
+        Panel.fit(
+            "[bold]Lokales Modell einrichten[/bold]\n"
+            "[dim]Laeuft komplett auf diesem Rechner -- kein API-Key, kein Konto.[/dim]",
+            border_style="cyan",
+        )
+    )
+
+    # -- 1. Ollama ---------------------------------------------------------
+    if lm.ollama_binary() is None:
+        command = lm.install_command()
+        if command is None:
+            console.print(f"[yellow]Ollama fehlt.[/yellow] {lm.install_hint()}")
+            return ""
+        console.print("\n[bold]1. Ollama installieren[/bold]")
+        console.print("  [dim]Ollama fehlt. Dieser Befehl wuerde ausgefuehrt:[/dim]")
+        shown = " ".join(command[2:]) if len(command) > 2 else " ".join(command)
+        console.print(f"  [cyan]{shown}[/cyan]")
+        if not (assume_yes or typer.confirm("  Ausfuehren?", default=True)):
+            console.print(f"  [dim]Abgebrochen. Von Hand: {lm.install_hint()}[/dim]")
+            return ""
+        if not lm.install_ollama():
+            console.print("[red]Installation fehlgeschlagen.[/red]")
+            return ""
+        console.print("  [green]Ollama installiert.[/green]")
+    else:
+        console.print(
+            f"\n[bold]1. Ollama[/bold]  [green]gefunden[/green] [dim]({lm.ollama_binary()})[/dim]"
+        )
+
+    # -- 2. Server ---------------------------------------------------------
+    console.print("\n[bold]2. Server[/bold]")
+    if lm.server_running():
+        console.print("  [green]laeuft bereits[/green]")
+    else:
+        with console.status("  starte ollama serve ..."):
+            started = lm.start_server()
+        if not started:
+            console.print(
+                "  [red]Server startet nicht.[/red] Starte ihn von Hand: [bold]ollama serve[/bold]"
+            )
+            return ""
+        console.print("  [green]gestartet[/green]")
+
+    # -- 3. Modell waehlen -------------------------------------------------
+    console.print("\n[bold]3. Modell[/bold]")
+    memory = lm.total_memory_gb()
+    gpu = lm.gpu_hint()
+    if memory:
+        console.print(f"  [dim]Arbeitsspeicher: {memory} GB[/dim]")
+    if gpu:
+        console.print(f"  [dim]GPU: {gpu}[/dim]")
+
+    already = set(lm.installed_models())
+    if model_name:
+        chosen = model_name
+    else:
+        recommended = lm.recommend_model(memory)
+        table = Table(show_header=True, box=None, header_style="dim")
+        table.add_column(" ", style="cyan", no_wrap=True)
+        table.add_column("Modell")
+        table.add_column("Groesse", justify="right")
+        table.add_column("")
+        for index, candidate in enumerate(lm.LOCAL_MODELS, start=1):
+            marker = []
+            if candidate.name in already:
+                marker.append("[green]geladen[/green]")
+            if candidate.name == recommended.name:
+                marker.append("[cyan]empfohlen[/cyan]")
+            table.add_row(
+                str(index),
+                candidate.name,
+                f"~{candidate.size_gb} GB",
+                f"{candidate.note} {' '.join(marker)}".strip(),
+            )
+        console.print(table)
+        default_index = str(lm.LOCAL_MODELS.index(recommended) + 1)
+        answer = typer.prompt("  Auswahl (oder eigener Ollama-Name)", default=default_index).strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(lm.LOCAL_MODELS):
+            chosen = lm.LOCAL_MODELS[int(answer) - 1].name
+        else:
+            chosen = answer
+
+    # -- 4. Laden ----------------------------------------------------------
+    if chosen in already:
+        console.print(f"  [green]{chosen} ist bereits geladen.[/green]")
+    else:
+        console.print(f"  Lade [bold]{chosen}[/bold] -- das dauert beim ersten Mal.")
+        try:
+            with console.status(f"  ollama pull {chosen} ...") as status:
+                for line in lm.pull_model(chosen):
+                    status.update(f"  {line[:90]}")
+        except lm.LocalModelError as exc:
+            console.print(f"  [red]{exc}[/red]")
+            return ""
+        size = lm.model_size_gb(chosen)
+        suffix = f" [dim]({size} GB)[/dim]" if size else ""
+        console.print(f"  [green]geladen[/green]{suffix}")
+
+    # -- 5. Tool-Calling pruefen ------------------------------------------
+    model_id = f"{lm.MODEL_PREFIX}/{chosen}"
+    console.print("\n[bold]4. Tool-Calling pruefen[/bold]")
+    console.print("  [dim]Ohne Werkzeugaufrufe kann der Agent weder suchen noch lesen.[/dim]")
+    with console.status("  teste ..."):
+        works, detail = lm.verify_tool_calling(model_id)
+    if works:
+        console.print(f"  [green]OK[/green]  {detail}")
+    else:
+        console.print(f"  [red]FEHLER[/red]  {detail}")
+        console.print(
+            "  [yellow]Dieses Modell kann keine Werkzeuge aufrufen.[/yellow] "
+            "Nimm ein anderes aus der Liste -- scoutr wuerde sonst aus dem "
+            "Gedaechtnis antworten statt aus dem Web."
+        )
+        if not (assume_yes or typer.confirm("  Trotzdem eintragen?", default=False)):
+            return ""
+
+    return model_id
+
+
+@app.command("install-model")
+def install_model_command(
+    model: str = typer.Option("", "--model", "-m", help="Ollama-Modellname, z.B. qwen2.5:7b."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Rueckfragen ueberspringen."),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
+) -> None:
+    """Installiert ein lokales Modell und traegt es ein -- ohne API-Key."""
+    from scoutr.local_model import DEFAULT_OLLAMA_URL, env_values
+
+    model_id = _run_local_setup(model, assume_yes=yes)
+    if not model_id:
+        raise typer.Exit(code=1)
+
+    target = env_file or find_env_file() or DEFAULT_ENV_PATH
+    written = write_env_file(env_values(model_id, DEFAULT_OLLAMA_URL), target)
+    reset_settings_cache()
+    console.print(
+        Panel.fit(
+            f"Modell [bold cyan]{model_id}[/bold cyan]\n"
+            f"Eingetragen in [cyan]{written}[/cyan]\n\n"
+            "Loslegen:\n"
+            "  [bold]scoutr[/bold]                     Chat\n"
+            '  [bold]scoutr "deine Frage"[/bold]       einmalige Recherche',
+            title="fertig",
+            border_style="green",
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Chat
 # ---------------------------------------------------------------------------
@@ -545,7 +723,10 @@ def _warn_if_unconfigured(settings: Settings) -> None:
     if problems:
         console.print(
             Panel.fit(
-                "\n".join(problems) + "\n\nRichte scoutr mit [bold]scoutr setup[/bold] ein.",
+                "\n".join(problems)
+                + "\n\nRichte scoutr mit [bold]scoutr setup[/bold] ein."
+                + "\n[dim]Keinen API-Key? [bold]scoutr install-model[/bold] richtet ein "
+                "lokales Modell ein -- laeuft ohne Key und ohne Konto.[/dim]",
                 title="Konfiguration unvollstaendig",
                 border_style="red",
             )
@@ -792,6 +973,7 @@ COMMANDS = {
     "history",
     "export",
     "install-browser",
+    "install-model",
     "chat",
     "version",
 }
