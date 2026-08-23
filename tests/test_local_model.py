@@ -410,3 +410,95 @@ def test_windows_memory_failure_is_tolerated(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(lm.Path, "is_file", lambda self: False)
     assert lm.total_memory_gb() is None
     assert lm.recommend_model(None) in lm.LOCAL_MODELS
+
+
+# ---------------------------------------------------------------------------
+# Speicher freigeben
+# ---------------------------------------------------------------------------
+def test_loaded_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_get(url, **kwargs):
+        assert url.endswith("/api/ps")
+        return httpx.Response(
+            200,
+            json={"models": [{"name": "llama3.1:8b"}, {"name": "llava:7b"}]},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    assert lm.loaded_models() == ["llama3.1:8b", "llava:7b"]
+
+
+def test_unload_model_sends_keep_alive_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert lm.unload_model("llama3.1:8b") is True
+    assert captured["url"].endswith("/api/generate")
+    assert captured["json"] == {"model": "llama3.1:8b", "keep_alive": 0}
+
+
+def test_free_memory_unloads_everything(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lm, "loaded_models", lambda *a, **k: ["llama3.1:8b", "llava:7b"])
+    unloaded: list[str] = []
+    monkeypatch.setattr(lm, "unload_model", lambda name, *a, **k: unloaded.append(name) or True)
+    assert lm.free_memory() == ["llama3.1:8b", "llava:7b"]
+    assert unloaded == ["llama3.1:8b", "llava:7b"]
+
+
+def test_free_memory_survives_a_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(url, **kwargs):
+        raise httpx.ConnectError("weg", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", failing)
+    assert lm.free_memory() == []
+
+
+# ---------------------------------------------------------------------------
+# Speichermangel von Blindheit unterscheiden
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "detail",
+    [
+        'model runner has unexpectedly stopped, this may be due to resource limitations',
+        "CUDA error: out of memory",
+        "failed to allocate memory",
+    ],
+)
+def test_resource_problems_are_recognised(detail: str) -> None:
+    assert lm.resource_problem(detail)
+
+
+def test_ordinary_errors_are_not_resource_problems() -> None:
+    assert not lm.resource_problem("ConnectionError: Server nicht erreichbar")
+    assert not lm.resource_problem("Das Modell hat das Testbild nicht erkannt")
+
+
+def test_crashed_runner_is_not_reported_as_blindness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Genau der Fall aus der Praxis: Absturz, nicht fehlende Sehfaehigkeit."""
+
+    def failing(**kwargs: Any):
+        raise RuntimeError(
+            'Ollama_chatException - {"error":"model runner has unexpectedly stopped, '
+            'this may be due to resource limitations or an internal error"}'
+        )
+
+    monkeypatch.setattr("litellm.completion", failing)
+    ok, detail = lm.verify_vision("ollama_chat/llava:7b")
+    assert not ok
+    assert "Speicher" in detail
+    assert "sehen kann" in detail  # sagt ausdruecklich, dass es kein Sehurteil ist
+
+
+def test_crashed_runner_in_the_tool_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(**kwargs: Any):
+        raise RuntimeError("model runner has unexpectedly stopped")
+
+    monkeypatch.setattr("litellm.completion", failing)
+    ok, detail = lm.verify_tool_calling("ollama_chat/qwen2.5:32b")
+    assert not ok
+    assert "kleineres Modell" in detail

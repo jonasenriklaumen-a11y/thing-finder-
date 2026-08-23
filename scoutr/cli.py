@@ -643,6 +643,14 @@ def _run_vision_setup(model_name: str = "", assume_yes: bool = False) -> str:
         return ""
 
     model_id = f"{lm.MODEL_PREFIX}/{chosen}"
+
+    # Das Textmodell liegt nach seiner Pruefung noch im Speicher. Zwei Modelle
+    # gleichzeitig sprengen auf vielen Rechnern den VRAM und der Ollama-Runner
+    # stirbt -- also vorher aufraeumen.
+    freed = lm.free_memory()
+    if freed:
+        console.print(f"  [dim]Speicher freigegeben: {', '.join(freed)}[/dim]")
+
     console.print("  [dim]Sehtest: das Modell bekommt ein rotes Bild gezeigt.[/dim]")
     with console.status("  teste ..."):
         works, detail = lm.verify_vision(model_id)
@@ -651,6 +659,23 @@ def _run_vision_setup(model_name: str = "", assume_yes: bool = False) -> str:
         return model_id
 
     console.print(f"  [red]FEHLER[/red]  {detail}")
+
+    # Speichermangel ist kein Urteil ueber das Modell -- ein kleineres tut es.
+    if lm.resource_problem(detail) and not model_name:
+        smaller = min(lm.VISION_MODELS, key=lambda candidate: candidate.size_gb)
+        if smaller.name != chosen:
+            console.print(
+                f"  [yellow]Zu wenig Speicher fuer {chosen}.[/yellow] "
+                f"[bold]{smaller.name}[/bold] ist mit ~{smaller.size_gb} GB deutlich kleiner."
+            )
+            if assume_yes or typer.confirm(f"  Stattdessen {smaller.name} nehmen?", default=True):
+                return _run_vision_setup(smaller.name, assume_yes=True)
+        console.print(
+            "  [dim]Sonst: andere Programme schliessen, oder in der .env "
+            "OLLAMA_KEEP_ALIVE=0 setzen, damit Ollama Modelle sofort entlaedt.[/dim]"
+        )
+        return ""
+
     if assume_yes or typer.confirm("  Trotzdem eintragen?", default=False):
         return model_id
     return ""
@@ -697,6 +722,7 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
 
     # -- 5. Tool-Calling pruefen ------------------------------------------
     model_id = f"{lm.MODEL_PREFIX}/{chosen}"
+    lm.free_memory()
     console.print("\n[bold]4. Tool-Calling pruefen[/bold]")
     console.print("  [dim]Ohne Werkzeugaufrufe kann der Agent weder suchen noch lesen.[/dim]")
     with console.status("  teste ..."):

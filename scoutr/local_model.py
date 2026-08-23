@@ -220,6 +220,41 @@ def pull_model(name: str, binary: str | None = None) -> Iterator[str]:
         raise LocalModelError(f"`ollama pull {name}` fehlgeschlagen: {last_line or 'kein Grund'}")
 
 
+def loaded_models(base_url: str = DEFAULT_OLLAMA_URL) -> list[str]:
+    """Modelle, die gerade im Speicher liegen (`ollama ps`)."""
+    try:
+        response = httpx.get(f"{base_url.rstrip('/')}/api/ps", timeout=5)
+        if response.status_code != 200:
+            return []
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+    return [str(item.get("name", "")) for item in payload.get("models", []) if item.get("name")]
+
+
+def unload_model(name: str, base_url: str = DEFAULT_OLLAMA_URL) -> bool:
+    """Wirft *name* aus dem Speicher (keep_alive=0).
+
+    Zwei Modelle gleichzeitig sprengen auf vielen Rechnern den VRAM -- der
+    Ollama-Runner stirbt dann mitten im Aufruf. Vor dem Sehtest raeumen wir
+    deshalb auf. Fehler sind egal: schlimmstenfalls bleibt alles geladen.
+    """
+    try:
+        response = httpx.post(
+            f"{base_url.rstrip('/')}/api/generate",
+            json={"model": name, "keep_alive": 0},
+            timeout=30,
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 200
+
+
+def free_memory(base_url: str = DEFAULT_OLLAMA_URL) -> list[str]:
+    """Entlaedt alle laufenden Modelle. Gibt zurueck, was entladen wurde."""
+    return [name for name in loaded_models(base_url) if unload_model(name, base_url)]
+
+
 def model_size_gb(name: str, base_url: str = DEFAULT_OLLAMA_URL) -> float | None:
     """Tatsaechliche Groesse eines geladenen Modells in GB."""
     try:
@@ -276,7 +311,13 @@ def verify_tool_calling(model_id: str, api_base: str = DEFAULT_OLLAMA_URL) -> tu
             timeout=180,
         )
     except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
+        detail = f"{type(exc).__name__}: {exc}"
+        if resource_problem(detail):
+            return False, (
+                "Der Ollama-Runner ist abgestuerzt -- dem Rechner ging der Speicher aus. "
+                "Ein kleineres Modell sollte durchlaufen."
+            )
+        return False, detail
 
     message = response.choices[0].message
     calls = getattr(message, "tool_calls", None) or []
@@ -392,6 +433,23 @@ def gpu_hint() -> str:
 # ---------------------------------------------------------------------------
 # Sehtest: kann das Modell ein Bild wirklich anschauen?
 # ---------------------------------------------------------------------------
+#: Marker, an denen ein Absturz wegen Speichermangels zu erkennen ist.
+RESOURCE_MARKERS = (
+    "model runner has unexpectedly stopped",
+    "resource limitations",
+    "out of memory",
+    "cudamalloc",
+    "insufficient memory",
+    "failed to allocate",
+)
+
+
+def resource_problem(detail: str) -> bool:
+    """Deutet die Fehlermeldung auf zu wenig Speicher hin?"""
+    lowered = detail.lower()
+    return any(marker in lowered for marker in RESOURCE_MARKERS)
+
+
 #: Farbe des Testbildes und die Woerter, die eine richtige Antwort enthaelt.
 PROBE_COLOR = (220, 20, 20)
 PROBE_COLOR_WORDS = ("rot", "red", "rouge", "rosso")
@@ -456,7 +514,13 @@ def verify_vision(model_id: str, api_base: str = DEFAULT_OLLAMA_URL) -> tuple[bo
             timeout=180,
         )
     except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
+        detail = f"{type(exc).__name__}: {exc}"
+        if resource_problem(detail):
+            return False, (
+                "Der Ollama-Runner ist abgestuerzt -- dem Rechner ging der Speicher aus. "
+                "Das sagt nichts darueber, ob das Modell sehen kann."
+            )
+        return False, detail
 
     answer = (response.choices[0].message.content or "").strip()
     if not answer:

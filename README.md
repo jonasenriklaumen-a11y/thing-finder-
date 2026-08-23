@@ -565,6 +565,25 @@ Namen aus dem [Ollama-Katalog](https://ollama.com/library).
 > Werkzeuge durch; mit `ollama/` bleibt der Agent stumm. `scoutr install-model` schreibt
 > automatisch das richtige.
 
+#### Wenn der Speicher knapp wird
+
+Text- und Vision-Modell gleichzeitig im VRAM sprengen viele Grafikkarten — der
+Ollama-Runner stirbt dann mit `model runner has unexpectedly stopped`. scoutr entlädt
+deshalb vor jedem Test alle laufenden Modelle und erkennt diesen Absturz als das, was er
+ist: ein Speicherproblem, kein Urteil über das Modell. Er bietet dann automatisch ein
+kleineres an.
+
+Hilft das nicht:
+
+```bash
+ollama ps                       # was liegt gerade im Speicher?
+ollama stop <modell>            # von Hand entladen
+OLLAMA_KEEP_ALIVE=0 ollama serve   # Modelle sofort nach jedem Aufruf entladen
+```
+
+Als Faustregel: Text- und Vision-Modell zusammen sollten unter deinem VRAM bleiben. Mit
+12 GB passen z. B. `qwen2.5:7b` und `moondream` gut nebeneinander.
+
 Zusammen mit SearXNG (siehe unten) läuft dann alles auf deinem Rechner — kein einziger
 Aufruf geht noch an einen fremden Dienst.
 

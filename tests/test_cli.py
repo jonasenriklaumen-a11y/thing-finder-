@@ -703,3 +703,58 @@ def test_image_is_sent_as_data_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     runner.invoke(cli.app, ["chat", "Was ist das?", "--image", str(folder), "--no-stream"])
     content = seen[0][0]["content"]
     assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_memory_is_freed_before_the_sight_test(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sonst liegen Text- und Vision-Modell gleichzeitig im VRAM."""
+    from scoutr import local_model as lm
+
+    _fake_ollama(monkeypatch)
+    order: list[str] = []
+    monkeypatch.setattr(lm, "free_memory", lambda *a, **k: order.append("frei") or ["qwen2.5:7b"])
+    monkeypatch.setattr(
+        lm, "verify_vision", lambda *a, **k: order.append("sehtest") or (True, "erkannt")
+    )
+    result = runner.invoke(
+        cli.app,
+        [
+            "install-model",
+            "--model", "qwen2.5:7b",
+            "--vision-model", "llava:7b",
+            "--yes",
+            "--env-file", str(tmp_path / ".env"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert order.index("frei") < order.index("sehtest")
+    assert "Speicher freigegeben" in result.output
+
+
+def test_out_of_memory_offers_a_smaller_vision_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Speichermangel darf nicht als 'Modell ist blind' enden."""
+    from scoutr import local_model as lm
+
+    _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "free_memory", lambda *a, **k: [])
+    attempts: list[str] = []
+
+    def verify(model_id: str, *args: Any, **kwargs: Any):
+        attempts.append(model_id)
+        if "moondream" in model_id:
+            return True, "Testbild erkannt"
+        return False, "Der Ollama-Runner ist abgestuerzt -- resource limitations"
+
+    monkeypatch.setattr(lm, "verify_vision", verify)
+    target = tmp_path / ".env"
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--model", "qwen2.5:7b", "--env-file", str(target)],
+        input="1\n\n1\ny\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert any("moondream" in attempt for attempt in attempts)
+    assert "SCOUTR_VISION_MODEL=ollama_chat/moondream" in target.read_text(encoding="utf-8")
