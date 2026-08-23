@@ -99,6 +99,8 @@ def install_command() -> list[str] | None:
         if shutil.which("brew"):
             return ["brew", "install", "ollama"]
         return None
+    if system == "Windows" and shutil.which("winget"):
+        return ["winget", "install", "--id", "Ollama.Ollama", "-e", "--accept-package-agreements"]
     return None
 
 
@@ -108,7 +110,10 @@ def install_hint() -> str:
     if system == "Darwin":
         return "Lade Ollama von https://ollama.com/download -- oder `brew install ollama`."
     if system == "Windows":
-        return "Lade den Installer von https://ollama.com/download herunter."
+        return (
+            "Installiere Ollama mit `winget install Ollama.Ollama` oder lade den "
+            "Installer von https://ollama.com/download herunter."
+        )
     return "Anleitung: https://ollama.com/download"
 
 
@@ -140,14 +145,27 @@ def start_server(base_url: str = DEFAULT_OLLAMA_URL, wait_seconds: float = 20.0)
         return False
     if server_running(base_url):
         return True
+    # Unter Windows kennt Popen `start_new_session` nicht; dort loesen
+    # Creation-Flags den Prozess von der Konsole und unterdruecken das
+    # aufpoppende Fenster.
+    extra: dict[str, object] = {}
+    if platform.system() == "Windows":
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+            subprocess, "CREATE_NO_WINDOW", 0
+        )
+        if flags:
+            extra["creationflags"] = flags
+    else:
+        extra["start_new_session"] = True
+
     try:
         subprocess.Popen(
             [binary, "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            **extra,
         )
-    except OSError:
+    except (OSError, ValueError):
         return False
 
     deadline = time.monotonic() + wait_seconds
@@ -300,7 +318,36 @@ def total_memory_gb() -> float | None:
             return round(int(output.stdout.strip()) / 1_073_741_824, 1)
         except (OSError, ValueError):
             return None
+    if platform.system() == "Windows":
+        return _windows_memory_gb()
     return None
+
+
+def _windows_memory_gb() -> float | None:
+    """Arbeitsspeicher unter Windows ueber GlobalMemoryStatusEx."""
+    try:
+        import ctypes
+
+        class MemoryStatusEx(ctypes.Structure):
+            _fields_ = (
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            )
+
+        status = MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(MemoryStatusEx)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        return round(status.ullTotalPhys / 1_073_741_824, 1)
+    except (AttributeError, OSError, ValueError):
+        return None
 
 
 def _recommend(models: tuple[LocalModel, ...], memory_gb: float | None) -> LocalModel:

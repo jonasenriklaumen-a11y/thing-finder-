@@ -55,6 +55,32 @@ scoutr --version            # zeigt, ob die neue Version aktiv ist
 > veröffentlicht ist, genügt `uv tool install scoutr`. Zum Entwickeln stattdessen
 > `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run scoutr ...` aufrufen.
 
+### Windows
+
+Alles läuft auch unter Windows — in **PowerShell**:
+
+```powershell
+# uv installieren, falls noch nicht vorhanden
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+git clone --branch claude/scoutr-ai-web-agent-yogr3j `
+  https://github.com/jonasenriklaumen-a11y/thing-finder-.git
+cd thing-finder-
+uv tool install .
+uv tool update-shell        # danach PowerShell neu öffnen
+
+scoutr install-model        # holt Ollama per winget und lädt die Modelle
+```
+
+Unterschiede zu Linux und macOS:
+
+* Ollama kommt per `winget install Ollama.Ollama`; ohne winget lädst du den Installer von
+  [ollama.com/download](https://ollama.com/download) und startest `scoutr install-model`
+  danach erneut.
+* Pfade mit Backslash und Anführungszeichen: `scoutr --image "C:\Users\du\Bilder"`
+* Pfeiltasten-History im Chat gibt es nur mit `pip install pyreadline3`.
+* Der Ollama-Server läuft im Hintergrund, ohne dass ein Konsolenfenster aufgeht.
+
 `scoutr setup` fragt genau zwei Dinge ab:
 
 | Was | Wo bekommt man es | Pflicht? |

@@ -326,3 +326,87 @@ def test_colour_words_are_matched_loosely(
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content=answer))
     ok, _ = lm.verify_vision("ollama_chat/llava:7b")
     assert ok, answer
+
+
+# ---------------------------------------------------------------------------
+# Windows
+# ---------------------------------------------------------------------------
+def test_windows_uses_winget_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lm.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(lm.shutil, "which", lambda name: "C:\\\\winget.exe")
+    command = lm.install_command()
+    assert command is not None
+    assert "Ollama.Ollama" in command
+
+
+def test_windows_without_winget_gets_a_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lm.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(lm.shutil, "which", lambda name: None)
+    assert lm.install_command() is None
+    hint = lm.install_hint()
+    assert "winget" in hint and "ollama.com/download" in hint
+
+
+def test_windows_server_start_uses_creationflags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`start_new_session` gibt es unter Windows nicht -- dort brauchen wir Flags."""
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(lm.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(lm, "ollama_binary", lambda: "C:\\\\ollama.exe")
+    monkeypatch.setattr(lm, "server_running", lambda *a, **k: True)
+    monkeypatch.setattr(lm.subprocess, "DETACHED_PROCESS", 8, raising=False)
+    monkeypatch.setattr(lm.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    calls = {"n": 0}
+
+    def fake_running(*args: Any, **kwargs: Any) -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1  # erst nach dem Start erreichbar
+
+    monkeypatch.setattr(lm, "server_running", fake_running)
+    monkeypatch.setattr(
+        lm.subprocess, "Popen", lambda *a, **k: captured.update(k) or SimpleNamespaceStub()
+    )
+    assert lm.start_server(wait_seconds=2) is True
+    assert "creationflags" in captured
+    assert "start_new_session" not in captured
+
+
+class SimpleNamespaceStub:
+    """Popen-Ersatz, der nichts tut."""
+
+
+def test_posix_server_start_uses_new_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(lm.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(lm, "ollama_binary", lambda: "/usr/bin/ollama")
+    calls = {"n": 0}
+
+    def fake_running(*args: Any, **kwargs: Any) -> bool:
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    monkeypatch.setattr(lm, "server_running", fake_running)
+    monkeypatch.setattr(
+        lm.subprocess, "Popen", lambda *a, **k: captured.update(k) or SimpleNamespaceStub()
+    )
+    assert lm.start_server(wait_seconds=2) is True
+    assert captured["start_new_session"] is True
+    assert "creationflags" not in captured
+
+
+def test_windows_memory_is_read_via_ctypes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ohne die Abfrage bekaeme jeder Windows-Rechner denselben Vorschlag."""
+    monkeypatch.setattr(lm.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(lm, "_windows_memory_gb", lambda: 31.9)
+    monkeypatch.setattr(lm.Path, "is_file", lambda self: False)
+    assert lm.total_memory_gb() == 31.9
+    assert lm.recommend_model(31.9).needs_gb <= 31.9
+
+
+def test_windows_memory_failure_is_tolerated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lm.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(lm, "_windows_memory_gb", lambda: None)
+    monkeypatch.setattr(lm.Path, "is_file", lambda self: False)
+    assert lm.total_memory_gb() is None
+    assert lm.recommend_model(None) in lm.LOCAL_MODELS
