@@ -60,6 +60,19 @@ LOCAL_MODELS: tuple[LocalModel, ...] = (
 
 DEFAULT_MODEL = LOCAL_MODELS[0]
 
+#: Modelle, die Bilder beschreiben koennen -- fuer `scoutr --image` und
+#: `/image`. Sie brauchen KEIN Tool-Calling: sie schauen sich nur das Bild
+#: an, die Recherche danach macht das Hauptmodell.
+VISION_MODELS: tuple[LocalModel, ...] = (
+    LocalModel("llava:7b", 4.7, 8, "Bewaehrt, versteht Fotos und Schilder"),
+    LocalModel("minicpm-v", 5.5, 8, "Stark bei Text im Bild"),
+    LocalModel("llama3.2-vision:11b", 7.9, 12, "Genauer, braucht mehr Speicher"),
+    LocalModel("llava:13b", 8.0, 12, "Groessere llava-Variante"),
+    LocalModel("moondream", 1.7, 4, "Winzig, fuer schwache Rechner"),
+)
+
+DEFAULT_VISION_MODEL = VISION_MODELS[0]
+
 
 class LocalModelError(RuntimeError):
     """Etwas an der lokalen Einrichtung ist schiefgegangen."""
@@ -290,15 +303,25 @@ def total_memory_gb() -> float | None:
     return None
 
 
-def recommend_model(memory_gb: float | None = None) -> LocalModel:
-    """Waehlt das groesste Modell, das in den Speicher passt."""
+def _recommend(models: tuple[LocalModel, ...], memory_gb: float | None) -> LocalModel:
+    """Groesstes Modell aus *models*, das in den Speicher passt."""
     available = memory_gb if memory_gb is not None else total_memory_gb()
     if available is None:
-        return DEFAULT_MODEL
-    fitting = [model for model in LOCAL_MODELS if model.needs_gb <= available]
+        return models[0]
+    fitting = [model for model in models if model.needs_gb <= available]
     if not fitting:
-        return min(LOCAL_MODELS, key=lambda model: model.needs_gb)
+        return min(models, key=lambda model: model.needs_gb)
     return max(fitting, key=lambda model: model.size_gb)
+
+
+def recommend_model(memory_gb: float | None = None) -> LocalModel:
+    """Waehlt das groesste Textmodell, das in den Speicher passt."""
+    return _recommend(LOCAL_MODELS, memory_gb)
+
+
+def recommend_vision_model(memory_gb: float | None = None) -> LocalModel:
+    """Waehlt das groesste Vision-Modell, das in den Speicher passt."""
+    return _recommend(VISION_MODELS, memory_gb)
 
 
 def gpu_hint() -> str:
@@ -317,6 +340,94 @@ def gpu_hint() -> str:
         return ""
     line = output.stdout.strip().splitlines()
     return line[0].strip() if line else ""
+
+
+# ---------------------------------------------------------------------------
+# Sehtest: kann das Modell ein Bild wirklich anschauen?
+# ---------------------------------------------------------------------------
+#: Farbe des Testbildes und die Woerter, die eine richtige Antwort enthaelt.
+PROBE_COLOR = (220, 20, 20)
+PROBE_COLOR_WORDS = ("rot", "red", "rouge", "rosso")
+
+VISION_PROBE_MESSAGE = (
+    "Welche Farbe hat dieses Bild? Antworte mit einem einzigen Wort."
+)
+
+
+def solid_png(rgb: tuple[int, int, int] = PROBE_COLOR, size: int = 64) -> bytes:
+    """Erzeugt ein einfarbiges PNG -- ohne zusaetzliche Abhaengigkeit.
+
+    Damit laesst sich pruefen, ob ein Modell das Bild tatsaechlich sieht:
+    Die richtige Antwort ist bekannt.
+    """
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    scanline = b"\x00" + bytes(rgb) * size
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(scanline * size, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+def verify_vision(model_id: str, api_base: str = DEFAULT_OLLAMA_URL) -> tuple[bool, str]:
+    """Prueft an einem echten Bild, ob *model_id* sehen kann.
+
+    Gezeigt wird ein rotes Quadrat und nach der Farbe gefragt. Nennt das
+    Modell die Farbe, schaut es das Bild wirklich an -- ein Textmodell kann
+    das nicht.
+    """
+    import base64
+
+    encoded = base64.b64encode(solid_png()).decode("ascii")
+    try:
+        import litellm
+
+        litellm.suppress_debug_info = True
+        response = litellm.completion(
+            model=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": VISION_PROBE_MESSAGE},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                        },
+                    ],
+                }
+            ],
+            api_base=api_base,
+            max_tokens=20,
+            timeout=180,
+        )
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+    answer = (response.choices[0].message.content or "").strip()
+    if not answer:
+        return False, "Das Modell hat nichts geantwortet."
+    if any(word in answer.lower() for word in PROBE_COLOR_WORDS):
+        return True, f"Testbild erkannt (Antwort: {answer[:40]})"
+    return False, (
+        f"Das Modell hat das Testbild nicht erkannt (Antwort: {answer[:60]}). "
+        "Vermutlich kann es keine Bilder sehen."
+    )
+
+
+def vision_env_values(model: LocalModel | str) -> dict[str, str]:
+    """Der `.env`-Eintrag fuer das Vision-Modell."""
+    model_id = model.model_id if isinstance(model, LocalModel) else str(model)
+    if "/" not in model_id:
+        model_id = f"{MODEL_PREFIX}/{model_id}"
+    return {"SCOUTR_VISION_MODEL": model_id}
 
 
 def env_values(model: LocalModel | str, base_url: str = DEFAULT_OLLAMA_URL) -> dict[str, str]:

@@ -204,6 +204,16 @@ Ein Vision-Modell beschreibt, was auf dem Bild zu sehen ist (Produkt, Logo, Schi
 Text), daraus werden Suchbegriffe — danach läuft die normale Recherche. Im Chat geht
 dasselbe mit `/image pfad.jpg`.
 
+Es wird nichts hochgeladen: scoutr liest die Datei von deiner Platte. Zuständig ist
+`SCOUTR_VISION_MODEL`; ist das leer, wird das Hauptmodell gefragt — und **Textmodelle
+können keine Bilder sehen**. Ein lokales Vision-Modell richtest du so ein:
+
+```bash
+scoutr install-model --vision-only
+```
+
+Welches Modell gerade zuständig ist, zeigt `scoutr config` in der Zeile „Vision-Modell".
+
 ## Im Container laufen lassen
 
 Wer scoutr nicht direkt aufs System installieren will, lässt es in einem Container
@@ -481,11 +491,22 @@ SCOUTR_MODEL=ollama_chat/qwen2.5:7b
 SCOUTR_API_BASE=http://localhost:11434
 ```
 
+Zum Schluss fragt er, ob du **auch Bilder** als Eingabe nutzen willst, und richtet dafür
+ein Vision-Modell ein — mit eigenem Sehtest: Das Modell bekommt ein rotes Quadrat gezeigt
+und muss die Farbe nennen. Ein Textmodell fällt dabei durch und wird nicht eingetragen.
+
 Ein bestimmtes Modell direkt:
 
 ```bash
-scoutr install-model --model qwen2.5:14b
+scoutr install-model --model qwen2.5:14b                  # nur Text
+scoutr install-model --vision-model llava:7b              # Text + Bild
+scoutr install-model --vision-only --vision-model llava:7b  # nur Bild nachrüsten
+scoutr install-model --model qwen2.5:7b --no-vision       # ohne Bild
 ```
+
+Mit `--yes` läuft alles ohne Rückfragen — ein Vision-Modell wird dann nur geladen, wenn
+du es mit `--vision-model` benennst. Mehrere Gigabyte ungefragt herunterzuladen wäre
+nicht in Ordnung.
 
 | Modell | ca. Größe | ab RAM |
 |---|---|---|
@@ -494,6 +515,17 @@ scoutr install-model --model qwen2.5:14b
 | `llama3.1:8b` | 4,9 GB | 8 GB |
 | `qwen2.5:14b` | 9,0 GB | 16 GB |
 | `qwen2.5:32b` | 20,0 GB | 32 GB |
+
+**Vision-Modelle** (für `--image` und `/image`) — sie brauchen *kein* Tool-Calling, sie
+beschreiben nur; die Recherche danach macht das Hauptmodell:
+
+| Modell | ca. Größe | ab RAM |
+|---|---|---|
+| `moondream` | 1,7 GB | 4 GB |
+| `llava:7b` | 4,7 GB | 8 GB |
+| `minicpm-v` | 5,5 GB | 8 GB |
+| `llama3.2-vision:11b` | 7,9 GB | 12 GB |
+| `llava:13b` | 8,0 GB | 12 GB |
 
 Jedes andere Ollama-Modell mit Werkzeug-Unterstützung geht auch — `--model` nimmt jeden
 Namen aus dem [Ollama-Katalog](https://ollama.com/library).

@@ -226,3 +226,103 @@ def test_verify_handles_dict_shaped_tool_calls(monkeypatch: pytest.MonkeyPatch) 
     )
     ok, detail = lm.verify_tool_calling("ollama_chat/qwen2.5:7b")
     assert ok and "web_search" in detail
+
+
+# ---------------------------------------------------------------------------
+# Vision-Modelle und Sehtest
+# ---------------------------------------------------------------------------
+def test_vision_models_use_the_right_prefix() -> None:
+    for model in lm.VISION_MODELS:
+        assert model.model_id.startswith("ollama_chat/")
+
+
+def test_vision_recommendation_fits_the_memory() -> None:
+    assert lm.recommend_vision_model(4).needs_gb <= 4
+    assert lm.recommend_vision_model(64).needs_gb <= 64
+    assert lm.recommend_vision_model(2).name == "moondream"
+
+
+def test_vision_env_values() -> None:
+    assert lm.vision_env_values("llava:7b") == {"SCOUTR_VISION_MODEL": "ollama_chat/llava:7b"}
+    assert lm.vision_env_values(lm.VISION_MODELS[0])["SCOUTR_VISION_MODEL"].startswith(
+        "ollama_chat/"
+    )
+
+
+def test_probe_image_is_a_valid_png() -> None:
+    """Das Testbild muss ein echtes PNG sein -- sonst prueft der Sehtest nichts."""
+    import struct
+
+    data = lm.solid_png()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    width, height = struct.unpack(">II", data[16:24])
+    assert width == height == 64
+    assert data[24] == 8 and data[25] == 2  # 8 Bit, Farbtyp RGB
+    assert data.endswith(b"IEND\xae\x42\x60\x82")
+
+
+def test_probe_image_has_the_expected_colour() -> None:
+    """Die Antwort auf den Sehtest muss vorher feststehen."""
+    import zlib
+
+    data = lm.solid_png()
+    start = data.index(b"IDAT") + 4
+    end = data.index(b"IEND") - 4
+    pixels = zlib.decompress(data[start:end])
+    # Erste Zeile: Filterbyte, dann RGB-Tripel.
+    assert pixels[0] == 0
+    assert tuple(pixels[1:4]) == lm.PROBE_COLOR
+    assert "rot" in lm.PROBE_COLOR_WORDS
+
+
+def test_verify_vision_accepts_a_model_that_sees(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def completion(**kwargs: Any):
+        captured.update(kwargs)
+        return _reply(content="Rot")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    ok, detail = lm.verify_vision("ollama_chat/llava:7b")
+    assert ok
+    assert "erkannt" in detail
+    # Es wurde tatsaechlich ein Bild mitgeschickt.
+    content = captured["messages"][0]["content"]
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_verify_vision_rejects_a_text_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein Textmodell raet oder redet drumherum -- das faellt auf."""
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: _reply(content="Ich kann keine Bilder sehen."),
+    )
+    ok, detail = lm.verify_vision("ollama_chat/qwen2.5:7b")
+    assert not ok
+    assert "nicht erkannt" in detail
+
+
+def test_verify_vision_rejects_an_empty_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content=""))
+    ok, detail = lm.verify_vision("ollama_chat/stumm")
+    assert not ok
+    assert "nichts geantwortet" in detail
+
+
+def test_verify_vision_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(**kwargs: Any):
+        raise ConnectionError("Server weg")
+
+    monkeypatch.setattr("litellm.completion", failing)
+    ok, detail = lm.verify_vision("ollama_chat/llava:7b")
+    assert not ok and "Server weg" in detail
+
+
+@pytest.mark.parametrize("answer", ["rot", "Rot.", "ROT", "red", "Das Bild ist rot."])
+def test_colour_words_are_matched_loosely(
+    monkeypatch: pytest.MonkeyPatch, answer: str
+) -> None:
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content=answer))
+    ok, _ = lm.verify_vision("ollama_chat/llava:7b")
+    assert ok, answer

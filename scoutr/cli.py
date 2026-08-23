@@ -520,6 +520,142 @@ def install_browser_command() -> None:
 # ---------------------------------------------------------------------------
 # install-model
 # ---------------------------------------------------------------------------
+def _ensure_ollama(assume_yes: bool = False) -> bool:
+    """Sorgt dafuer, dass Ollama installiert ist und laeuft.
+
+    Der Installationsbefehl wird immer angezeigt und muss bestaetigt werden --
+    hier laedt nichts ungefragt etwas aus dem Netz und fuehrt es aus.
+    """
+    from scoutr import local_model as lm
+
+    # -- 1. Ollama ---------------------------------------------------------
+    if lm.ollama_binary() is None:
+        command = lm.install_command()
+        if command is None:
+            console.print(f"[yellow]Ollama fehlt.[/yellow] {lm.install_hint()}")
+            return False
+        console.print("\n[bold]1. Ollama installieren[/bold]")
+        console.print("  [dim]Ollama fehlt. Dieser Befehl wuerde ausgefuehrt:[/dim]")
+        shown = " ".join(command[2:]) if len(command) > 2 else " ".join(command)
+        console.print(f"  [cyan]{shown}[/cyan]")
+        if not (assume_yes or typer.confirm("  Ausfuehren?", default=True)):
+            console.print(f"  [dim]Abgebrochen. Von Hand: {lm.install_hint()}[/dim]")
+            return False
+        if not lm.install_ollama():
+            console.print("[red]Installation fehlgeschlagen.[/red]")
+            return False
+        console.print("  [green]Ollama installiert.[/green]")
+    else:
+        console.print(
+            f"\n[bold]1. Ollama[/bold]  [green]gefunden[/green] [dim]({lm.ollama_binary()})[/dim]"
+        )
+
+    # -- 2. Server ---------------------------------------------------------
+    console.print("\n[bold]2. Server[/bold]")
+    if lm.server_running():
+        console.print("  [green]laeuft bereits[/green]")
+        return True
+    with console.status("  starte ollama serve ..."):
+        started = lm.start_server()
+    if not started:
+        console.print(
+            "  [red]Server startet nicht.[/red] Starte ihn von Hand: [bold]ollama serve[/bold]"
+        )
+        return False
+    console.print("  [green]gestartet[/green]")
+    return True
+
+
+def _pick_local_model(models, recommended, already: set[str], label: str) -> str:
+    """Zeigt eine Modellauswahl und gibt den gewaehlten Ollama-Namen zurueck."""
+    table = Table(show_header=True, box=None, header_style="dim")
+    table.add_column(" ", style="cyan", no_wrap=True)
+    table.add_column(label)
+    table.add_column("Groesse", justify="right")
+    table.add_column("")
+    for index, candidate in enumerate(models, start=1):
+        marker = []
+        if candidate.name in already:
+            marker.append("[green]geladen[/green]")
+        if candidate.name == recommended.name:
+            marker.append("[cyan]empfohlen[/cyan]")
+        table.add_row(
+            str(index),
+            candidate.name,
+            f"~{candidate.size_gb} GB",
+            f"{candidate.note} {' '.join(marker)}".strip(),
+        )
+    console.print(table)
+    default_index = str(list(models).index(recommended) + 1)
+    answer = typer.prompt("  Auswahl (oder eigener Ollama-Name)", default=default_index).strip()
+    if answer.isdigit() and 1 <= int(answer) <= len(models):
+        return models[int(answer) - 1].name
+    return answer
+
+
+def _pull_if_needed(name: str, already: set[str]) -> bool:
+    """Laedt *name*, falls noch nicht vorhanden. `False` bei Fehler."""
+    from scoutr import local_model as lm
+
+    if name in already:
+        console.print(f"  [green]{name} ist bereits geladen.[/green]")
+        return True
+    console.print(f"  Lade [bold]{name}[/bold] -- das dauert beim ersten Mal.")
+    try:
+        with console.status(f"  ollama pull {name} ...") as status:
+            for line in lm.pull_model(name):
+                status.update(f"  {line[:90]}")
+    except lm.LocalModelError as exc:
+        console.print(f"  [red]{exc}[/red]")
+        console.print(
+            "  [dim]Gibt es den Namen noch? Katalog: https://ollama.com/library[/dim]"
+        )
+        return False
+    size = lm.model_size_gb(name)
+    suffix = f" [dim]({size} GB)[/dim]" if size else ""
+    console.print(f"  [green]geladen[/green]{suffix}")
+    return True
+
+
+def _run_vision_setup(model_name: str = "", assume_yes: bool = False) -> str:
+    """Richtet ein lokales Vision-Modell ein. Gibt die Modell-ID zurueck, sonst "".
+
+    Vision-Modelle brauchen kein Tool-Calling -- sie beschreiben nur, was auf
+    dem Bild zu sehen ist. Die Recherche danach macht das Hauptmodell.
+    """
+    from scoutr import local_model as lm
+
+    console.print("\n[bold]5. Vision-Modell[/bold] [dim](fuer scoutr --image und /image)[/dim]")
+    if not (model_name or assume_yes) and not typer.confirm(
+        "  Auch Bilder als Eingabe nutzen?", default=True
+    ):
+        console.print("  [dim]Uebersprungen. Spaeter: scoutr install-model --vision-only[/dim]")
+        return ""
+
+    already = set(lm.installed_models())
+    if model_name:
+        chosen = model_name
+    else:
+        recommended = lm.recommend_vision_model(lm.total_memory_gb())
+        chosen = _pick_local_model(lm.VISION_MODELS, recommended, already, "Vision-Modell")
+
+    if not _pull_if_needed(chosen, already):
+        return ""
+
+    model_id = f"{lm.MODEL_PREFIX}/{chosen}"
+    console.print("  [dim]Sehtest: das Modell bekommt ein rotes Bild gezeigt.[/dim]")
+    with console.status("  teste ..."):
+        works, detail = lm.verify_vision(model_id)
+    if works:
+        console.print(f"  [green]OK[/green]  {detail}")
+        return model_id
+
+    console.print(f"  [red]FEHLER[/red]  {detail}")
+    if assume_yes or typer.confirm("  Trotzdem eintragen?", default=False):
+        return model_id
+    return ""
+
+
 def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
     """Richtet ein lokales Modell ein. Gibt die Modell-ID zurueck, sonst "".
 
@@ -536,41 +672,8 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
         )
     )
 
-    # -- 1. Ollama ---------------------------------------------------------
-    if lm.ollama_binary() is None:
-        command = lm.install_command()
-        if command is None:
-            console.print(f"[yellow]Ollama fehlt.[/yellow] {lm.install_hint()}")
-            return ""
-        console.print("\n[bold]1. Ollama installieren[/bold]")
-        console.print("  [dim]Ollama fehlt. Dieser Befehl wuerde ausgefuehrt:[/dim]")
-        shown = " ".join(command[2:]) if len(command) > 2 else " ".join(command)
-        console.print(f"  [cyan]{shown}[/cyan]")
-        if not (assume_yes or typer.confirm("  Ausfuehren?", default=True)):
-            console.print(f"  [dim]Abgebrochen. Von Hand: {lm.install_hint()}[/dim]")
-            return ""
-        if not lm.install_ollama():
-            console.print("[red]Installation fehlgeschlagen.[/red]")
-            return ""
-        console.print("  [green]Ollama installiert.[/green]")
-    else:
-        console.print(
-            f"\n[bold]1. Ollama[/bold]  [green]gefunden[/green] [dim]({lm.ollama_binary()})[/dim]"
-        )
-
-    # -- 2. Server ---------------------------------------------------------
-    console.print("\n[bold]2. Server[/bold]")
-    if lm.server_running():
-        console.print("  [green]laeuft bereits[/green]")
-    else:
-        with console.status("  starte ollama serve ..."):
-            started = lm.start_server()
-        if not started:
-            console.print(
-                "  [red]Server startet nicht.[/red] Starte ihn von Hand: [bold]ollama serve[/bold]"
-            )
-            return ""
-        console.print("  [green]gestartet[/green]")
+    if not _ensure_ollama(assume_yes=assume_yes):
+        return ""
 
     # -- 3. Modell waehlen -------------------------------------------------
     console.print("\n[bold]3. Modell[/bold]")
@@ -586,46 +689,11 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
         chosen = model_name
     else:
         recommended = lm.recommend_model(memory)
-        table = Table(show_header=True, box=None, header_style="dim")
-        table.add_column(" ", style="cyan", no_wrap=True)
-        table.add_column("Modell")
-        table.add_column("Groesse", justify="right")
-        table.add_column("")
-        for index, candidate in enumerate(lm.LOCAL_MODELS, start=1):
-            marker = []
-            if candidate.name in already:
-                marker.append("[green]geladen[/green]")
-            if candidate.name == recommended.name:
-                marker.append("[cyan]empfohlen[/cyan]")
-            table.add_row(
-                str(index),
-                candidate.name,
-                f"~{candidate.size_gb} GB",
-                f"{candidate.note} {' '.join(marker)}".strip(),
-            )
-        console.print(table)
-        default_index = str(lm.LOCAL_MODELS.index(recommended) + 1)
-        answer = typer.prompt("  Auswahl (oder eigener Ollama-Name)", default=default_index).strip()
-        if answer.isdigit() and 1 <= int(answer) <= len(lm.LOCAL_MODELS):
-            chosen = lm.LOCAL_MODELS[int(answer) - 1].name
-        else:
-            chosen = answer
+        chosen = _pick_local_model(lm.LOCAL_MODELS, recommended, already, "Modell")
 
     # -- 4. Laden ----------------------------------------------------------
-    if chosen in already:
-        console.print(f"  [green]{chosen} ist bereits geladen.[/green]")
-    else:
-        console.print(f"  Lade [bold]{chosen}[/bold] -- das dauert beim ersten Mal.")
-        try:
-            with console.status(f"  ollama pull {chosen} ...") as status:
-                for line in lm.pull_model(chosen):
-                    status.update(f"  {line[:90]}")
-        except lm.LocalModelError as exc:
-            console.print(f"  [red]{exc}[/red]")
-            return ""
-        size = lm.model_size_gb(chosen)
-        suffix = f" [dim]({size} GB)[/dim]" if size else ""
-        console.print(f"  [green]geladen[/green]{suffix}")
+    if not _pull_if_needed(chosen, already):
+        return ""
 
     # -- 5. Tool-Calling pruefen ------------------------------------------
     model_id = f"{lm.MODEL_PREFIX}/{chosen}"
@@ -651,26 +719,62 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
 @app.command("install-model")
 def install_model_command(
     model: str = typer.Option("", "--model", "-m", help="Ollama-Modellname, z.B. qwen2.5:7b."),
+    vision_model: str = typer.Option(
+        "", "--vision-model", help="Vision-Modell, z.B. llava:7b."
+    ),
+    vision: bool = typer.Option(
+        True, "--vision/--no-vision", help="Auch ein Vision-Modell einrichten."
+    ),
+    vision_only: bool = typer.Option(
+        False, "--vision-only", help="Nur das Vision-Modell einrichten."
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Rueckfragen ueberspringen."),
     env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
 ) -> None:
-    """Installiert ein lokales Modell und traegt es ein -- ohne API-Key."""
-    from scoutr.local_model import DEFAULT_OLLAMA_URL, env_values
+    """Installiert lokale Modelle und traegt sie ein -- ohne API-Key."""
+    from scoutr.local_model import DEFAULT_OLLAMA_URL, env_values, vision_env_values
 
-    model_id = _run_local_setup(model, assume_yes=yes)
-    if not model_id:
-        raise typer.Exit(code=1)
+    values: dict[str, str] = {}
+
+    if vision_only:
+        if not _ensure_ollama(assume_yes=yes):
+            raise typer.Exit(code=1)
+        vision_id = _run_vision_setup(vision_model, assume_yes=True)
+        if not vision_id:
+            raise typer.Exit(code=1)
+        values.update(vision_env_values(vision_id))
+    else:
+        model_id = _run_local_setup(model, assume_yes=yes)
+        if not model_id:
+            raise typer.Exit(code=1)
+        values.update(env_values(model_id, DEFAULT_OLLAMA_URL))
+
+        # Mit --yes wird nicht gefragt -- dann laden wir ein Vision-Modell nur,
+        # wenn es ausdruecklich benannt wurde. Ungefragt mehrere Gigabyte
+        # herunterzuladen waere nicht in Ordnung.
+        if vision_model or (vision and not yes):
+            vision_id = _run_vision_setup(vision_model, assume_yes=yes)
+            if vision_id:
+                values.update(vision_env_values(vision_id))
 
     target = env_file or find_env_file() or DEFAULT_ENV_PATH
-    written = write_env_file(env_values(model_id, DEFAULT_OLLAMA_URL), target)
+    written = write_env_file(values, target)
     reset_settings_cache()
+
+    lines = [f"{key.removeprefix('SCOUTR_')}: [bold cyan]{value}[/bold cyan]"
+             for key, value in values.items() if key.endswith("MODEL")]
     console.print(
         Panel.fit(
-            f"Modell [bold cyan]{model_id}[/bold cyan]\n"
-            f"Eingetragen in [cyan]{written}[/cyan]\n\n"
+            "\n".join(lines)
+            + f"\nEingetragen in [cyan]{written}[/cyan]\n\n"
             "Loslegen:\n"
             "  [bold]scoutr[/bold]                     Chat\n"
-            '  [bold]scoutr "deine Frage"[/bold]       einmalige Recherche',
+            '  [bold]scoutr "deine Frage"[/bold]       einmalige Recherche\n'
+            + (
+                "  [bold]scoutr --image foto.jpg[/bold]  Bild als Ausgangspunkt"
+                if "SCOUTR_VISION_MODEL" in values
+                else ""
+            ),
             title="fertig",
             border_style="green",
         )
@@ -868,8 +972,15 @@ def _describe_image(agent, image: Path) -> str | None:
     try:
         with console.status(f"  Sehe mir {image.name} an ..."):
             description = agent.describe_image(image)
-    except (FileNotFoundError, RuntimeError) as exc:
+    except FileNotFoundError as exc:
         console.print(f"[red]{exc}[/red]")
+        return None
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        console.print(
+            "[dim]Kann dein Modell ueberhaupt Bilder sehen? Ein eigenes Vision-Modell "
+            "richtet [bold]scoutr install-model --vision-only[/bold] ein.[/dim]"
+        )
         return None
     console.print(Panel(description, title=f"[Bild] {image.name}", border_style="cyan"))
     return f"Auf dem Bild ist Folgendes zu sehen:\n{description}"

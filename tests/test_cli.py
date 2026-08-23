@@ -380,6 +380,8 @@ def test_install_model_writes_the_env(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert "SCOUTR_MODEL=ollama_chat/qwen2.5:7b" in content
     assert "SCOUTR_API_BASE=http://localhost:11434" in content
     assert "Werkzeug aufgerufen" in result.output
+    # --yes laedt kein Vision-Modell ungefragt nach.
+    assert "SCOUTR_VISION_MODEL" not in content
 
 
 def test_install_model_refuses_a_model_without_tool_calling(
@@ -505,3 +507,90 @@ def test_hyphenated_single_word_question_needs_quotes(
     with pytest.raises(SystemExit):
         cli.main()
     assert 'scoutr "e-bike"' in capsys.readouterr().out
+
+
+def test_install_model_adds_a_vision_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Text- und Vision-Modell in einem Durchlauf."""
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "verify_vision", lambda *a, **k: (True, "Testbild erkannt"))
+    target = tmp_path / ".env"
+    result = runner.invoke(
+        cli.app,
+        [
+            "install-model",
+            "--model", "qwen2.5:7b",
+            "--vision-model", "llava:7b",
+            "--yes",
+            "--env-file", str(target),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["pulled"] == ["qwen2.5:7b", "llava:7b"]
+    content = target.read_text(encoding="utf-8")
+    assert "SCOUTR_MODEL=ollama_chat/qwen2.5:7b" in content
+    assert "SCOUTR_VISION_MODEL=ollama_chat/llava:7b" in content
+    assert "--image" in result.output
+
+
+def test_vision_only_leaves_the_text_model_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "verify_vision", lambda *a, **k: (True, "Testbild erkannt"))
+    target = tmp_path / ".env"
+    target.write_text("SCOUTR_MODEL=anthropic/claude-sonnet-4-6\n", encoding="utf-8")
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--vision-only", "--vision-model", "llava:7b", "--env-file", str(target)],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["pulled"] == ["llava:7b"]
+    content = target.read_text(encoding="utf-8")
+    assert "SCOUTR_VISION_MODEL=ollama_chat/llava:7b" in content
+    # Das bestehende Hauptmodell bleibt unangetastet.
+    assert "SCOUTR_MODEL=anthropic/claude-sonnet-4-6" in content
+
+
+def test_blind_vision_model_is_not_written(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ein Modell, das das Testbild nicht erkennt, wird nicht eingetragen."""
+    from scoutr import local_model as lm
+
+    _fake_ollama(monkeypatch)
+    monkeypatch.setattr(
+        lm, "verify_vision", lambda *a, **k: (False, "Das Modell hat das Testbild nicht erkannt")
+    )
+    target = tmp_path / ".env"
+    result = runner.invoke(
+        cli.app,
+        [
+            "install-model",
+            "--model", "qwen2.5:7b",
+            "--vision-model", "blind:1b",
+            "--env-file", str(target),
+        ],
+        input="n\n",
+    )
+    assert result.exit_code == 0, result.output
+    content = target.read_text(encoding="utf-8")
+    assert "SCOUTR_MODEL=ollama_chat/qwen2.5:7b" in content
+    assert "SCOUTR_VISION_MODEL" not in content
+
+
+def test_no_vision_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    state = _fake_ollama(monkeypatch)
+    target = tmp_path / ".env"
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--model", "qwen2.5:7b", "--no-vision", "--env-file", str(target)],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["pulled"] == ["qwen2.5:7b"]
+    assert "SCOUTR_VISION_MODEL" not in target.read_text(encoding="utf-8")
