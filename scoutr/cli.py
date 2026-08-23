@@ -23,6 +23,7 @@ from scoutr.config import (
     find_env_file,
     get_settings,
     load_env,
+    model_problem,
     reset_settings_cache,
     write_env_file,
 )
@@ -139,6 +140,9 @@ def setup_command(
         except (ValueError, IndexError):
             model = MODEL_PRESETS[0][0]
     console.print(f"  Modell: [bold cyan]{model}[/bold cyan]")
+    model_issue = model_problem(model)
+    if model_issue:
+        console.print(f"  [yellow]{model_issue}[/yellow]")
 
     key_name = api_key_name_for(model)
     api_key = ""
@@ -711,8 +715,13 @@ def _handle_slash(line: str, agent, settings: Settings, turns: list, renderer) -
         if not argument:
             console.print(f"Aktuelles Modell: [bold]{settings.model}[/bold]")
         else:
-            agent.set_model(argument)
-            console.print(f"[green]Modell:[/green] {argument}")
+            problem = model_problem(argument)
+            if problem:
+                console.print(f"[yellow]{problem}[/yellow]")
+                console.print(f"[dim]Weiter mit {settings.model}.[/dim]")
+            else:
+                agent.set_model(argument)
+                console.print(f"[green]Modell:[/green] {argument}")
     elif command == "export":
         _do_export(turns, argument or "html", settings)
     elif command == "image":

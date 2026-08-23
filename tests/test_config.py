@@ -138,3 +138,48 @@ def test_generic_key_does_not_override_known_providers(
     assert config.api_key_name_for("anthropic/claude-sonnet-4-6") == "ANTHROPIC_API_KEY"
     # Ollama braucht weiterhin keinen Key.
     assert config.api_key_name_for("ollama/llama3.1") == ""
+
+
+# ---------------------------------------------------------------------------
+# Modell-IDs pruefen
+# ---------------------------------------------------------------------------
+def test_valid_models_pass() -> None:
+    for model in (
+        "anthropic/claude-sonnet-4-6",
+        "openai/gpt-4o",
+        "nvidia_nim/meta/llama-3.3-70b-instruct",
+        "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b",
+    ):
+        assert config.model_problem(model) == "", model
+
+
+def test_missing_provider_prefix_is_caught_with_a_suggestion() -> None:
+    """`nvidia/...` statt `nvidia_nim/nvidia/...` -- der haeufige Fehlgriff."""
+    problem = config.model_problem("nvidia/nemotron-3-ultra-550b-a55b")
+    assert "keinem Anbieter zuordnen" in problem
+    assert "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in problem
+
+
+def test_suggestion_only_when_the_prefix_matches() -> None:
+    """Unter einem gueltigen Praefix akzeptiert LiteLLM jede ID -- also nicht raten."""
+    assert config.suggest_model("quatsch/modell") == ""
+    assert config.suggest_model("voelliger-quatsch") == ""
+    problem = config.model_problem("quatsch/modell")
+    assert "Meintest du" not in problem
+    assert "Beispiele:" in problem
+
+
+def test_broken_model_shows_up_in_missing_requirements(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SCOUTR_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
+    problems = config.get_settings().missing_requirements()
+    assert any("nvidia_nim/nvidia/" in problem for problem in problems)
+
+
+def test_resolve_model_reports_the_provider() -> None:
+    assert config.resolve_model("nvidia_nim/meta/llama-3.3-70b-instruct") == "nvidia_nim"
+    assert config.resolve_model("anthropic/claude-sonnet-4-6") == "anthropic"
+    assert config.resolve_model("quatsch/modell") == ""
+    assert config.resolve_model("") == ""

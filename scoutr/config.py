@@ -122,6 +122,70 @@ def api_key_name_for(model: str) -> str:
     return GENERIC_KEY_NAME if _env_str(GENERIC_KEY_NAME) else ""
 
 
+def resolve_model(model: str) -> str:
+    """Prueft, ob LiteLLM den Anbieter aus *model* ableiten kann.
+
+    Returns:
+        Den erkannten Anbieter, oder einen leeren String, wenn nicht.
+    """
+    if not model.strip():
+        return ""
+    try:
+        import litellm
+
+        litellm.suppress_debug_info = True
+        _, provider, *_ = litellm.get_llm_provider(model=model.strip())
+        return str(provider or "")
+    except Exception:
+        return ""
+
+
+def suggest_model(model: str) -> str:
+    """Sucht zu einer nicht aufloesbaren Modell-ID eine, die funktioniert.
+
+    Typischer Fall: `nvidia/nemotron-...` statt `nvidia_nim/nvidia/nemotron-...`.
+    Vorgeschlagen wird nur, wenn das erste Segment der Eingabe zu einem
+    bekannten Anbieter passt -- LiteLLM akzeptiert unter einem gueltigen
+    Praefix naemlich jede beliebige Modell-ID, sodass wir sonst Unsinn
+    vorschlagen wuerden.
+    """
+    model = model.strip()
+    if "/" not in model:
+        return ""
+    head = model.split("/", 1)[0].lower()
+    if not head:
+        return ""
+    related = [
+        provider
+        for provider in PROVIDER_KEYS
+        if provider.startswith(head) or head.startswith(provider.split("_", 1)[0])
+    ]
+    for provider in related:
+        candidate = f"{provider}/{model}"
+        if resolve_model(candidate):
+            return candidate
+    return ""
+
+
+def model_problem(model: str) -> str:
+    """Menschenlesbare Meldung, wenn *model* so nicht benutzbar ist."""
+    if resolve_model(model):
+        return ""
+    message = (
+        f"Modell '{model}' laesst sich keinem Anbieter zuordnen. "
+        "Die Modell-ID braucht ein Anbieter-Praefix."
+    )
+    suggestion = suggest_model(model)
+    if suggestion:
+        message += f"\nMeintest du: {suggestion}"
+    else:
+        message += (
+            "\nBeispiele: anthropic/claude-sonnet-4-6, openai/gpt-4o, "
+            "nvidia_nim/meta/llama-3.3-70b-instruct, ollama/llama3.1"
+        )
+    return message
+
+
 @dataclass(slots=True)
 class Settings:
     """Alle Laufzeit-Einstellungen an einem Ort."""
@@ -181,6 +245,9 @@ class Settings:
     def missing_requirements(self) -> list[str]:
         """Liste menschenlesbarer Hinweise auf fehlende Pflichtangaben."""
         problems: list[str] = []
+        model_issue = model_problem(self.model)
+        if model_issue:
+            problems.append(model_issue)
         key_name = self.api_key_name
         if key_name and not _env_str(key_name):
             problems.append(f"{key_name} fehlt (fuer Modell {self.model})")
