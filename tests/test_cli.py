@@ -429,3 +429,79 @@ def test_install_model_skips_an_already_loaded_model(
     assert result.exit_code == 0
     assert state["pulled"] == []
     assert "bereits geladen" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Unbekannte Unterbefehle
+# ---------------------------------------------------------------------------
+def _main_with(monkeypatch: pytest.MonkeyPatch, args: list[str]) -> list[list[str]]:
+    """Ruft cli.main() mit *args* und faengt ab, womit die App gestartet wuerde."""
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["scoutr", *args])
+    called: list[list[str]] = []
+    monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
+    cli.main()
+    return called
+
+
+def test_unknown_subcommand_is_not_sent_to_the_llm(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`scoutr install-modell` darf keine Recherche ausloesen."""
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["scoutr", "install-modell"])
+    monkeypatch.setattr(cli, "app", lambda: pytest.fail("haette nicht starten duerfen"))
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+    assert excinfo.value.code == 2
+    output = capsys.readouterr().out
+    assert "Unbekannter Befehl" in output
+    assert "install-model" in output  # Vorschlag
+    assert "Anfuehrungszeichen" in output
+
+
+def test_outdated_installation_gets_a_hint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Genau der Fall: der Befehl existiert, die Installation kennt ihn nicht."""
+    import sys
+
+    monkeypatch.setattr(cli, "COMMANDS", cli.COMMANDS - {"install-model"})
+    monkeypatch.setattr(sys, "argv", ["scoutr", "install-model"])
+    monkeypatch.setattr(cli, "app", lambda: pytest.fail("haette nicht starten duerfen"))
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert "veraltet" in capsys.readouterr().out
+
+
+def test_known_subcommands_still_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _main_with(monkeypatch, ["install-model"])[0] == ["scoutr", "install-model"]
+    assert _main_with(monkeypatch, ["install-browser"])[0] == ["scoutr", "install-browser"]
+
+
+def test_real_questions_are_never_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fragen mit Leerzeichen, ohne Bindestrich oder mit Grossbuchstaben bleiben Fragen."""
+    for question in (
+        "cafés in mönchengladbach mit wlan",
+        "hallo",
+        "E-Bike",
+        "was-ist-das?",
+        "Laptop-Test",
+    ):
+        called = _main_with(monkeypatch, [question])
+        assert called[0][1] == "chat", question
+
+
+def test_hyphenated_single_word_question_needs_quotes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Preis der Eindeutigkeit: `scoutr e-bike` wird abgefangen, mit Hinweis."""
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["scoutr", "e-bike"])
+    monkeypatch.setattr(cli, "app", lambda: pytest.fail("haette nicht starten duerfen"))
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert 'scoutr "e-bike"' in capsys.readouterr().out

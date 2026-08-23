@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import difflib
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -979,12 +981,44 @@ COMMANDS = {
 }
 
 
+#: Sieht wie ein Unterbefehl aus: kleingeschrieben, mit Bindestrich, ein Wort.
+#: Eine echte Rechercheanfrage sieht praktisch nie so aus.
+SUBCOMMAND_LIKE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$")
+
+
+def _unknown_command(name: str) -> None:
+    """Meldet einen unbekannten Unterbefehl, statt ihn ans LLM zu schicken."""
+    console.print(f"[red]Unbekannter Befehl '{name}'.[/red]")
+    close = difflib.get_close_matches(name, sorted(COMMANDS), n=2, cutoff=0.5)
+    if close:
+        console.print("Meintest du: " + ", ".join(f"[bold]{item}[/bold]" for item in close))
+        console.print(
+            f"[dim]Kennt deine Installation '{name}' noch nicht? "
+            "Dann ist sie veraltet -- siehe README, Abschnitt Quickstart.[/dim]"
+        )
+    console.print("[dim]Alle Befehle: " + ", ".join(sorted(COMMANDS)) + "[/dim]")
+    console.print(
+        f'[dim]War das als Frage gemeint? Dann in Anfuehrungszeichen: scoutr "{name}"[/dim]'
+    )
+
+
 def main() -> None:
     """Einstiegspunkt: `scoutr` und `scoutr "Frage"` landen im Chat."""
     argv = sys.argv[1:]
     if argv and argv[0] in ("--version", "-V"):
         console.print(f"scoutr {__version__}")
         return
+    # Ein einzelnes Wort mit Bindestrich ist fast sicher ein vertippter oder
+    # unbekannter Unterbefehl. Den als Rechercheanfrage ans LLM zu schicken
+    # kostet Zeit und Geld und hilft niemandem.
+    if (
+        len(argv) == 1
+        and argv[0] not in COMMANDS
+        and not argv[0].startswith("-")
+        and SUBCOMMAND_LIKE.match(argv[0])
+    ):
+        _unknown_command(argv[0])
+        raise SystemExit(2)
     if not argv or (argv[0] not in COMMANDS and argv[0] not in ("--help", "-h")):
         sys.argv.insert(1, "chat")
     app()

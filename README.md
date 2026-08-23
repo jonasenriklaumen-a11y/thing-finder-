@@ -41,6 +41,16 @@ scoutr setup
 scoutr
 ```
 
+**Aktualisieren** — beide Befehle müssen *im Repo-Verzeichnis* laufen, nicht im
+Home-Verzeichnis:
+
+```bash
+cd ~/thing-finder-          # dorthin, wo du geklont hast
+git pull
+uv tool install . --force --reinstall
+scoutr --version            # zeigt, ob die neue Version aktiv ist
+```
+
 > Voraussetzungen: Python 3.11+ und [uv](https://docs.astral.sh/uv/). Sobald das Paket
 > veröffentlicht ist, genügt `uv tool install scoutr`. Zum Entwickeln stattdessen
 > `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run scoutr ...` aufrufen.
