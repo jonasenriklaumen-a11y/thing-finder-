@@ -39,6 +39,12 @@ PROVIDER_KEYS: dict[str, str] = {
     "mistral": "MISTRAL_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "nvidia_nim": "NVIDIA_NIM_API_KEY",
+    "xai": "XAI_API_KEY",
+    "together_ai": "TOGETHER_API_KEY",
+    "fireworks_ai": "FIREWORKS_AI_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
+    "perplexity": "PERPLEXITYAI_API_KEY",
     "ollama": "",  # lokal, kein Key noetig
     "ollama_chat": "",
     "lm_studio": "",
@@ -97,9 +103,23 @@ def provider_of(model: str) -> str:
     return model.split("/", 1)[0].lower() if "/" in model else model.split("-", 1)[0].lower()
 
 
+#: Fuer Anbieter, die in PROVIDER_KEYS nicht stehen. LiteLLM kennt weit mehr
+#: Provider, als hier sinnvoll aufzuzaehlen sind -- damit laesst sich jeder
+#: davon nutzen, ohne dass scoutr angepasst werden muss.
+GENERIC_KEY_NAME = "SCOUTR_API_KEY"
+
+
 def api_key_name_for(model: str) -> str:
-    """Name der Umgebungsvariable, in der der Key fuer *model* erwartet wird."""
-    return PROVIDER_KEYS.get(provider_of(model), "")
+    """Name der Umgebungsvariable, in der der Key fuer *model* erwartet wird.
+
+    Steht der Anbieter nicht in :data:`PROVIDER_KEYS`, gilt
+    :data:`GENERIC_KEY_NAME` -- aber nur, wenn dort auch etwas steht. Sonst
+    bleibt es dabei, dass LiteLLM sich den Key selbst aus der Umgebung holt.
+    """
+    provider = provider_of(model)
+    if provider in PROVIDER_KEYS:
+        return PROVIDER_KEYS[provider]
+    return GENERIC_KEY_NAME if _env_str(GENERIC_KEY_NAME) else ""
 
 
 @dataclass(slots=True)

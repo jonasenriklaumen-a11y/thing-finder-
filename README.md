@@ -431,7 +431,8 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 |---|---|---|
 | `SCOUTR_MODEL` | LiteLLM-Modell-ID | `anthropic/claude-sonnet-4-6` |
 | `SCOUTR_VISION_MODEL` | Modell für `--image` | wie `SCOUTR_MODEL` |
-| `SCOUTR_API_BASE` | eigene Basis-URL (Ollama, Proxy) | — |
+| `SCOUTR_API_BASE` | eigene Basis-URL (Ollama, eigene NIM, Proxy) | — |
+| `SCOUTR_API_KEY` | Key für Anbieter ohne eigenen Eintrag | — |
 | `SCOUTR_SEARCH_BACKEND` | `duckduckgo`, `searxng`, `brave`, `tavily` | `duckduckgo` |
 | `SCOUTR_SEARCH_ENGINES` | Engines der Metasuche einschränken | alle |
 | `SCOUTR_SEARXNG_URL` | Adresse der SearXNG-Instanz | — |
@@ -442,13 +443,50 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
 | `SCOUTR_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
 
-Da LiteLLM als LLM-Schicht dient, sind Anthropic, OpenAI und lokale Modelle per Ollama
-austauschbar:
+### LLM-Anbieter
+
+Da LiteLLM als LLM-Schicht dient, ist der Anbieter austauschbar:
 
 ```bash
 scoutr --model openai/gpt-4o
-scoutr --model ollama/llama3.1          # dazu SCOUTR_API_BASE=http://localhost:11434
+scoutr --model nvidia_nim/meta/llama-3.3-70b-instruct   # NVIDIA NIM
+scoutr --model ollama/llama3.1                          # dazu SCOUTR_API_BASE=...
 ```
+
+| Anbieter | Modell-Präfix | Key |
+|---|---|---|
+| Anthropic | `anthropic/` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai/` | `OPENAI_API_KEY` |
+| Google | `gemini/` | `GEMINI_API_KEY` |
+| [NVIDIA NIM](https://build.nvidia.com/) | `nvidia_nim/` | `NVIDIA_NIM_API_KEY` |
+| xAI · Together · Cerebras · Perplexity · Groq · DeepSeek · OpenRouter | siehe `.env.example` | jeweils eigener |
+| Ollama (lokal) | `ollama/` | — |
+
+**Wichtig: Das Modell muss Tool-Calling (Function Calling) beherrschen.** Ohne das kann
+der Agent weder suchen noch Seiten lesen — er antwortet dann aus dem Gedächtnis statt aus
+dem Web, was genau das ist, was scoutr vermeiden soll.
+
+Jeden weiteren LiteLLM-Anbieter nutzt du über den Notausgang `SCOUTR_API_KEY`:
+
+```bash
+SCOUTR_MODEL=irgendein_anbieter/modell
+SCOUTR_API_KEY=dein-key
+```
+
+#### NVIDIA NIM im Detail
+
+[build.nvidia.com](https://build.nvidia.com/) gibt dir nach der Anmeldung Startguthaben
+und einen Key (`nvapi-...`). Modell auswählen, „Get API Key" klicken, dann:
+
+```bash
+SCOUTR_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct
+NVIDIA_NIM_API_KEY=nvapi-...
+```
+
+Die Modell-ID ist genau die von build.nvidia.com, mit `nvidia_nim/` davor. Achte darauf,
+ein Modell zu wählen, das in der Modellkarte Tool-Calling aufführt — nicht alle dort
+angebotenen Modelle können das. Eine eigene, selbst gehostete NIM-Instanz erreichst du
+über `SCOUTR_API_BASE=http://dein-host:8000/v1`.
 
 SQLite (`~/.scoutr/scoutr.sqlite3`) wird für genau zwei Dinge benutzt: Response-Cache
 (TTL 24 h) und Verlauf vergangener Recherchen.

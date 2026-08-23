@@ -74,3 +74,67 @@ def test_write_env_file_preserves_comments(tmp_path: Path) -> None:
     assert "FREMD=behalten" in content
     assert "SCOUTR_LANG=en" in content
     assert "SCOUTR_MODEL=alt" not in content
+
+
+# ---------------------------------------------------------------------------
+# Weitere Anbieter
+# ---------------------------------------------------------------------------
+def test_nvidia_nim_key_is_recognised() -> None:
+    """NVIDIA-Modell-IDs enthalten mehrere Schraegstriche."""
+    assert config.provider_of("nvidia_nim/meta/llama-3.3-70b-instruct") == "nvidia_nim"
+    assert (
+        config.api_key_name_for("nvidia_nim/meta/llama-3.3-70b-instruct")
+        == "NVIDIA_NIM_API_KEY"
+    )
+
+
+def test_nvidia_settings_are_complete_with_the_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SCOUTR_MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-test-1234")
+    settings = config.get_settings()
+    assert settings.missing_requirements() == []
+    assert settings.llm_kwargs()["api_key"] == "nvapi-test-1234"
+
+
+def test_nvidia_without_key_is_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SCOUTR_MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
+    monkeypatch.delenv("NVIDIA_NIM_API_KEY", raising=False)
+    problems = config.get_settings().missing_requirements()
+    assert any("NVIDIA_NIM_API_KEY" in problem for problem in problems)
+
+
+@pytest.mark.parametrize(
+    ("model", "key_name"),
+    [
+        ("xai/grok-2", "XAI_API_KEY"),
+        ("together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo", "TOGETHER_API_KEY"),
+        ("cerebras/llama-3.3-70b", "CEREBRAS_API_KEY"),
+        ("perplexity/sonar", "PERPLEXITYAI_API_KEY"),
+    ],
+)
+def test_further_providers(model: str, key_name: str) -> None:
+    assert config.api_key_name_for(model) == key_name
+
+
+def test_generic_key_covers_unlisted_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Jeder LiteLLM-Anbieter laesst sich ueber SCOUTR_API_KEY nutzen."""
+    monkeypatch.delenv("SCOUTR_API_KEY", raising=False)
+    assert config.api_key_name_for("exotisch/modell") == ""
+
+    monkeypatch.setenv("SCOUTR_API_KEY", "geheim")
+    assert config.api_key_name_for("exotisch/modell") == "SCOUTR_API_KEY"
+
+
+def test_generic_key_does_not_override_known_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SCOUTR_API_KEY", "geheim")
+    assert config.api_key_name_for("anthropic/claude-sonnet-4-6") == "ANTHROPIC_API_KEY"
+    # Ollama braucht weiterhin keinen Key.
+    assert config.api_key_name_for("ollama/llama3.1") == ""

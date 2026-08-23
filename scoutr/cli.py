@@ -40,8 +40,16 @@ MODEL_PRESETS: list[tuple[str, str]] = [
     ("anthropic/claude-sonnet-4-6", "Anthropic Claude Sonnet 4.6 (Default)"),
     ("openai/gpt-4o", "OpenAI GPT-4o"),
     ("gemini/gemini-2.0-flash", "Google Gemini 2.0 Flash"),
+    ("nvidia_nim/meta/llama-3.3-70b-instruct", "NVIDIA NIM (build.nvidia.com)"),
     ("ollama/llama3.1", "Lokal via Ollama (kein API-Key)"),
 ]
+
+#: Modelle ohne Tool-Calling koennen den Agenten nicht fahren -- darauf
+#: weisen wir bei der Einrichtung hin.
+TOOL_CALL_WARNING = (
+    "Das Modell muss Tool-Calling (Function Calling) beherrschen -- sonst kann "
+    "der Agent weder suchen noch Seiten lesen."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +129,10 @@ def setup_command(
 
     choice = typer.prompt("Auswahl", default="1")
     if choice.strip() == "0":
-        model = typer.prompt("Modell-ID (LiteLLM-Format, z.B. openai/gpt-4o)")
+        console.print(f"  [dim]{TOOL_CALL_WARNING}[/dim]")
+        model = typer.prompt(
+            "Modell-ID im LiteLLM-Format, z.B. nvidia_nim/meta/llama-3.3-70b-instruct"
+        )
     else:
         try:
             model = MODEL_PRESETS[int(choice) - 1][0]
@@ -269,6 +280,11 @@ def _key_hint(key_name: str) -> str:
         "GROQ_API_KEY": "https://console.groq.com/keys",
         "MISTRAL_API_KEY": "https://console.mistral.ai/api-keys/",
         "OPENROUTER_API_KEY": "https://openrouter.ai/keys",
+        "NVIDIA_NIM_API_KEY": "https://build.nvidia.com/ -- Modell waehlen, dann 'Get API Key'",
+        "XAI_API_KEY": "https://console.x.ai/",
+        "TOGETHER_API_KEY": "https://api.together.ai/settings/api-keys",
+        "CEREBRAS_API_KEY": "https://cloud.cerebras.ai/",
+        "PERPLEXITYAI_API_KEY": "https://www.perplexity.ai/settings/api",
         "BRAVE_API_KEY": "https://brave.com/search/api/",
         "TAVILY_API_KEY": "https://app.tavily.com/home",
     }.get(key_name, "siehe Doku des Anbieters")
