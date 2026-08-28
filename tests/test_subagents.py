@@ -281,3 +281,57 @@ def test_without_its_own_model_the_main_one_is_used(
     )
     run_subagents(["Teilfrage"], settings, parallel=1)
     assert used == [settings.model]
+
+
+def test_overflowing_subagent_calls_still_get_answers(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Abgeschnittene Tool-Calls brauchen eine Antwort, sonst ist der
+    Verlauf ungueltig und die Abschluss-Zusammenfassung schlaegt fehl."""
+    settings.subagent_budget = 1
+    histories: list[list[dict[str, Any]]] = []
+
+    def completion(**kwargs: Any):
+        histories.append(kwargs["messages"])
+        if "tools" in kwargs and len(histories) == 1:
+            return _reply(
+                tool_calls=[
+                    _tool_call("web_search", {"query": "a"}, "s1"),
+                    _tool_call("web_search", {"query": "b"}, "s2"),
+                    _tool_call("web_search", {"query": "c"}, "s3"),
+                ]
+            )
+        return _reply(content="Zusammenfassung")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    results = run_subagents(["Frage"], settings, parallel=1)
+    assert results[0].summary == "Zusammenfassung"
+    # Der letzte Aufruf sah fuer jeden Tool-Call eine Antwort.
+    final_history = histories[-1]
+    assistant = next(m for m in final_history if m.get("tool_calls"))
+    tool_ids = {m["tool_call_id"] for m in final_history if m.get("role") == "tool"}
+    assert {c["id"] for c in assistant["tool_calls"]} == tool_ids == {"s1", "s2", "s3"}
+    budget_answers = [
+        m for m in final_history if m.get("role") == "tool" and "Budget" in m["content"]
+    ]
+    assert len(budget_answers) == 2
+
+
+def test_subagents_share_one_fetcher(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Die Drossel (1 Request/s je Domain) muss ueber alle Subagenten gelten."""
+    created: list[Any] = []
+    from scoutr.fetch import Fetcher as RealFetcher
+
+    class SpyFetcher(RealFetcher):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    monkeypatch.setattr("scoutr.fetch.Fetcher", SpyFetcher)
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="ok"))
+    run_subagents(["a", "b", "c"], settings, parallel=2)
+    assert len(created) == 1
+    # Und er wurde am Ende geschlossen.
+    assert created[0]._client.is_closed

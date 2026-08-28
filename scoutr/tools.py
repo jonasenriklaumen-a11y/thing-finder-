@@ -246,7 +246,11 @@ class Toolbox:
         else:
             page = self._fetcher.fetch(url, want_products=True)
             self._maybe_llm_specs(page)
-            if self.cache:
+            # Voruebergehende Fehler nicht cachen: ein Timeout von jetzt sagt
+            # nichts darueber, ob die Seite in einer Stunde erreichbar ist.
+            # Stabile Ergebnisse (Inhalt, blocked, paywall) duerfen 24 h liegen.
+            transient = page.skipped_reason in ("timeout", "network_error")
+            if self.cache and not transient:
                 self.cache.set(key, page.model_dump(), kind="page", label=page.title or url)
 
         if page.ok:

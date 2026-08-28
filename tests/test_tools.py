@@ -208,3 +208,52 @@ def test_events_are_emitted(
 def test_dispatch_unknown_tool(settings: Settings) -> None:
     box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     assert "Unbekanntes Werkzeug" in box.call("rm_rf", {})["error"]
+
+
+def test_transient_fetch_failures_are_not_cached(
+    settings: Settings, tmp_path: Path
+) -> None:
+    """Ein Timeout von jetzt darf nicht 24 Stunden lang festgeschrieben sein."""
+    from scoutr.cache import Cache
+
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise httpx.ReadTimeout("zu langsam", request=request)
+        body = "Endlich erreichbar. " * 30
+        return httpx.Response(
+            200,
+            text=f"<html><body><main><p>{body}</p></main></body></html>",
+            headers={"content-type": "text/html"},
+        )
+
+    cache = Cache(tmp_path / "c.sqlite3")
+    box = Toolbox(settings, cache=cache, fetcher=_mock_fetcher(handler))
+    first = box.fetch_page("https://langsam.example/")
+    assert first["skipped_reason"] == "timeout"
+    # Zweiter Versuch trifft die Seite wirklich -- kein Cache-Treffer.
+    second = box.fetch_page("https://langsam.example/")
+    assert second["ok"] is True
+
+
+def test_stable_failures_stay_cached(settings: Settings, tmp_path: Path) -> None:
+    """blocked dagegen ist stabil und darf liegen bleiben."""
+    from scoutr.cache import Cache
+
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        attempts["n"] += 1
+        return httpx.Response(403, text="nope")
+
+    cache = Cache(tmp_path / "c.sqlite3")
+    box = Toolbox(settings, cache=cache, fetcher=_mock_fetcher(handler))
+    box.fetch_page("https://zu.example/")
+    box.fetch_page("https://zu.example/")
+    assert attempts["n"] == 1

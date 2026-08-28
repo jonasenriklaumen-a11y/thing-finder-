@@ -113,6 +113,9 @@ TRANSIENT_MARKERS = (
     "too many requests",
 )
 
+#: Beginn der internen Nachricht mit den Vorrecherche-Ergebnissen.
+PRE_RESEARCH_PREFIX = "Zu deiner Unterstuetzung wurde die Anfrage"
+
 #: Platzhalter fuer aeltere Werkzeug-Ergebnisse, die aus dem Verlauf fliegen.
 TRIMMED_NOTE = "[gekuerzt -- aeltere Werkzeug-Ausgabe, die Fakten stehen in der Antwort]"
 
@@ -185,15 +188,21 @@ class Agent:
         return self.use_subagents and self.settings.subagents_auto
 
     def _recent_context(self, turns: int = 2) -> str:
-        """Die letzten Wortmeldungen -- damit Nachfragen verstaendlich bleiben."""
+        """Die letzten Wortmeldungen -- damit Nachfragen verstaendlich bleiben.
+
+        Interne Zwischennachrichten (Vorrecherche-Ergebnisse, Budget-Hinweis)
+        gehoeren nicht hinein: der Planer soll das Gespraech sehen, nicht
+        unsere Regie-Anweisungen.
+        """
         parts: list[str] = []
         for message in self.messages[1:-1]:
             role = message.get("role")
             if role not in ("user", "assistant"):
                 continue
             content = str(message.get("content") or "").strip()
-            if not content:
+            if not content or content.startswith((PRE_RESEARCH_PREFIX, BUDGET_PROMPT[:40])):
                 continue
+            content = content.split("\n\n[Ortsfilter:")[0]
             parts.append(f"{'Nutzer' if role == 'user' else 'scoutr'}: {content[:400]}")
         return "\n".join(parts[-turns * 2 :])
 
@@ -207,10 +216,13 @@ class Agent:
 
         limit = max(1, min(self.settings.max_subagents, 4))
         self._emit("planning", question=question)
+        context = self._recent_context()
+        if self.settings.location:
+            # Sonst planen die Teilfragen ohne den Ort aus --location/.env
+            # und die Subagenten suchen weltweit.
+            context = f"[Ortsfilter: {self.settings.location}]\n{context}".strip()
         try:
-            tasks = plan_subtasks(
-                question, self.settings, context=self._recent_context(), limit=limit
-            )
+            tasks = plan_subtasks(question, self.settings, context=context, limit=limit)
         except Exception as exc:
             # Scheitert die Planung, macht der Hauptagent es eben selbst.
             self._emit("error", message=f"Planung fehlgeschlagen: {exc}")
@@ -224,7 +236,8 @@ class Agent:
             {
                 "role": "user",
                 "content": (
-                    "Zu deiner Unterstuetzung wurde die Anfrage bereits in Teilfragen "
+                    PRE_RESEARCH_PREFIX
+                    + " bereits in Teilfragen "
                     "zerlegt und vorrecherchiert. Nutze diese Ergebnisse, pruefe sie "
                     "gegen die Kriterien des Nutzers und recherchiere nur nach, wo "
                     "etwas fehlt.\n\n"
@@ -396,6 +409,11 @@ class Agent:
             result.answer = ""
             return result
 
+        # Alles ab hier gehoert zu diesem Turn. Scheitert das LLM endgueltig,
+        # wird bis hierher zurueckgeschnitten -- ein halber Turn (Assistant-
+        # Nachricht mit Tool-Calls ohne Antworten) macht den Verlauf fuer
+        # jede weitere Frage unbrauchbar, die API lehnt ihn dann ab.
+        turn_start = len(self.messages)
         self.messages.append({"role": "user", "content": self._with_context(question)})
 
         budget = max(1, self.settings.max_tool_calls)
@@ -422,8 +440,10 @@ class Agent:
             except Exception as exc:  # LLM-Fehler duerfen den Chat nicht toeten
                 result.error = f"{type(exc).__name__}: {exc}"
                 self._emit("error", message=result.error)
-                self.messages.pop()  # die unbeantwortete Nutzerfrage zuruecknehmen
-                return self._finish(result)
+                # Den ganzen angefangenen Turn verwerfen, nicht nur die letzte
+                # Nachricht -- sonst bleibt ein Tool-Call ohne Antwort stehen.
+                del self.messages[turn_start:]
+                return self._finish(result, question)
 
             tool_calls = message.get("tool_calls") or []
             self.messages.append(_assistant_message(message))
@@ -455,7 +475,7 @@ class Agent:
                         }
                     )
 
-        return self._finish(result)
+        return self._finish(result, question)
 
     def _trim_history(self) -> None:
         """Haelt den Verlauf klein genug fuer kleine Kontextfenster.
@@ -540,7 +560,7 @@ class Agent:
         self.messages.append({"role": "assistant", "content": text})
         return text
 
-    def _finish(self, result: AgentResult) -> AgentResult:
+    def _finish(self, result: AgentResult, question: str = "") -> AgentResult:
         stats = self.toolbox.stats
         result.tool_calls = stats.tool_calls
         result.searches = list(stats.searches)
@@ -552,7 +572,7 @@ class Agent:
         if self.cache and result.answer:
             self.cache.add_history(
                 session_id=str(id(self)),
-                question=_last_user_question(self.messages),
+                question=question,
                 answer=result.answer,
                 meta=result.meta(),
             )
@@ -680,14 +700,6 @@ def _assistant_message(message: dict[str, Any]) -> dict[str, Any]:
     if message.get("tool_calls"):
         out["tool_calls"] = message["tool_calls"]
     return out
-
-
-def _last_user_question(messages: list[dict[str, Any]]) -> str:
-    for message in reversed(messages):
-        if message.get("role") == "user":
-            content = message.get("content") or ""
-            return str(content).split("\n\n[Ortsfilter:")[0]
-    return ""
 
 
 def _parse_spec_json(raw: str) -> dict[str, str]:

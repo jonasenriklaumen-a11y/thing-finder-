@@ -194,9 +194,26 @@ def _run_one(
                 }
             )
 
+            answered: set[str] = set()
             for index, call in enumerate(calls):
+                call_id = getattr(call, "id", None) or f"sub_{index}"
                 if used >= budget:
-                    break
+                    # Auch abgeschnittene Aufrufe brauchen eine Antwort --
+                    # ein Tool-Call ohne Antwort macht den Verlauf ungueltig
+                    # und der abschliessende Aufruf wuerde abgelehnt.
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "name": getattr(call.function, "name", "") or "",
+                            "content": json.dumps(
+                                {"error": "Werkzeug-Budget aufgebraucht."},
+                                ensure_ascii=False,
+                            ),
+                        }
+                    )
+                    continue
+                answered.add(call_id)
                 used += 1
                 name = getattr(call.function, "name", "") or ""
                 raw = getattr(call.function, "arguments", "") or "{}"
@@ -211,7 +228,7 @@ def _run_one(
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": getattr(call, "id", None) or f"sub_{index}",
+                        "tool_call_id": call_id,
                         "name": name,
                         "content": json.dumps(payload, ensure_ascii=False)[
                             : max(1000, settings.max_tool_chars)
@@ -274,10 +291,31 @@ def run_subagents(
     if on_event:
         on_event("subagents", {"tasks": clean})
 
-    workers = max(1, min(parallel, len(clean)))
-    if workers == 1:
-        return [_run_one(task, settings, cache, on_event) for task in clean]
+    # Ein gemeinsamer Fetcher fuer alle: dessen Drossel und robots.txt-Cache
+    # gelten damit ueber die Subagenten hinweg. Mit je eigenem Fetcher wuerden
+    # zwei parallele Subagenten dieselbe Domain gleichzeitig treffen -- und
+    # unser Versprechen von einem Request pro Sekunde und Domain waere hin.
+    from scoutr.fetch import Fetcher
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_run_one, task, settings, cache, on_event) for task in clean]
-        return [future.result() for future in futures]
+    shared_fetcher = Fetcher(
+        user_agent=settings.user_agent,
+        timeout=settings.fetch_timeout,
+        delay_seconds=settings.request_delay_seconds,
+        enable_browser=settings.enable_playwright,
+    )
+    boxes = [Toolbox(settings, cache=cache, fetcher=shared_fetcher) for _ in clean]
+    try:
+        workers = max(1, min(parallel, len(clean)))
+        if workers == 1:
+            return [
+                _run_one(task, settings, cache, on_event, toolbox=box)
+                for task, box in zip(clean, boxes, strict=True)
+            ]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_run_one, task, settings, cache, on_event, toolbox=box)
+                for task, box in zip(clean, boxes, strict=True)
+            ]
+            return [future.result() for future in futures]
+    finally:
+        shared_fetcher.close()

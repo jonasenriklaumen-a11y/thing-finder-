@@ -574,3 +574,94 @@ def test_subagent_calls_count_towards_the_budget(
     agent.ask("Frage", stream=False)
     # Der Hauptagent darf danach nicht so tun, als haette er das volle Budget.
     assert agent.last_result is not None
+
+
+# ---------------------------------------------------------------------------
+# Regressionen aus der Fehlersuche
+# ---------------------------------------------------------------------------
+def test_llm_error_mid_turn_leaves_no_orphan_tool_calls(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Scheitert das LLM NACH einer Werkzeugrunde, muss der ganze Turn weg.
+
+    Vorher blieb eine Assistant-Nachricht mit Tool-Calls stehen, deren
+    Antworten weggepoppt waren -- jede weitere Frage der Sitzung wurde dann
+    von der API abgelehnt.
+    """
+    calls = {"n": 0}
+
+    def flaky(**kwargs: Any):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _message(tool_calls=[_tool_call("web_search", {"query": "x"})])
+        raise RuntimeError("AuthenticationError: invalid key")
+
+    monkeypatch.setattr("litellm.completion", flaky)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Meine Frage", stream=False)
+    assert result.error
+    # Kompletter Turn verworfen: nur der Systemprompt bleibt.
+    assert [m["role"] for m in agent.messages] == ["system"]
+
+    # Und die naechste Frage funktioniert wieder.
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="geht wieder")))
+    assert agent.ask("Neue Frage", stream=False).answer == "geht wieder"
+
+
+def test_history_stores_the_question_not_the_budget_prompt(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
+) -> None:
+    """Am Budget-Limit wurde vorher der Budget-Hinweis als Frage gespeichert."""
+    from scoutr.cache import Cache
+
+    settings.max_tool_calls = 1
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("web_search", {"query": "x"})]),
+        _message(content="Zwischenstand"),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+    cache = Cache(tmp_path / "c.sqlite3")
+    Agent(settings, cache=cache, toolbox=toolbox).ask("Cafés in Köln?", stream=False)
+    assert cache.recent_history()[0].question == "Cafés in Köln?"
+
+
+def test_planner_sees_the_location_filter(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Mit --location muessen auch die Teilfragen den Ort kennen."""
+    settings.subagents_auto = True
+    settings.location = "Mönchengladbach"
+    seen: dict[str, str] = {}
+
+    def spy_plan(question, settings_arg, context="", limit=4):
+        seen["question"] = question
+        seen["context"] = context
+        return [question]
+
+    monkeypatch.setattr("scoutr.subagents.plan_subtasks", spy_plan)
+    monkeypatch.setattr("scoutr.agent.Agent._run_subagents", lambda self, tasks: [])
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="ok")))
+    Agent(settings, cache=None, toolbox=toolbox).ask("Cafés mit WLAN", stream=False)
+    assert "Mönchengladbach" in seen["context"]
+
+
+def test_planner_context_hides_internal_messages(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Vorrecherche-Blob und Budget-Hinweis sind Regie, kein Gespraech."""
+    from scoutr.agent import BUDGET_PROMPT, PRE_RESEARCH_PREFIX
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.messages += [
+        {"role": "user", "content": "Cafés in Köln\n\n[Ortsfilter: Köln · Sprache de]"},
+        {"role": "user", "content": PRE_RESEARCH_PREFIX + " zerlegt: {...}"},
+        {"role": "assistant", "content": "Zwei gefunden."},
+        {"role": "user", "content": BUDGET_PROMPT},
+        {"role": "assistant", "content": "Rest."},
+        {"role": "user", "content": "aktuelle Frage"},
+    ]
+    context = agent._recent_context()
+    assert "Cafés in Köln" in context
+    assert PRE_RESEARCH_PREFIX not in context
+    assert "Budget" not in context
+    assert "[Ortsfilter:" not in context
