@@ -31,6 +31,17 @@ SKIP_LABELS: dict[str, str] = {
 }
 
 
+def shorten(text: str, limit: int = 70) -> str:
+    """Kuerzt an der Wortgrenze statt mitten im Wort."""
+    text = " ".join(str(text).split())
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if " " in cut:
+        cut = cut[: cut.rfind(" ")]
+    return f"{cut.rstrip(',;.')}…"
+
+
 def _domain(url: str) -> str:
     from scoutr.models import domain_of
 
@@ -87,20 +98,21 @@ class ChatRenderer:
             Text.assemble(("  [Teile] ", "bold magenta"), (f"{len(tasks)} Teilfragen", "white"))
         )
         for task in tasks:
-            self.console.print(f"          [dim]{str(task)[:88]}[/dim]")
+            self.console.print(f"          [dim]{shorten(task, 80)}[/dim]")
 
     def _on_subagent_done(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
-        task = str(payload.get("task", ""))[:60]
+        task = shorten(payload.get("task", ""), 62)
         if payload.get("error"):
             self.console.print(f"  [yellow][Teil][/yellow] {task} [red](fehlgeschlagen)[/red]")
         else:
-            calls = payload.get("tool_calls", 0)
+            calls = int(payload.get("tool_calls", 0) or 0)
+            wort = "Aufruf" if calls == 1 else "Aufrufe"
             self.console.print(
                 Text.assemble(
                     ("  [Fertig] ", "bold green"),
                     (task, "white"),
-                    (f"  ({calls} Aufrufe)", "dim"),
+                    (f"  ({calls} {wort})", "dim"),
                 )
             )
 

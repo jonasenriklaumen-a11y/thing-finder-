@@ -100,3 +100,61 @@ def test_print_products_is_silent_without_products() -> None:
     console = _console()
     print_products(console, [], show_images=False)
     assert console.export_text().strip() == ""
+
+
+def test_shorten_cuts_at_word_boundaries() -> None:
+    from scoutr.render import shorten
+
+    long = "Welche Cafés in Mönchengladbach haben kostenloses WLAN und Steckdosen?"
+    short = shorten(long, 40)
+    assert len(short) <= 40
+    assert short.endswith("…")
+    # Nicht mitten im Wort abgeschnitten.
+    assert not short[:-1].endswith(" ")
+    assert "Mönchengladbach" in short
+
+
+def test_shorten_leaves_short_text_alone() -> None:
+    from scoutr.render import shorten
+
+    assert shorten("kurz", 40) == "kurz"
+
+
+def test_shorten_normalises_whitespace() -> None:
+    from scoutr.render import shorten
+
+    assert shorten("a   b\n c", 40) == "a b c"
+
+
+def test_subagent_steps_are_shown() -> None:
+    console = _console()
+    renderer = ChatRenderer(console, show_images=False)
+    renderer.handle("planning", {"question": "Frage"})
+    renderer.handle("subagents", {"tasks": ["Teil eins", "Teil zwei"]})
+    renderer.handle("subagent_done", {"task": "Teil eins", "tool_calls": 4})
+    renderer.handle("subagent_done", {"task": "Teil zwei", "error": "kaputt"})
+    output = console.export_text()
+    assert "[Plane]" in output
+    assert "[Teile] 2 Teilfragen" in output
+    assert "[Fertig] Teil eins" in output
+    assert "fehlgeschlagen" in output
+
+
+def test_retry_is_shown() -> None:
+    console = _console()
+    ChatRenderer(console, show_images=False).handle(
+        "retry", {"attempt": 2, "reason": "Speichermangel", "detail": "entladen: qwen3:8b"}
+    )
+    output = console.export_text()
+    assert "Neuer Versuch 2" in output
+    assert "entladen: qwen3:8b" in output
+
+
+def test_singular_and_plural_of_calls() -> None:
+    console = _console()
+    renderer = ChatRenderer(console, show_images=False)
+    renderer.handle("subagent_done", {"task": "eins", "tool_calls": 1})
+    renderer.handle("subagent_done", {"task": "zwei", "tool_calls": 4})
+    output = console.export_text()
+    assert "(1 Aufruf)" in output
+    assert "(4 Aufrufe)" in output
