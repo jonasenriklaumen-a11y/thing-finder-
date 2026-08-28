@@ -120,9 +120,16 @@ PRE_RESEARCH_PREFIX = "Zu deiner Unterstuetzung wurde die Anfrage"
 TRIMMED_NOTE = "[gekuerzt -- aeltere Werkzeug-Ausgabe, die Fakten stehen in der Antwort]"
 
 
+#: Fehler, die ein zweiter Versuch sicher NICHT behebt -- auch wenn LiteLLM
+#: sie als APIConnectionError etikettiert.
+PERMANENT_MARKERS = ("jsondecodeerror", "extra data", "expecting value", "invalid api key")
+
+
 def is_transient(detail: str) -> bool:
     """Lohnt sich bei diesem Fehler ein zweiter Versuch?"""
     lowered = detail.lower()
+    if any(marker in lowered for marker in PERMANENT_MARKERS):
+        return False
     return any(marker in lowered for marker in TRANSIENT_MARKERS)
 
 
@@ -305,6 +312,11 @@ class Agent:
         attempts = max(1, self.settings.llm_retries)
         last_error: Exception | None = None
 
+        # Sicherheitsnetz: ein einziges kaputtes Argument im Verlauf laesst
+        # LiteLLM jeden weiteren Aufruf ablehnen. Vor dem Senden reparieren,
+        # damit auch Altbestand keine Sitzung mehr vergiften kann.
+        sanitize_history(messages)
+
         for attempt in range(attempts):
             try:
                 return self._completion(messages, stream=stream)
@@ -354,7 +366,9 @@ class Agent:
             return {
                 "role": "assistant",
                 "content": content,
-                "tool_calls": _tool_calls_to_dicts(getattr(message, "tool_calls", None)),
+                "tool_calls": repair_tool_calls(
+                    _tool_calls_to_dicts(getattr(message, "tool_calls", None))
+                ),
             }
         return self._consume_stream(response)
 
@@ -374,9 +388,17 @@ class Agent:
                 self._emit("answer_chunk", text=text)
             for call in getattr(delta, "tool_calls", None) or []:
                 index = getattr(call, "index", 0) or 0
-                entry = calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
-                if getattr(call, "id", None):
-                    entry["id"] = call.id
+                call_id = getattr(call, "id", None)
+                entry = calls.get(index)
+                if entry is not None and call_id and entry["id"] and entry["id"] != call_id:
+                    # Ollama meldet jeden Tool-Call unter Index 0 -- eine neue
+                    # ID am selben Index ist ein NEUER Aufruf, kein Delta.
+                    index = max(calls) + 1
+                    entry = None
+                if entry is None:
+                    entry = calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                if call_id:
+                    entry["id"] = call_id
                 function = getattr(call, "function", None)
                 if function is not None:
                     if getattr(function, "name", None):
@@ -384,15 +406,17 @@ class Agent:
                     if getattr(function, "arguments", None):
                         entry["arguments"] += function.arguments
 
-        tool_calls = [
-            {
-                "id": entry["id"] or f"call_{index}",
-                "type": "function",
-                "function": {"name": entry["name"], "arguments": entry["arguments"] or "{}"},
-            }
-            for index, entry in sorted(calls.items())
-            if entry["name"]
-        ]
+        tool_calls = repair_tool_calls(
+            [
+                {
+                    "id": entry["id"] or f"call_{index}",
+                    "type": "function",
+                    "function": {"name": entry["name"], "arguments": entry["arguments"] or "{}"},
+                }
+                for index, entry in sorted(calls.items())
+                if entry["name"]
+            ]
+        )
         return {
             "role": "assistant",
             "content": "".join(content_parts),
@@ -700,6 +724,85 @@ def _assistant_message(message: dict[str, Any]) -> dict[str, Any]:
     if message.get("tool_calls"):
         out["tool_calls"] = message["tool_calls"]
     return out
+
+
+def sanitize_history(messages: list[dict[str, Any]]) -> None:
+    """Repariert ungueltige Tool-Call-Argumente in einem Verlauf, in place.
+
+    Aufteilen geht hier nicht mehr -- die Tool-Antworten sind schon
+    zugeordnet. Also: erstes gueltiges Objekt behalten, sonst `{}`.
+    """
+    for message in messages:
+        for call in message.get("tool_calls") or []:
+            function = call.get("function")
+            if not isinstance(function, dict):
+                continue
+            raw = str(function.get("arguments") or "{}")
+            try:
+                json.loads(raw)
+                continue
+            except json.JSONDecodeError:
+                pass
+            pieces = split_json_objects(raw)
+            function["arguments"] = pieces[0] if pieces else "{}"
+
+
+def split_json_objects(raw: str) -> list[str]:
+    """Zerlegt aneinandergeklebte JSON-Objekte in einzelne.
+
+    Ollama streamt Tool-Calls mit jeweils kompletten Argumenten, aber alle
+    unter Index 0 -- naiv aufsummiert entsteht `{"a":1}{"b":2}`. Und manche
+    Modelle haengen selbst Text hinter ihr JSON. Beides laesst LiteLLM beim
+    NAECHSTEN Aufruf mit "Extra data" sterben, weil es die Argumente aus dem
+    Verlauf zurueckparst.
+    """
+    decoder = json.JSONDecoder()
+    objects: list[str] = []
+    index = 0
+    raw = raw.strip()
+    while index < len(raw):
+        while index < len(raw) and raw[index] in " \t\r\n,":
+            index += 1
+        if index >= len(raw):
+            break
+        try:
+            value, end = decoder.raw_decode(raw, index)
+        except json.JSONDecodeError:
+            break
+        if isinstance(value, dict):
+            objects.append(json.dumps(value, ensure_ascii=False))
+        index = end
+    return objects
+
+
+def repair_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sorgt dafuer, dass jeder Tool-Call GUELTIGE JSON-Argumente traegt.
+
+    Aneinandergeklebte Objekte werden zu eigenen Aufrufen aufgeteilt
+    (Duplikate fallen weg), Unlesbares wird zu `{}` -- besser ein leerer
+    Aufruf, den das Werkzeug sauber ablehnt, als ein Verlauf, den die API
+    fuer immer zurueckweist.
+    """
+    repaired: list[dict[str, Any]] = []
+    for call in tool_calls:
+        function = call.get("function", {})
+        raw = str(function.get("arguments") or "{}")
+        pieces = split_json_objects(raw)
+        if not pieces:
+            pieces = ["{}"]
+        seen: set[str] = set()
+        for piece_index, piece in enumerate(pieces):
+            if piece in seen:
+                continue  # Ollama wiederholt Chunks gelegentlich komplett
+            seen.add(piece)
+            entry = {
+                "id": call.get("id", "call_0") if piece_index == 0 else
+                f"{call.get('id', 'call_0')}_{piece_index}",
+                "type": "function",
+                "function": {"name": function.get("name", ""), "arguments": piece},
+            }
+            repaired.append(entry)
+    return repaired
 
 
 def _parse_spec_json(raw: str) -> dict[str, str]:

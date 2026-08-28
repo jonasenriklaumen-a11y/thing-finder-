@@ -176,27 +176,28 @@ def _run_one(
                 result.summary = content.strip()
                 break
 
+            from scoutr.agent import repair_tool_calls
+
+            call_dicts = repair_tool_calls(
+                [
+                    {
+                        "id": getattr(call, "id", None) or f"sub_{index}",
+                        "type": "function",
+                        "function": {
+                            "name": getattr(call.function, "name", "") or "",
+                            "arguments": getattr(call.function, "arguments", "") or "{}",
+                        },
+                    }
+                    for index, call in enumerate(calls)
+                ]
+            )
             messages.append(
-                {
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": [
-                        {
-                            "id": getattr(call, "id", None) or f"sub_{index}",
-                            "type": "function",
-                            "function": {
-                                "name": getattr(call.function, "name", "") or "",
-                                "arguments": getattr(call.function, "arguments", "") or "{}",
-                            },
-                        }
-                        for index, call in enumerate(calls)
-                    ],
-                }
+                {"role": "assistant", "content": content, "tool_calls": call_dicts}
             )
 
             answered: set[str] = set()
-            for index, call in enumerate(calls):
-                call_id = getattr(call, "id", None) or f"sub_{index}"
+            for call in call_dicts:
+                call_id = call["id"]
                 if used >= budget:
                     # Auch abgeschnittene Aufrufe brauchen eine Antwort --
                     # ein Tool-Call ohne Antwort macht den Verlauf ungueltig
@@ -205,7 +206,7 @@ def _run_one(
                         {
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "name": getattr(call.function, "name", "") or "",
+                            "name": call["function"]["name"],
                             "content": json.dumps(
                                 {"error": "Werkzeug-Budget aufgebraucht."},
                                 ensure_ascii=False,
@@ -215,8 +216,8 @@ def _run_one(
                     continue
                 answered.add(call_id)
                 used += 1
-                name = getattr(call.function, "name", "") or ""
-                raw = getattr(call.function, "arguments", "") or "{}"
+                name = call["function"]["name"]
+                raw = call["function"]["arguments"] or "{}"
                 try:
                     arguments = json.loads(raw)
                 except json.JSONDecodeError:

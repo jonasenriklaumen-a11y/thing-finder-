@@ -80,8 +80,17 @@ DEFAULT_MODEL = LOCAL_MODELS[0]
 
 #: Reine Vision-Modelle, falls das Hauptmodell nichts sieht. Sie brauchen
 #: KEIN Tool-Calling: sie beschreiben nur, recherchiert wird danach.
+#: Achtung Namensfalle: das offizielle `gemma3` beherrscht in Ollama Vision,
+#: aber KEIN Tool-Calling -- es taugt nur als Vision-Modell, nie als
+#: Hauptmodell. Erst `gemma4` bringt beides mit.
 VISION_MODELS: tuple[LocalModel, ...] = (
+    LocalModel(
+        "gemma3:4b", 3.3, 6, "Offizielles Google-Modell, sieht gut", tools=False, vision=True
+    ),
     LocalModel("qwen3-vl:4b", 3.3, 6, "Klein und aktuell", tools=False, vision=True),
+    LocalModel(
+        "gemma3:12b", 8.1, 12, "Groessere offizielle Gemma-Variante", tools=False, vision=True
+    ),
     LocalModel(
         "llava:7b", 4.7, 8, "Bewaehrt, versteht Fotos und Schilder", tools=False, vision=True
     ),

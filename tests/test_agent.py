@@ -665,3 +665,122 @@ def test_planner_context_hides_internal_messages(
     assert PRE_RESEARCH_PREFIX not in context
     assert "Budget" not in context
     assert "[Ortsfilter:" not in context
+
+
+# ---------------------------------------------------------------------------
+# Kaputtes Tool-Call-JSON (Ollama/Gemma) -- Regression zu "Extra data"
+# ---------------------------------------------------------------------------
+def test_split_json_objects() -> None:
+    from scoutr.agent import split_json_objects
+
+    assert split_json_objects('{"a": 1}') == ['{"a": 1}']
+    assert split_json_objects('{"a": 1}{"b": 2}') == ['{"a": 1}', '{"b": 2}']
+    assert split_json_objects('{"a": 1} , {"b": 2}') == ['{"a": 1}', '{"b": 2}']
+    assert split_json_objects('{"q": "x"} und noch Text dahinter') == ['{"q": "x"}']
+    assert split_json_objects("voelliger Unsinn") == []
+    assert split_json_objects("") == []
+
+
+def test_repair_splits_concatenated_calls() -> None:
+    """Zwei zusammengeklebte Objekte werden zwei eigene Aufrufe."""
+    from scoutr.agent import repair_tool_calls
+
+    repaired = repair_tool_calls(
+        [
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "web_search", "arguments": '{"query":"a"}{"query":"b"}'},
+            }
+        ]
+    )
+    assert len(repaired) == 2
+    assert [json.loads(c["function"]["arguments"]) for c in repaired] == [
+        {"query": "a"},
+        {"query": "b"},
+    ]
+    # IDs bleiben eindeutig.
+    assert len({c["id"] for c in repaired}) == 2
+
+
+def test_repair_dedupes_repeated_chunks_and_fixes_garbage() -> None:
+    from scoutr.agent import repair_tool_calls
+
+    repaired = repair_tool_calls(
+        [
+            {"id": "c1", "type": "function",
+             "function": {"name": "f", "arguments": '{"q": "x"}{"q": "x"}'}},
+            {"id": "c2", "type": "function",
+             "function": {"name": "g", "arguments": "kein json"}},
+        ]
+    )
+    assert len(repaired) == 2
+    assert repaired[0]["function"]["arguments"] == '{"q": "x"}'
+    assert repaired[1]["function"]["arguments"] == "{}"
+
+
+def test_stream_with_ollama_style_index_zero_calls(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ollama meldet jeden Tool-Call unter Index 0 mit kompletten Argumenten.
+
+    Vorher wurden die Argumente konkateniert -- der Verlauf war danach fuer
+    jede weitere Anfrage unbrauchbar ("Extra data" beim Zurueckparsen).
+    """
+    chunks = []
+    for number, args in enumerate(('{"query": "a"}', '{"query": "b"}')):
+        call = SimpleNamespace(
+            index=0,
+            id=f"ollama_{number}",
+            function=SimpleNamespace(name="web_search", arguments=args),
+        )
+        delta = SimpleNamespace(content=None, tool_calls=[call])
+        chunks.append(SimpleNamespace(choices=[SimpleNamespace(delta=delta)]))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    message = agent._consume_stream(iter(chunks))
+    assert len(message["tool_calls"]) == 2
+    for call in message["tool_calls"]:
+        json.loads(call["function"]["arguments"])
+
+
+def test_poisoned_history_is_healed_before_sending(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Altbestand mit kaputten Argumenten darf die Sitzung nicht mehr toeten."""
+    sent: list[list[dict[str, Any]]] = []
+
+    def completion(**kwargs: Any):
+        sent.append(kwargs["messages"])
+        return _message(content="geht")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.messages.append(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "alt",
+                    "type": "function",
+                    "function": {"name": "web_search", "arguments": '{"q":"a"}{"q":"b"}'},
+                }
+            ],
+        }
+    )
+    agent.messages.append({"role": "tool", "tool_call_id": "alt", "name": "web_search",
+                           "content": "{}"})
+    result = agent.ask("Neue Frage", stream=False)
+    assert result.answer == "geht"
+    for message in sent[0]:
+        for call in message.get("tool_calls") or []:
+            json.loads(call["function"]["arguments"])
+
+
+def test_json_errors_are_not_retried_as_connection_problems() -> None:
+    from scoutr.agent import is_transient
+
+    assert not is_transient("APIConnectionError: Extra data: line 1 column 73 (char 72)")
+    assert not is_transient("json.decoder.JSONDecodeError: Expecting value")
+    assert is_transient("APIConnectionError: Connection refused")

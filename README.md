@@ -644,9 +644,15 @@ Modell im Speicher liegt. Stand August 2026:
 | Modell | ca. Größe | ab VRAM |
 |---|---|---|
 | `moondream` | 1,7 GB | 3 GB |
+| `gemma3:4b` | 3,3 GB | 6 GB |
 | `qwen3-vl:4b` | 3,3 GB | 6 GB |
 | `llava:7b` | 4,7 GB | 8 GB |
 | `minicpm-v` | 5,5 GB | 8 GB |
+| `gemma3:12b` | 8,1 GB | 12 GB |
+
+> **Namensfalle:** Das offizielle `gemma3` kann in Ollama Bilder ansehen, aber **keine
+> Werkzeuge aufrufen** — als Hauptmodell ist es damit unbrauchbar, scoutr führt es
+> deshalb nur bei den Vision-Modellen. Erst `gemma4` bringt beides mit.
 
 scoutr liest den VRAM per `nvidia-smi` aus und schlägt danach vor — ohne GPU rechnet er
 mit 70 % des Arbeitsspeichers, weil auf der CPU nicht alles nutzbar ist. Passt ein
