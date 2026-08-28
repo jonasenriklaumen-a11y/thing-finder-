@@ -74,6 +74,39 @@ class ChatRenderer:
         self._skips.append(f"{_domain(payload.get('url', ''))} uebersprungen: {reason}")
         self._update_reading()
 
+    def _on_subagents(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        tasks = payload.get("tasks", [])
+        self.console.print(
+            Text.assemble(("  [Teile] ", "bold magenta"), (f"{len(tasks)} Teilfragen", "white"))
+        )
+        for task in tasks:
+            self.console.print(f"          [dim]{str(task)[:88]}[/dim]")
+
+    def _on_subagent_done(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        task = str(payload.get("task", ""))[:60]
+        if payload.get("error"):
+            self.console.print(f"  [yellow][Teil][/yellow] {task} [red](fehlgeschlagen)[/red]")
+        else:
+            calls = payload.get("tool_calls", 0)
+            self.console.print(
+                Text.assemble(
+                    ("  [Fertig] ", "bold green"),
+                    (task, "white"),
+                    (f"  ({calls} Aufrufe)", "dim"),
+                )
+            )
+
+    def _on_retry(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        detail = payload.get("detail", "")
+        suffix = f" -- {detail}" if detail else ""
+        self.console.print(
+            f"  [yellow][Neuer Versuch {payload.get('attempt')}][/yellow] "
+            f"{payload.get('reason', '')}{suffix}"
+        )
+
     def _on_error(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         self.console.print(f"  [red][Fehler][/red] {payload.get('message', '')}")

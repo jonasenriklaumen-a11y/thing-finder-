@@ -202,6 +202,16 @@ class Settings:
     lang: str = "de"
     country: str = "de"
     max_tool_calls: int = 20
+    #: Wie oft ein LLM-Aufruf bei transienten Fehlern wiederholt wird.
+    llm_retries: int = 3
+    #: Wie viele Zeichen ein einzelnes Werkzeug-Ergebnis im Verlauf belegt.
+    max_tool_chars: int = 8000
+    #: So viele der juengsten Werkzeug-Ergebnisse bleiben ungekuerzt.
+    keep_full_results: int = 4
+    #: Obergrenze fuer parallele Subagenten.
+    max_subagents: int = 4
+    #: Werkzeug-Budget je Subagent.
+    subagent_budget: int = 6
     fetch_timeout: float = 15.0
     cache_ttl_hours: int = 24
     max_results_default: int = 8
@@ -275,6 +285,11 @@ def get_settings() -> Settings:
         lang=_env_str("SCOUTR_LANG", "de"),
         country=_env_str("SCOUTR_COUNTRY", "de"),
         max_tool_calls=_env_int("SCOUTR_MAX_TOOL_CALLS", 20),
+        llm_retries=_env_int("SCOUTR_LLM_RETRIES", 3),
+        max_tool_chars=_env_int("SCOUTR_MAX_TOOL_CHARS", 8000),
+        keep_full_results=_env_int("SCOUTR_KEEP_FULL_RESULTS", 4),
+        max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 4),
+        subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),
         cache_ttl_hours=_env_int("SCOUTR_CACHE_TTL_HOURS", 24),
         enable_playwright=_env_bool("SCOUTR_ENABLE_PLAYWRIGHT", True),

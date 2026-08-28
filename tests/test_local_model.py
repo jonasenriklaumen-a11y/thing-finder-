@@ -38,7 +38,7 @@ def test_all_models_use_the_tool_calling_prefix() -> None:
 def test_recommendation_fits_the_memory() -> None:
     assert lm.recommend_model(4).needs_gb <= 4
     assert lm.recommend_model(8).needs_gb <= 8
-    assert lm.recommend_model(64).name == "qwen2.5:32b"
+    assert lm.recommend_model(64).needs_gb <= 64
 
 
 def test_tiny_machines_get_the_smallest_model() -> None:
@@ -53,7 +53,8 @@ def test_recommendation_without_memory_info() -> None:
 
 def test_env_values() -> None:
     values = lm.env_values(lm.LOCAL_MODELS[0])
-    assert values["SCOUTR_MODEL"] == "ollama_chat/qwen2.5:7b"
+    assert values["SCOUTR_MODEL"] == lm.LOCAL_MODELS[0].model_id
+    assert values["SCOUTR_MODEL"].startswith("ollama_chat/")
     assert values["SCOUTR_API_BASE"] == "http://localhost:11434"
 
 
@@ -240,6 +241,92 @@ def test_vision_recommendation_fits_the_memory() -> None:
     assert lm.recommend_vision_model(4).needs_gb <= 4
     assert lm.recommend_vision_model(64).needs_gb <= 64
     assert lm.recommend_vision_model(2).name == "moondream"
+
+
+# ---------------------------------------------------------------------------
+# Ein Modell fuer alles
+# ---------------------------------------------------------------------------
+def test_dual_models_can_do_both() -> None:
+    for model in lm.DUAL_MODELS:
+        assert model.tools and model.vision
+        assert model.does_everything
+
+
+def test_text_models_do_not_claim_vision() -> None:
+    for model in lm.LOCAL_MODELS:
+        assert model.tools and not model.vision
+
+
+def test_vision_models_do_not_claim_tools() -> None:
+    """Sie beschreiben nur -- recherchiert wird mit dem Hauptmodell."""
+    for model in lm.VISION_MODELS:
+        assert model.vision and not model.tools
+
+
+def test_a_12gb_card_gets_one_model_for_everything() -> None:
+    """Der Fall des Nutzers: RTX 4070 mit 12 GB."""
+    main, vision, why = lm.plan_setup(12)
+    assert main.does_everything
+    assert vision is None
+    assert main.size_gb <= 12
+    assert "ein Modell reicht" in why
+
+
+@pytest.mark.parametrize("vram", [24, 16, 12, 10, 8, 6])
+def test_the_plan_always_fits(vram: int) -> None:
+    main, vision, _ = lm.plan_setup(vram)
+    assert main.needs_gb <= vram
+    if vision is not None:
+        assert vision.needs_gb <= vram
+
+
+def test_tiny_cards_fall_back_to_two_small_models() -> None:
+    main, vision, why = lm.plan_setup(4)
+    assert not main.does_everything
+    assert vision is not None
+    assert "abwechselnd" in why or "passen zusammen" in why
+
+
+def test_fits_together() -> None:
+    small = lm.LocalModel("a", 2.0, 4, "")
+    large = lm.LocalModel("b", 9.0, 12, "")
+    assert lm.fits_together(small, small, 8)
+    assert not lm.fits_together(large, large, 12)
+    assert not lm.fits_together(small, small, None)
+
+
+def test_vram_is_preferred_over_ram(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Was zaehlt, ist der VRAM -- im RAM waere alles gross genug."""
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
+    monkeypatch.setattr(lm, "total_memory_gb", lambda: 64.0)
+    assert lm.usable_memory_gb() == 12.0
+
+
+def test_without_a_gpu_only_part_of_the_ram_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: None)
+    monkeypatch.setattr(lm, "total_memory_gb", lambda: 16.0)
+    assert lm.usable_memory_gb() == 11.2
+
+
+def test_gpu_vram_is_parsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lm.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr(
+        lm.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespaceRun(stdout="12282\n8192\n"),
+    )
+    assert lm.gpu_vram_gb() == 12.0
+
+
+class SimpleNamespaceRun:
+    def __init__(self, stdout: str) -> None:
+        self.stdout = stdout
+        self.returncode = 0
+
+
+def test_without_nvidia_smi_there_is_no_vram(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lm.shutil, "which", lambda name: None)
+    assert lm.gpu_vram_gb() is None
 
 
 def test_vision_env_values() -> None:

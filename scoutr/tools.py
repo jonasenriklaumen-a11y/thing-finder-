@@ -23,6 +23,37 @@ EventHook = Callable[[str, dict[str, Any]], None]
 #: LLM-Fallback fuer Specs: (seitentext, url) -> {"CPU": "...", ...}
 SpecExtractor = Callable[[str, str], dict[str, str]]
 
+#: Drittes Werkzeug, das nur der Hauptagent bekommt -- Subagenten duerfen
+#: keine weiteren Subagenten starten.
+SUBAGENT_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "research_subtasks",
+        "description": (
+            "Gibt mehrere unabhaengige Teilfragen an Rechercheassistenten ab, die "
+            "parallel suchen und lesen. Nutze das, wenn die Anfrage in Teile zerfaellt, "
+            "die sich getrennt beantworten lassen -- etwa mehrere Kandidaten, mehrere "
+            "Orte oder mehrere Kriterien. Jede Teilfrage muss fuer sich verstaendlich "
+            "sein und den noetigen Zusammenhang selbst mitbringen (Ort, Produkt, "
+            "Kriterium). Du bekommst je Teilfrage eine Zusammenfassung mit Quellen "
+            "zurueck und fasst daraus die Antwort zusammen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Zwei bis vier eigenstaendige Teilfragen, jeweils ein ganzer Satz."
+                    ),
+                }
+            },
+            "required": ["tasks"],
+        },
+    },
+}
+
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -117,6 +148,8 @@ class Toolbox:
         self.spec_extractor = spec_extractor
         self.rules = load_rules()
         self.stats = ToolStats()
+        #: Setzt der Agent, wenn Subagenten erlaubt sind.
+        self.subagent_runner: Callable[[list[str]], list[dict[str, Any]]] | None = None
         self._fetcher = fetcher or Fetcher(
             user_agent=settings.user_agent,
             timeout=settings.fetch_timeout,
@@ -278,7 +311,22 @@ class Toolbox:
             )
         if name == "fetch_page":
             return self.fetch_page(url=str(arguments.get("url", "")))
+        if name == "research_subtasks":
+            return self.research_subtasks(arguments.get("tasks") or [])
         return {"error": f"Unbekanntes Werkzeug '{name}'."}
+
+    # -- Werkzeug 3 (nur fuer den Hauptagenten) ---------------------------
+    def research_subtasks(self, tasks: Any) -> dict[str, Any]:
+        """Gibt Teilfragen an parallele Subagenten ab."""
+        if self.subagent_runner is None:
+            return {"error": "Subagenten sind in dieser Sitzung nicht aktiv."}
+        if not isinstance(tasks, list):
+            return {"error": "`tasks` muss eine Liste von Teilfragen sein."}
+        clean = [str(task).strip() for task in tasks if str(task).strip()]
+        if not clean:
+            return {"error": "Keine Teilfragen angegeben."}
+        results = self.subagent_runner(clean)
+        return {"results": results}
 
 
 def looks_like_product_page(html: str, url: str) -> bool:

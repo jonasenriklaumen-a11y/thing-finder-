@@ -572,6 +572,7 @@ def _pick_local_model(models, recommended, already: set[str], label: str) -> str
     table.add_column(" ", style="cyan", no_wrap=True)
     table.add_column(label)
     table.add_column("Groesse", justify="right")
+    table.add_column("Kann")
     table.add_column("")
     for index, candidate in enumerate(models, start=1):
         marker = []
@@ -579,10 +580,16 @@ def _pick_local_model(models, recommended, already: set[str], label: str) -> str
             marker.append("[green]geladen[/green]")
         if candidate.name == recommended.name:
             marker.append("[cyan]empfohlen[/cyan]")
+        can = []
+        if candidate.tools:
+            can.append("Suche")
+        if candidate.vision:
+            can.append("Bilder")
         table.add_row(
             str(index),
             candidate.name,
             f"~{candidate.size_gb} GB",
+            "+".join(can),
             f"{candidate.note} {' '.join(marker)}".strip(),
         )
     console.print(table)
@@ -617,7 +624,9 @@ def _pull_if_needed(name: str, already: set[str]) -> bool:
     return True
 
 
-def _run_vision_setup(model_name: str = "", assume_yes: bool = False) -> str:
+def _run_vision_setup(
+    model_name: str = "", assume_yes: bool = False, main_can_see: bool = False
+) -> str:
     """Richtet ein lokales Vision-Modell ein. Gibt die Modell-ID zurueck, sonst "".
 
     Vision-Modelle brauchen kein Tool-Calling -- sie beschreiben nur, was auf
@@ -626,6 +635,12 @@ def _run_vision_setup(model_name: str = "", assume_yes: bool = False) -> str:
     from scoutr import local_model as lm
 
     console.print("\n[bold]5. Vision-Modell[/bold] [dim](fuer scoutr --image und /image)[/dim]")
+    if main_can_see:
+        console.print(
+            "  [green]Das Hauptmodell kann selbst Bilder ansehen[/green] -- "
+            "kein zweites Modell noetig."
+        )
+        return ""
     if not (model_name or assume_yes) and not typer.confirm(
         "  Auch Bilder als Eingabe nutzen?", default=True
     ):
@@ -703,18 +718,26 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
     # -- 3. Modell waehlen -------------------------------------------------
     console.print("\n[bold]3. Modell[/bold]")
     memory = lm.total_memory_gb()
+    vram = lm.gpu_vram_gb()
     gpu = lm.gpu_hint()
-    if memory:
-        console.print(f"  [dim]Arbeitsspeicher: {memory} GB[/dim]")
     if gpu:
         console.print(f"  [dim]GPU: {gpu}[/dim]")
+    if memory:
+        console.print(f"  [dim]Arbeitsspeicher: {memory} GB[/dim]")
+    budget = lm.usable_memory_gb()
+    if budget:
+        quelle = "VRAM" if vram else "Arbeitsspeicher, ohne GPU"
+        console.print(f"  [dim]Nutzbar fuer Modelle: {budget} GB ({quelle})[/dim]")
 
     already = set(lm.installed_models())
     if model_name:
         chosen = model_name
     else:
-        recommended = lm.recommend_model(memory)
-        chosen = _pick_local_model(lm.LOCAL_MODELS, recommended, already, "Modell")
+        main, _, why = lm.plan_setup(budget)
+        console.print(f"  [cyan]{why}[/cyan]")
+        # Modelle, die auch Bilder koennen, zuerst -- sie sparen ein zweites.
+        candidates = tuple(lm.DUAL_MODELS) + tuple(lm.LOCAL_MODELS)
+        chosen = _pick_local_model(candidates, main, already, "Modell")
 
     # -- 4. Laden ----------------------------------------------------------
     if not _pull_if_needed(chosen, already):
@@ -778,10 +801,21 @@ def install_model_command(
         # Mit --yes wird nicht gefragt -- dann laden wir ein Vision-Modell nur,
         # wenn es ausdruecklich benannt wurde. Ungefragt mehrere Gigabyte
         # herunterzuladen waere nicht in Ordnung.
-        if vision_model or (vision and not yes):
+        # Kann das Hauptmodell selbst sehen, sparen wir das zweite Modell --
+        # auf knappen Karten macht das den Unterschied.
+        from scoutr.local_model import DUAL_MODELS
+
+        bare = model_id.split("/", 1)[-1]
+        main_can_see = any(candidate.name == bare for candidate in DUAL_MODELS)
+        if main_can_see:
+            values.update(vision_env_values(model_id))
+
+        if not main_can_see and (vision_model or (vision and not yes)):
             vision_id = _run_vision_setup(vision_model, assume_yes=yes)
             if vision_id:
                 values.update(vision_env_values(vision_id))
+        elif main_can_see:
+            _run_vision_setup(assume_yes=True, main_can_see=True)
 
     target = env_file or find_env_file() or DEFAULT_ENV_PATH
     written = write_env_file(values, target)

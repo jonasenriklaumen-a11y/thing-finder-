@@ -163,6 +163,31 @@ Pro Nutzeranfrage:
 4. Es fasst zusammen, bewertet gegen die Kriterien des Nutzers und nennt zu jeder Angabe
    die Quelle.
 
+### Subagenten: Teilfragen parallel
+
+Zerfällt eine Anfrage in unabhängige Teile, darf das Hauptmodell sie abgeben, statt alles
+selbst nacheinander abzuarbeiten:
+
+```
+> vergleiche das Lenovo Yoga Pro 7, das ThinkPad X1 und das Zenbook 14
+
+  [Teile] 3 Teilfragen
+          Specs und Straßenpreis des Lenovo Yoga Pro 7 (14", Ryzen 7)
+          Specs und Straßenpreis des ThinkPad X1 Carbon Gen 12
+          Specs und Straßenpreis des Asus Zenbook 14 OLED
+  [Fertig] Specs und Straßenpreis des Lenovo Yoga Pro 7   (4 Aufrufe)
+  ...
+```
+
+Jeder Subagent hat dieselben zwei Werkzeuge, ein eigenes kleines Budget (Default 6
+Aufrufe) und liefert eine knappe Zusammenfassung mit Quellen zurück. Zwei laufen
+gleichzeitig — bei lokalen Modellen bringt mehr wenig, weil die GPU ohnehin nacheinander
+rechnet. Der Hauptverlauf bleibt dadurch kurz, was bei kleinen Kontextfenstern den
+Unterschied macht.
+
+Abschalten mit `SCOUTR_MAX_SUBAGENTS=0` — dann bleiben es die ursprünglichen zwei
+Werkzeuge.
+
 **Grenzen:** maximal 20 Tool-Calls pro Anfrage, dann wird der Zwischenstand ausgegeben.
 Was nicht gefunden wurde, wird als „nicht gefunden" gekennzeichnet — niemals geraten.
 
@@ -360,6 +385,24 @@ Testen lässt sich jedes Backend ohne LLM:
 scoutr search "cafés mönchengladbach" -n 5
 ```
 
+## Stabilität
+
+Lokale Modelle scheitern anders als Cloud-Modelle. scoutr fängt die drei häufigsten Fälle
+ab:
+
+* **Kontextüberlauf.** Zwanzig Werkzeug-Ergebnisse mit je mehreren Kilobyte sprengen ein
+  8k-Fenster sicher. scoutr kürzt ältere Ausgaben im Verlauf auf einen Platzhalter und
+  behält nur die jüngsten vollständig (`SCOUTR_KEEP_FULL_RESULTS`, Default 4). Einzelne
+  Ergebnisse sind auf `SCOUTR_MAX_TOOL_CHARS` (Default 8000) begrenzt.
+* **Abgestürzter Runner.** Bei `model runner has unexpectedly stopped` entlädt scoutr alle
+  Modelle und versucht es erneut, statt den Durchlauf zu verlieren.
+* **Wackelige Verbindung.** Timeouts, 502/503 und Rate-Limits werden bis zu
+  `SCOUTR_LLM_RETRIES` mal wiederholt (Default 3, mit wachsender Wartezeit). Ein falscher
+  API-Key wird *nicht* wiederholt — das würde nur Zeit kosten.
+
+Dazu: Ein Werkzeug, das eine Ausnahme wirft, beendet den Durchlauf nicht mehr, sondern
+meldet den Fehler an das Modell, das dann eine andere Quelle nimmt.
+
 ## Verhalten beim Seitenabruf
 
 * `robots.txt` wird respektiert (einmal je Origin geholt und zwischengespeichert)
@@ -491,6 +534,11 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_LOCATION` | Standard-Ortsfilter | — |
 | `SCOUTR_LANG` / `SCOUTR_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
 | `SCOUTR_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
+| `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `4` |
+| `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
+| `SCOUTR_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
+| `SCOUTR_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
+| `SCOUTR_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |
 | `SCOUTR_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
 | `SCOUTR_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
 | `SCOUTR_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
@@ -539,24 +587,39 @@ Mit `--yes` läuft alles ohne Rückfragen — ein Vision-Modell wird dann nur ge
 du es mit `--vision-model` benennst. Mehrere Gigabyte ungefragt herunterzuladen wäre
 nicht in Ordnung.
 
-| Modell | ca. Größe | ab RAM |
+**Ein Modell für alles** (Recherche *und* Bilder) — die sparsamste Variante, weil nur ein
+Modell im Speicher liegt. Stand August 2026:
+
+| Modell | ca. Größe | ab VRAM | kann |
+|---|---|---|---|
+| `qwen3-vl:4b` | 3,3 GB | 6 GB | Suche + Bilder |
+| `gemma4:e4b` | 3,5 GB | 6 GB | Suche + Bilder |
+| `qwen3-vl:8b` | 6,1 GB | 12 GB | Suche + Bilder |
+| `gemma4:12b` | 6,6 GB | 10 GB | Suche + Bilder |
+| `gemma4:26b` | 16,0 GB | 24 GB | Suche + Bilder |
+
+**Nur Recherche** (stärker im Suchen, sehen aber nichts):
+
+| Modell | ca. Größe | ab VRAM |
 |---|---|---|
 | `qwen2.5:3b` | 1,9 GB | 4 GB |
 | `qwen2.5:7b` | 4,7 GB | 8 GB |
 | `llama3.1:8b` | 4,9 GB | 8 GB |
+| `qwen3:8b` | 5,2 GB | 8 GB |
 | `qwen2.5:14b` | 9,0 GB | 16 GB |
-| `qwen2.5:32b` | 20,0 GB | 32 GB |
 
-**Vision-Modelle** (für `--image` und `/image`) — sie brauchen *kein* Tool-Calling, sie
-beschreiben nur; die Recherche danach macht das Hauptmodell:
+**Nur Bilder** (brauchen kein Tool-Calling, beschreiben nur):
 
-| Modell | ca. Größe | ab RAM |
+| Modell | ca. Größe | ab VRAM |
 |---|---|---|
-| `moondream` | 1,7 GB | 4 GB |
+| `moondream` | 1,7 GB | 3 GB |
+| `qwen3-vl:4b` | 3,3 GB | 6 GB |
 | `llava:7b` | 4,7 GB | 8 GB |
 | `minicpm-v` | 5,5 GB | 8 GB |
-| `llama3.2-vision:11b` | 7,9 GB | 12 GB |
-| `llava:13b` | 8,0 GB | 12 GB |
+
+scoutr liest den VRAM per `nvidia-smi` aus und schlägt danach vor — ohne GPU rechnet er
+mit 70 % des Arbeitsspeichers, weil auf der CPU nicht alles nutzbar ist. Passt ein
+Modell, das beides kann, wird kein zweites geladen.
 
 Jedes andere Ollama-Modell mit Werkzeug-Unterstützung geht auch — `--model` nimmt jeden
 Namen aus dem [Ollama-Katalog](https://ollama.com/library).
@@ -648,7 +711,8 @@ scoutr/
   extract.py     # Produktdaten aus JSON-LD, OG, Microdata, Tabellen
   render.py      # Live-Anzeige, Produktkarten, Bilder
   export.py      # HTML / Markdown / CSV
-  local_model.py # lokales Modell per Ollama einrichten
+  subagents.py   # parallele Rechercheaufträge
+  local_model.py # lokale Modelle per Ollama einrichten
   cache.py       # SQLite-Cache und Verlauf
   config.py      # Settings aus .env
   selectors.yaml # Selektor- und Marker-Listen, ohne Code erweiterbar

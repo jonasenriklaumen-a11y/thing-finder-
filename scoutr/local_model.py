@@ -37,38 +37,56 @@ class LocalModel:
     name: str
     #: Ungefaehre Downloadgroesse in GB -- der genaue Wert kommt nach dem Laden.
     size_gb: float
-    #: Empfohlener freier Arbeitsspeicher in GB.
+    #: Empfohlener freier Speicher in GB (VRAM, sonst Arbeitsspeicher).
     needs_gb: int
     note: str
+    #: Kann das Modell Werkzeuge aufrufen? Ohne das kann es nicht recherchieren.
+    tools: bool = True
+    #: Kann es Bilder ansehen?
+    vision: bool = False
 
     @property
     def model_id(self) -> str:
         """Die ID, wie sie in die `.env` gehoert."""
         return f"{MODEL_PREFIX}/{self.name}"
 
+    @property
+    def does_everything(self) -> bool:
+        """Deckt dieses Modell Recherche UND Bilder ab?"""
+        return self.tools and self.vision
 
-#: Auswahl an Modellen, die laut Ollama-Katalog Tool-Calling koennen.
-#: Groessenangaben sind Richtwerte; jedes andere Ollama-Modell mit
-#: Werkzeug-Unterstuetzung laesst sich per `--model` genauso einrichten.
+
+#: Modelle, die BEIDES koennen: Werkzeuge aufrufen und Bilder ansehen.
+#: Sie sind die sparsamste Loesung -- nur ein Modell im Speicher statt zwei.
+#: Stand August 2026, Groessen sind Richtwerte fuer die Q4-Quantisierung.
+DUAL_MODELS: tuple[LocalModel, ...] = (
+    LocalModel("gemma4:12b", 6.6, 10, "Vision + Werkzeuge, guter Allrounder", vision=True),
+    LocalModel("qwen3-vl:8b", 6.1, 12, "Vision + Werkzeuge, sehr langer Kontext", vision=True),
+    LocalModel("gemma4:e4b", 3.5, 6, "Kompakt, laeuft auch auf kleinen Karten", vision=True),
+    LocalModel("qwen3-vl:4b", 3.3, 6, "Kleinste Vision-Variante mit Werkzeugen", vision=True),
+    LocalModel("gemma4:26b", 16.0, 24, "Deutlich staerker, braucht eine grosse Karte", vision=True),
+)
+
+#: Reine Textmodelle -- staerker im Recherchieren, sehen aber nichts.
 LOCAL_MODELS: tuple[LocalModel, ...] = (
-    LocalModel("qwen2.5:7b", 4.7, 8, "Guter Kompromiss aus Tempo und Qualitaet"),
-    LocalModel("llama3.1:8b", 4.9, 8, "Bewaehrt, breit getestet"),
-    LocalModel("qwen2.5:14b", 9.0, 16, "Deutlich staerker, braucht mehr Speicher"),
-    LocalModel("qwen2.5:32b", 20.0, 32, "Fuer Rechner mit viel VRAM"),
+    LocalModel("qwen3:8b", 5.2, 8, "Sehr zuverlaessig beim Werkzeugaufruf"),
+    LocalModel("qwen2.5:7b", 4.7, 8, "Bewaehrt, guter Kompromiss"),
+    LocalModel("llama3.1:8b", 4.9, 8, "Breit getestet"),
+    LocalModel("qwen2.5:14b", 9.0, 16, "Staerker, braucht mehr Speicher"),
     LocalModel("qwen2.5:3b", 1.9, 4, "Notloesung fuer schwache Rechner"),
 )
 
 DEFAULT_MODEL = LOCAL_MODELS[0]
 
-#: Modelle, die Bilder beschreiben koennen -- fuer `scoutr --image` und
-#: `/image`. Sie brauchen KEIN Tool-Calling: sie schauen sich nur das Bild
-#: an, die Recherche danach macht das Hauptmodell.
+#: Reine Vision-Modelle, falls das Hauptmodell nichts sieht. Sie brauchen
+#: KEIN Tool-Calling: sie beschreiben nur, recherchiert wird danach.
 VISION_MODELS: tuple[LocalModel, ...] = (
-    LocalModel("llava:7b", 4.7, 8, "Bewaehrt, versteht Fotos und Schilder"),
-    LocalModel("minicpm-v", 5.5, 8, "Stark bei Text im Bild"),
-    LocalModel("llama3.2-vision:11b", 7.9, 12, "Genauer, braucht mehr Speicher"),
-    LocalModel("llava:13b", 8.0, 12, "Groessere llava-Variante"),
-    LocalModel("moondream", 1.7, 4, "Winzig, fuer schwache Rechner"),
+    LocalModel("qwen3-vl:4b", 3.3, 6, "Klein und aktuell", tools=False, vision=True),
+    LocalModel(
+        "llava:7b", 4.7, 8, "Bewaehrt, versteht Fotos und Schilder", tools=False, vision=True
+    ),
+    LocalModel("minicpm-v", 5.5, 8, "Stark bei Text im Bild", tools=False, vision=True),
+    LocalModel("moondream", 1.7, 3, "Winzig, fuer schwache Rechner", tools=False, vision=True),
 )
 
 DEFAULT_VISION_MODEL = VISION_MODELS[0]
@@ -410,6 +428,87 @@ def recommend_model(memory_gb: float | None = None) -> LocalModel:
 def recommend_vision_model(memory_gb: float | None = None) -> LocalModel:
     """Waehlt das groesste Vision-Modell, das in den Speicher passt."""
     return _recommend(VISION_MODELS, memory_gb)
+
+
+def recommend_dual_model(memory_gb: float | None = None) -> LocalModel:
+    """Waehlt das groesste Modell, das Werkzeuge UND Bilder beherrscht."""
+    return _recommend(DUAL_MODELS, memory_gb)
+
+
+def fits_together(main: LocalModel, vision: LocalModel, memory_gb: float | None) -> bool:
+    """Passen zwei Modelle gleichzeitig in den Speicher?
+
+    scoutr entlaedt zwar zwischen den Aufrufen, aber wer beides parallel
+    halten kann, spart bei jedem Bild das Nachladen.
+    """
+    if memory_gb is None:
+        return False
+    # Etwas Luft fuer Kontext und Grafikausgabe.
+    return main.size_gb + vision.size_gb + 1.5 <= memory_gb
+
+
+def plan_setup(memory_gb: float | None = None) -> tuple[LocalModel, LocalModel | None, str]:
+    """Schlaegt eine Aufteilung vor: (Hauptmodell, Vision-Modell, Begruendung).
+
+    Ist das Hauptmodell selbst bildfaehig, entfaellt das zweite Modell -- das
+    ist auf knappen Karten deutlich sparsamer.
+    """
+    available = memory_gb if memory_gb is not None else usable_memory_gb()
+
+    dual = recommend_dual_model(available)
+    if available is not None and dual.needs_gb <= available:
+        return dual, None, (
+            f"{dual.name} kann Werkzeuge und Bilder -- ein Modell reicht "
+            f"({dual.size_gb} GB statt zwei getrennter)."
+        )
+
+    main = recommend_model(available)
+    vision = recommend_vision_model(available)
+    if fits_together(main, vision, available):
+        return main, vision, (
+            f"{main.name} und {vision.name} passen zusammen in {available} GB."
+        )
+    return main, vision, (
+        "Beide Modelle passen nicht gleichzeitig hinein -- scoutr laedt sie "
+        "abwechselnd, das kostet bei jedem Bild ein paar Sekunden."
+    )
+
+
+def gpu_vram_gb() -> float | None:
+    """Groesster freier VRAM einer NVIDIA-Karte in GB, sonst `None`.
+
+    Fuer die Modellwahl zaehlt der VRAM, nicht der Arbeitsspeicher: laeuft ein
+    Modell nicht vollstaendig auf der Karte, wird es zaeh oder stirbt.
+    """
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        output = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sizes: list[float] = []
+    for line in output.stdout.strip().splitlines():
+        try:
+            sizes.append(int(line.strip()) / 1024)
+        except ValueError:
+            continue
+    return round(max(sizes), 1) if sizes else None
+
+
+def usable_memory_gb() -> float | None:
+    """Wonach sich die Modellwahl richtet: VRAM, sonst Arbeitsspeicher."""
+    vram = gpu_vram_gb()
+    if vram:
+        return vram
+    memory = total_memory_gb()
+    # Ohne GPU laeuft alles auf der CPU; dort ist nicht der ganze RAM nutzbar.
+    return round(memory * 0.7, 1) if memory else None
 
 
 def gpu_hint() -> str:

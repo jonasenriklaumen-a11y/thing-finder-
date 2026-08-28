@@ -8,6 +8,7 @@ Settings). Danach gibt er den Zwischenstand aus.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,7 +17,7 @@ from typing import Any
 from scoutr.cache import Cache
 from scoutr.config import Settings
 from scoutr.models import Product
-from scoutr.tools import TOOL_SCHEMAS, EventHook, Toolbox
+from scoutr.tools import SUBAGENT_SCHEMA, TOOL_SCHEMAS, EventHook, Toolbox
 
 SYSTEM_PROMPT = """\
 Du bist scoutr, ein Rechercheagent in der Kommandozeile. Du beantwortest Fragen \
@@ -95,6 +96,33 @@ TEXT:
 """
 
 
+#: Fehler, bei denen ein zweiter Versuch sinnvoll ist.
+TRANSIENT_MARKERS = (
+    "timeout",
+    "timed out",
+    "connection",
+    "connection error",
+    "temporarily unavailable",
+    "service unavailable",
+    "internal server error",
+    "502",
+    "503",
+    "504",
+    "overloaded",
+    "rate limit",
+    "too many requests",
+)
+
+#: Platzhalter fuer aeltere Werkzeug-Ergebnisse, die aus dem Verlauf fliegen.
+TRIMMED_NOTE = "[gekuerzt -- aeltere Werkzeug-Ausgabe, die Fakten stehen in der Antwort]"
+
+
+def is_transient(detail: str) -> bool:
+    """Lohnt sich bei diesem Fehler ein zweiter Versuch?"""
+    lowered = detail.lower()
+    return any(marker in lowered for marker in TRANSIENT_MARKERS)
+
+
 @dataclass
 class AgentResult:
     """Was ein Durchlauf ergeben hat."""
@@ -138,7 +166,35 @@ class Agent:
             on_event=on_event,
             spec_extractor=self.extract_specs,
         )
+        #: Subagenten sind nur fuer den Hauptagenten da -- sonst koennte sich
+        #: die Kette endlos fortsetzen.
+        self.use_subagents = settings.max_subagents > 0
+        if self.use_subagents:
+            self.toolbox.subagent_runner = self._run_subagents
         self.last_result: AgentResult | None = None
+
+    @property
+    def tools(self) -> list[dict[str, Any]]:
+        """Die Werkzeuge, die dieser Agent anbietet."""
+        if self.use_subagents:
+            return [*TOOL_SCHEMAS, SUBAGENT_SCHEMA]
+        return list(TOOL_SCHEMAS)
+
+    def _run_subagents(self, tasks: list[str]) -> list[dict[str, Any]]:
+        """Fuehrt Teilfragen parallel aus und zaehlt ihr Budget mit."""
+        from scoutr.subagents import run_subagents
+
+        results = run_subagents(
+            tasks,
+            self.settings,
+            cache=self.cache,
+            on_event=self.on_event,
+            parallel=2,
+        )
+        for result in results:
+            self.toolbox.stats.sources.extend(result.sources)
+            self.toolbox.stats.searches.extend(result.searches)
+        return [result.as_dict() for result in results]
 
     # -- Zustand ----------------------------------------------------------
     def close(self) -> None:
@@ -165,6 +221,45 @@ class Agent:
             self.on_event(event, payload)
 
     # -- LLM --------------------------------------------------------------
+    def _completion_with_retry(
+        self, messages: list[dict[str, Any]], *, stream: bool
+    ) -> dict[str, Any]:
+        """Ruft das LLM und wiederholt bei voruebergehenden Stoerungen.
+
+        Lokale Modelle sterben gern an Speichermangel; in dem Fall raeumen wir
+        auf und versuchen es noch einmal, statt den ganzen Durchlauf zu
+        verlieren.
+        """
+        attempts = max(1, self.settings.llm_retries)
+        last_error: Exception | None = None
+
+        for attempt in range(attempts):
+            try:
+                return self._completion(messages, stream=stream)
+            except Exception as exc:
+                last_error = exc
+                detail = f"{type(exc).__name__}: {exc}"
+                if attempt + 1 >= attempts:
+                    break
+
+                from scoutr.local_model import free_memory, resource_problem
+
+                if resource_problem(detail):
+                    freed = free_memory()
+                    self._emit(
+                        "retry",
+                        attempt=attempt + 1,
+                        reason="Speichermangel",
+                        detail=f"entladen: {', '.join(freed)}" if freed else "",
+                    )
+                elif is_transient(detail):
+                    self._emit("retry", attempt=attempt + 1, reason="Verbindung", detail="")
+                else:
+                    break  # echter Fehler -- Wiederholen hilft nicht
+                time.sleep(min(2**attempt, 8))
+
+        raise last_error if last_error else RuntimeError("LLM-Aufruf fehlgeschlagen")
+
     def _completion(self, messages: list[dict[str, Any]], *, stream: bool) -> dict[str, Any]:
         """Ein LLM-Aufruf; gibt eine Assistant-Nachricht als Dict zurueck."""
         import litellm
@@ -174,7 +269,7 @@ class Agent:
         response = litellm.completion(
             model=self.settings.model,
             messages=messages,
-            tools=TOOL_SCHEMAS,
+            tools=self.tools,
             tool_choice="auto",
             stream=stream,
             **kwargs,
@@ -257,7 +352,8 @@ class Agent:
                 break
 
             try:
-                message = self._completion(self.messages, stream=stream)
+                self._trim_history()
+                message = self._completion_with_retry(self.messages, stream=stream)
             except Exception as exc:  # LLM-Fehler duerfen den Chat nicht toeten
                 result.error = f"{type(exc).__name__}: {exc}"
                 self._emit("error", message=result.error)
@@ -296,6 +392,26 @@ class Agent:
 
         return self._finish(result)
 
+    def _trim_history(self) -> None:
+        """Haelt den Verlauf klein genug fuer kleine Kontextfenster.
+
+        Lokale Modelle haben oft nur ein paar tausend Token Platz. Zwanzig
+        Werkzeug-Ergebnisse mit je mehreren Kilobyte sprengen das sicher --
+        und ein ueberlaufender Kontext ist die haeufigste Ursache dafuer, dass
+        ein lokaler Lauf mittendrin unbrauchbar wird. Aeltere Ausgaben werden
+        deshalb durch einen Platzhalter ersetzt; die juengsten bleiben ganz.
+        """
+        keep = max(1, self.settings.keep_full_results)
+        tool_indexes = [
+            index
+            for index, message in enumerate(self.messages)
+            if message.get("role") == "tool"
+        ]
+        for index in tool_indexes[:-keep]:
+            message = self.messages[index]
+            if message.get("content") != TRIMMED_NOTE:
+                message["content"] = TRIMMED_NOTE
+
     def _run_tool_call(self, call: dict[str, Any]) -> None:
         """Fuehrt einen einzelnen Tool-Call aus und haengt das Ergebnis an."""
         name = call["function"]["name"]
@@ -307,13 +423,22 @@ class Agent:
         if not isinstance(arguments, dict):
             arguments = {}
 
-        payload = self.toolbox.call(name, arguments)
+        try:
+            payload = self.toolbox.call(name, arguments)
+        except Exception as exc:
+            # Ein kaputtes Werkzeug darf den Durchlauf nicht beenden -- der
+            # Agent soll es mit einer anderen Quelle weiter versuchen.
+            payload = {"error": f"{type(exc).__name__}: {exc}"}
+            self._emit("error", message=f"Werkzeug {name}: {exc}")
+
         self.messages.append(
             {
                 "role": "tool",
                 "tool_call_id": call["id"],
                 "name": name,
-                "content": json.dumps(payload, ensure_ascii=False)[:60_000],
+                "content": json.dumps(payload, ensure_ascii=False)[
+                    : max(1000, self.settings.max_tool_chars)
+                ],
             }
         )
 

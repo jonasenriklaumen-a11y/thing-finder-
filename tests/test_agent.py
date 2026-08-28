@@ -123,6 +123,18 @@ def test_tools_are_offered_to_the_llm(
     monkeypatch.setattr("litellm.completion", llm)
     Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
+    assert names == ["web_search", "fetch_page", "research_subtasks"]
+
+
+def test_subagents_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ohne Subagenten bleiben es die urspruenglichen zwei Werkzeuge."""
+    settings.max_subagents = 0
+    llm = ScriptedLLM(_message(content="fertig"))
+    monkeypatch.setattr("litellm.completion", llm)
+    Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
+    names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
     assert names == ["web_search", "fetch_page"]
 
 
@@ -301,3 +313,159 @@ def test_broken_tool_arguments_do_not_crash(
 )
 def test_parse_spec_json(raw: str, expected: dict[str, str]) -> None:
     assert _parse_spec_json(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# Stabilitaet
+# ---------------------------------------------------------------------------
+def test_transient_errors_are_retried(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    attempts = {"n": 0}
+
+    def flaky(**kwargs: Any):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise RuntimeError("Connection error")
+        return _message(content="endlich da")
+
+    monkeypatch.setattr("litellm.completion", flaky)
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+    result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
+    assert result.answer == "endlich da"
+    assert attempts["n"] == 3
+
+
+def test_a_crashed_runner_frees_memory_and_retries(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Genau der Absturz aus der Praxis -- danach wird aufgeraeumt."""
+    attempts = {"n": 0}
+    freed: list[str] = []
+
+    def crashing(**kwargs: Any):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("model runner has unexpectedly stopped, resource limitations")
+        return _message(content="zweiter Versuch")
+
+    monkeypatch.setattr("litellm.completion", crashing)
+    monkeypatch.setattr("time.sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        "scoutr.local_model.free_memory", lambda *a, **k: freed.append("frei") or ["qwen3:8b"]
+    )
+    result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
+    assert result.answer == "zweiter Versuch"
+    assert freed == ["frei"]
+
+
+def test_permanent_errors_are_not_retried(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ein falscher Key wird durch Wiederholen nicht richtig."""
+    attempts = {"n": 0}
+
+    def failing(**kwargs: Any):
+        attempts["n"] += 1
+        raise RuntimeError("AuthenticationError: invalid api key")
+
+    monkeypatch.setattr("litellm.completion", failing)
+    result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
+    assert attempts["n"] == 1
+    assert "invalid api key" in result.error
+
+
+def test_old_tool_results_are_trimmed(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Sonst laeuft bei lokalen Modellen der Kontext ueber."""
+    from scoutr.agent import TRIMMED_NOTE
+
+    settings.keep_full_results = 2
+    settings.max_tool_calls = 6
+    searches = [
+        _message(tool_calls=[_tool_call("web_search", {"query": f"q{i}"}, f"c{i}")])
+        for i in range(5)
+    ]
+    llm = ScriptedLLM(*searches, _message(content="fertig"))
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Frage", stream=False)
+    tool_messages = [m for m in agent.messages if m["role"] == "tool"]
+    assert len(tool_messages) == 5
+    assert sum(1 for m in tool_messages if m["content"] == TRIMMED_NOTE) == 3
+    # Die juengsten bleiben vollstaendig.
+    assert all(m["content"] != TRIMMED_NOTE for m in tool_messages[-2:])
+
+
+def test_tool_results_are_capped(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.max_tool_chars = 1200
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("fetch_page", {"url": "https://cafe-sonntag.de/"})]),
+        _message(content="fertig"),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Frage", stream=False)
+    tool_message = next(m for m in agent.messages if m["role"] == "tool")
+    assert len(tool_message["content"]) <= 1200
+
+
+def test_a_broken_tool_does_not_end_the_run(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    def exploding(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("Werkzeug kaputt")
+
+    monkeypatch.setattr(toolbox, "call", exploding)
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("web_search", {"query": "x"})]),
+        _message(content="trotzdem fertig"),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Frage", stream=False)
+    assert result.answer == "trotzdem fertig"
+    tool_message = next(m for m in agent.messages if m["role"] == "tool")
+    assert "Werkzeug kaputt" in tool_message["content"]
+
+
+def test_subagent_results_reach_the_parent(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Quellen der Subagenten muessen in der Gesamtbilanz auftauchen."""
+    from scoutr.subagents import SubagentResult
+
+    monkeypatch.setattr(
+        "scoutr.subagents.run_subagents",
+        lambda tasks, *a, **k: [
+            SubagentResult(
+                task=task,
+                summary=f"Ergebnis {task}",
+                sources=[{"url": f"https://{task}.de", "title": task}],
+                searches=[task],
+            )
+            for task in tasks
+        ],
+    )
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("research_subtasks", {"tasks": ["eins", "zwei"]})]),
+        _message(content="zusammengefasst"),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Frage", stream=False)
+    assert result.answer == "zusammengefasst"
+    assert {source["url"] for source in result.sources} == {
+        "https://eins.de",
+        "https://zwei.de",
+    }
+    assert set(result.searches) == {"eins", "zwei"}
+
+
+def test_subagent_tool_without_runner_is_reported(settings: Settings, toolbox: Toolbox) -> None:
+    assert "nicht aktiv" in toolbox.call("research_subtasks", {"tasks": ["x"]})["error"]
