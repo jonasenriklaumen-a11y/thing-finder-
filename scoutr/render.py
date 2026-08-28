@@ -211,7 +211,7 @@ def image_backend() -> str:
     term_program = os.environ.get("TERM_PROGRAM", "")
     capable = (
         "kitty" in term
-        or "kitty" in os.environ.get("KITTY_WINDOW_ID", "x")
+        or bool(os.environ.get("KITTY_WINDOW_ID"))
         or term_program in {"iTerm.app", "WezTerm"}
         or bool(os.environ.get("WEZTERM_PANE"))
         or os.environ.get("TERM_PROGRAM") == "ghostty"

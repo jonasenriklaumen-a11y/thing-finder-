@@ -296,3 +296,31 @@ def test_rules_are_loaded_from_yaml() -> None:
     rules = load_rules()
     assert '#onetrust-consent-sdk' in rules.strip_selectors
     assert "amazon.de" in rules.known_blocking_domains
+
+
+def test_subdomains_of_known_blockers_are_skipped_too() -> None:
+    """m.amazon.de und smile.amazon.de sind genauso zwecklos wie amazon.de."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("haette nicht abgerufen werden duerfen")
+
+    with _fetcher(handler) as fetcher:
+        for url in (
+            "https://m.amazon.de/dp/B0TEST",
+            "https://smile.amazon.de/dp/B0TEST",
+            "https://de-de.facebook.com/laden/",
+        ):
+            assert fetcher.fetch(url).skipped_reason == "blocked", url
+
+
+def test_lookalike_domains_are_not_blocked(fixture_html) -> None:
+    """notamazon.de ist NICHT amazon.de -- nur echte Subdomains zaehlen."""
+    html = fixture_html("plain_article.html")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(200, text=html, headers={"content-type": "text/html"})
+
+    with _fetcher(handler) as fetcher:
+        assert fetcher.fetch("https://notamazon.de/artikel").ok

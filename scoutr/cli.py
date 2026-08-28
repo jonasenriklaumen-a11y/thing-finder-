@@ -1122,7 +1122,7 @@ def chat_command(
             if not line:
                 continue
             if line.startswith("/"):
-                if _handle_slash(line, agent, settings, turns, renderer):
+                if _handle_slash(line, agent, settings, turns, renderer, stream, show_images):
                     break
                 continue
             try:
@@ -1217,7 +1217,15 @@ def _describe_image(agent, image: Path) -> str | None:
     return f"Auf dem Bild ist Folgendes zu sehen:\n{description}"
 
 
-def _handle_slash(line: str, agent, settings: Settings, turns: list, renderer) -> bool:
+def _handle_slash(
+    line: str,
+    agent,
+    settings: Settings,
+    turns: list,
+    renderer,
+    stream: bool = True,
+    show_images: bool = True,
+) -> bool:
     """Fuehrt einen Slash-Befehl aus. Gibt `True` zurueck, wenn beendet werden soll."""
     command, _, argument = line[1:].partition(" ")
     command = command.lower()
@@ -1255,7 +1263,7 @@ def _handle_slash(line: str, agent, settings: Settings, turns: list, renderer) -
         else:
             description = _describe_image(agent, Path(argument))
             if description:
-                result = _run_turn(agent, renderer, description, True, True)
+                result = _run_turn(agent, renderer, description, stream, show_images)
                 _record_turn(turns, f"Bild: {argument}", result)
     elif command == "history":
         history_command(limit=15)

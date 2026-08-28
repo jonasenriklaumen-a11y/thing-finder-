@@ -880,3 +880,33 @@ def test_a_free_model_name_is_not_second_guessed(
     assert result.exit_code == 0, result.output
     assert state["pulled"] == ["eigenes-modell:99b"]
     assert "braucht etwa" not in result.output
+
+
+def test_slash_image_respects_no_stream(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """/image lief immer im Streaming-Modus, egal was --no-stream sagte."""
+    image = tmp_path / "foto.png"
+    from scoutr.local_model import solid_png
+
+    image.write_bytes(solid_png())
+    seen_stream: list[bool] = []
+
+    from scoutr.agent import Agent
+
+    original_ask = Agent.ask
+
+    def spy_ask(self, question, *, stream=True):
+        seen_stream.append(stream)
+        return original_ask(self, question, stream=stream)
+
+    monkeypatch.setattr(Agent, "ask", spy_ask)
+    monkeypatch.setattr(
+        "litellm.completion",
+        _llm("Ein rotes Bild. Suchbegriffe: rot", "Fertig recherchiert."),
+    )
+    result = runner.invoke(
+        cli.app, ["chat", "--no-stream"], input=f"/image {image}\n/quit\n"
+    )
+    assert result.exit_code == 0, result.output
+    assert seen_stream == [False]

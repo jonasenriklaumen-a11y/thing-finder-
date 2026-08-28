@@ -162,7 +162,7 @@ def _run_one(
                     messages=messages,
                     tools=TOOL_SCHEMAS,
                     tool_choice="auto",
-                    **settings.llm_kwargs(),
+                    **settings.llm_kwargs_for(settings.effective_subagent_model),
                 )
             except Exception as exc:
                 result.error = f"{type(exc).__name__}: {exc}"
@@ -250,7 +250,7 @@ def _run_one(
                 response = litellm.completion(
                     model=settings.effective_subagent_model,
                     messages=messages,
-                    **settings.llm_kwargs(),
+                    **settings.llm_kwargs_for(settings.effective_subagent_model),
                 )
                 result.summary = (response.choices[0].message.content or "").strip()
             except Exception as exc:

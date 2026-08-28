@@ -253,13 +253,26 @@ class Settings:
         return _env_str(name) if name else ""
 
     def llm_kwargs(self) -> dict[str, object]:
-        """Zusatzargumente fuer `litellm.completion`."""
+        """Zusatzargumente fuer `litellm.completion` mit dem Hauptmodell."""
         kwargs: dict[str, object] = {}
         if self.api_base:
             kwargs["api_base"] = self.api_base
         if self.api_key:
             kwargs["api_key"] = self.api_key
         return kwargs
+
+    def llm_kwargs_for(self, model: str) -> dict[str, object]:
+        """Zusatzargumente fuer einen Aufruf mit *model*.
+
+        api_base und api_key gehoeren zum Anbieter des HAUPTmodells. Laeuft
+        das Vision- oder Subagenten-Modell bei einem anderen Anbieter, waeren
+        sie falsch -- eine lokale Ollama-Basis-URL an Anthropic zu schicken
+        bricht den Aufruf. Dann lieber nichts mitgeben: LiteLLM findet den
+        richtigen Key selbst in der Umgebung.
+        """
+        if provider_of(model) == provider_of(self.model):
+            return self.llm_kwargs()
+        return {}
 
     def missing_requirements(self) -> list[str]:
         """Liste menschenlesbarer Hinweise auf fehlende Pflichtangaben."""

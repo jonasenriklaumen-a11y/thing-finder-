@@ -337,8 +337,12 @@ class Fetcher:
             result.skipped_reason = "invalid_url"
             return result
 
-        if domain in self.rules.known_blocking_domains:
-            # Bekannte Blocker gar nicht erst behelligen.
+        if any(
+            domain == blocked or domain.endswith(f".{blocked}")
+            for blocked in self.rules.known_blocking_domains
+        ):
+            # Bekannte Blocker gar nicht erst behelligen -- auch ihre
+            # Subdomains (m.amazon.de, smile.amazon.de) laufen ins Leere.
             result.skipped_reason = "blocked"
             return result
 

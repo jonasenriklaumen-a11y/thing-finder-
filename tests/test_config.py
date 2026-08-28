@@ -183,3 +183,37 @@ def test_resolve_model_reports_the_provider() -> None:
     assert config.resolve_model("anthropic/claude-sonnet-4-6") == "anthropic"
     assert config.resolve_model("quatsch/modell") == ""
     assert config.resolve_model("") == ""
+
+
+# ---------------------------------------------------------------------------
+# Kwargs je Modell -- gemischte Anbieter
+# ---------------------------------------------------------------------------
+def test_kwargs_for_the_same_provider_are_passed_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = config.Settings(
+        model="ollama_chat/gemma4:12b", api_base="http://localhost:11434"
+    )
+    assert settings.llm_kwargs_for("ollama_chat/llava:7b") == {
+        "api_base": "http://localhost:11434"
+    }
+
+
+def test_kwargs_for_a_foreign_provider_are_dropped() -> None:
+    """Die lokale Ollama-Basis-URL darf nie an einen Cloud-Anbieter gehen."""
+    settings = config.Settings(
+        model="ollama_chat/gemma4:12b",
+        api_base="http://localhost:11434",
+        vision_model="anthropic/claude-sonnet-4-6",
+    )
+    assert settings.llm_kwargs_for(settings.effective_vision_model) == {}
+
+
+def test_main_model_key_is_not_sent_to_other_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-geheim")
+    settings = config.Settings(
+        model="anthropic/claude-sonnet-4-6", subagent_model="ollama_chat/qwen3:1.7b"
+    )
+    assert settings.llm_kwargs_for(settings.effective_subagent_model) == {}

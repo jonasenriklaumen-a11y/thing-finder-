@@ -165,3 +165,56 @@ def test_failed_image_download_keeps_the_link(
     target = tmp_path / "recherche.md"
     export([_turn()], "md", path=target, with_images=True)
     assert "https://cdn.shop.de/yoga.jpg" in target.read_text(encoding="utf-8")
+
+
+def test_image_files_do_not_collide_across_turns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Gleicher Produktname in zwei Turns -> zwei Dateien, nicht eine."""
+    import httpx
+
+    payload_by_url = {
+        "https://cdn.a.de/bild.jpg": b"BILD-A",
+        "https://cdn.b.de/bild.jpg": b"BILD-B",
+    }
+
+    class FakeClient:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def get(self, url: str) -> httpx.Response:
+            return httpx.Response(
+                200, content=payload_by_url[url], request=httpx.Request("GET", url)
+            )
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+
+    def turn_with(url: str) -> Turn:
+        return Turn(
+            question="Laptop",
+            answer="...",
+            products=[
+                Product(
+                    name="Lenovo Yoga Pro 7",
+                    url="https://shop.de/x",
+                    image_url=url,
+                    source_domain="shop.de",
+                )
+            ],
+        )
+
+    from scoutr.export import download_images
+
+    mapping = download_images(
+        [turn_with("https://cdn.a.de/bild.jpg"), turn_with("https://cdn.b.de/bild.jpg")],
+        tmp_path,
+    )
+    assert len(set(mapping.values())) == 2
+    contents = {(tmp_path / name).read_bytes() for name in mapping.values()}
+    assert contents == {b"BILD-A", b"BILD-B"}

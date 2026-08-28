@@ -45,9 +45,13 @@ def download_images(turns: list[Turn], directory: Path, timeout: float = 15.0) -
     """Laedt Produktbilder in *directory* und gibt {url: dateiname} zurueck."""
     directory.mkdir(parents=True, exist_ok=True)
     mapping: dict[str, str] = {}
+    # Fortlaufender Zaehler ueber ALLE Turns: mit dem Index je Turn wuerden
+    # gleichnamige Produkte aus verschiedenen Turns dieselbe Datei
+    # ueberschreiben und auf das falsche Bild zeigen.
+    counter = 0
     with httpx.Client(timeout=timeout, follow_redirects=True) as client:
         for turn in turns:
-            for index, product in enumerate(turn.products):
+            for product in turn.products:
                 url = product.image_url
                 if not url or url in mapping:
                     continue
@@ -56,7 +60,8 @@ def download_images(turns: list[Turn], directory: Path, timeout: float = 15.0) -
                     if response.status_code != 200:
                         continue
                     suffix = Path(httpx.URL(url).path).suffix[:5] or ".jpg"
-                    name = f"{_slug(product.name, 30)}-{index}{suffix}"
+                    name = f"{_slug(product.name, 30)}-{counter}{suffix}"
+                    counter += 1
                     (directory / name).write_bytes(response.content)
                     mapping[url] = name
                 except httpx.HTTPError:

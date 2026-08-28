@@ -635,7 +635,7 @@ class Agent:
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         self._emit("image", path=str(image_path))
 
-        kwargs = self.settings.llm_kwargs()
+        kwargs = self.settings.llm_kwargs_for(self.settings.effective_vision_model)
         try:
             response = litellm.completion(
                 model=self.settings.effective_vision_model,
