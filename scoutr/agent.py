@@ -361,15 +361,16 @@ class Agent:
         if not stream:
             message = response.choices[0].message
             content = message.content or ""
-            if content:
+            tool_calls = repair_tool_calls(
+                _tool_calls_to_dicts(getattr(message, "tool_calls", None))
+            )
+            # Kommentar VOR Werkzeugaufrufen ("Ich suche mal ...") ist keine
+            # Antwort: als answer_chunk gerendert wuerde er sich mit den
+            # [Suche]-Zeilen verhaken und spaeter vor der echten Antwort
+            # kleben bleiben.
+            if content and not tool_calls:
                 self._emit("answer_chunk", text=content)
-            return {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": repair_tool_calls(
-                    _tool_calls_to_dicts(getattr(message, "tool_calls", None))
-                ),
-            }
+            return {"role": "assistant", "content": content, "tool_calls": tool_calls}
         return self._consume_stream(response)
 
     def _consume_stream(self, response: Any) -> dict[str, Any]:
@@ -556,6 +557,9 @@ class Agent:
         import litellm
 
         litellm.suppress_debug_info = True
+        # Der einzige Sendepfad neben _completion_with_retry -- dasselbe
+        # Sicherheitsnetz gegen kaputte Tool-Argumente gehoert auch hierher.
+        sanitize_history(self.messages)
         try:
             response = litellm.completion(
                 model=self.settings.model,

@@ -784,3 +784,58 @@ def test_json_errors_are_not_retried_as_connection_problems() -> None:
     assert not is_transient("APIConnectionError: Extra data: line 1 column 73 (char 72)")
     assert not is_transient("json.decoder.JSONDecodeError: Expecting value")
     assert is_transient("APIConnectionError: Connection refused")
+
+
+def test_pre_tool_commentary_is_not_rendered_as_answer(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """"Ich suche mal ..." vor einem Tool-Call darf nicht als Antwort erscheinen."""
+    llm = ScriptedLLM(
+        _message(content="Ich suche mal danach.",
+                 tool_calls=[_tool_call("web_search", {"query": "x"})]),
+        _message(content="Die echte Antwort."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+    chunks: list[str] = []
+    agent = Agent(
+        settings,
+        cache=None,
+        toolbox=toolbox,
+        on_event=lambda name, payload: chunks.append(payload["text"])
+        if name == "answer_chunk"
+        else None,
+    )
+    result = agent.ask("Frage", stream=False)
+    assert result.answer == "Die echte Antwort."
+    assert chunks == ["Die echte Antwort."]
+
+
+def test_final_answer_sends_a_sanitized_history(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Auch der Budget-Endspurt darf keine kaputten Argumente verschicken."""
+    sent: list[list[dict[str, Any]]] = []
+
+    def completion(**kwargs: Any):
+        sent.append(kwargs["messages"])
+        return _message(content="Zwischenstand")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.messages.append(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "alt", "type": "function",
+                 "function": {"name": "web_search", "arguments": '{"q":"a"}{"q":"b"}'}}
+            ],
+        }
+    )
+    agent.messages.append(
+        {"role": "tool", "tool_call_id": "alt", "name": "web_search", "content": "{}"}
+    )
+    assert agent._final_answer(stream=False) == "Zwischenstand"
+    for message in sent[0]:
+        for call in message.get("tool_calls") or []:
+            json.loads(call["function"]["arguments"])
