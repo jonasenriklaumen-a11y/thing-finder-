@@ -25,6 +25,10 @@ OPEN_ENGINES = ("duckduckgo", "mojeek", "startpage", "brave", "yahoo", "wikipedi
 #: Backends, die ohne Key auskommen.
 KEYLESS_BACKENDS = ("duckduckgo", "ddg", "open", "searxng")
 
+#: Die Namen der offenen Metasuche selbst -- von hier gibt es kein weiteres
+#: Fallback, sie IST das Fallback.
+OPEN_BACKEND_NAMES = frozenset({"duckduckgo", "ddg", "open"})
+
 
 def _region(country: str, lang: str) -> str:
     """`de` + `de` -> `de-de`, wie es die Engines als Region erwarten."""
@@ -286,3 +290,51 @@ def search_web(
         instance_url=instance_url,
     )
     return _dedupe(runner(query, options), count)
+
+
+def search_news(
+    query: str,
+    count: int = 8,
+    country: str = "de",
+    lang: str = "de",
+) -> list[SearchResult]:
+    """Sucht in Nachrichten -- immer ueber die offene Metasuche, ohne Key.
+
+    Fuer "was ist diese Woche passiert" liefert die normale Websuche zu viel
+    Altes; die News-Vertikale sortiert nach Aktualitaet und traegt ein Datum.
+
+    Raises:
+        SearchError: Wenn keine Engine erreichbar ist.
+    """
+    from ddgs import DDGS
+    from ddgs.exceptions import DDGSException
+
+    query = query.strip()
+    if not query:
+        return []
+    count = min(max(int(count or 8), 1), 20)
+    try:
+        raw = DDGS(timeout=20).news(
+            query,
+            region=_region(country, lang),
+            safesearch="moderate",
+            max_results=max(count, 5),
+        )
+    except DDGSException as exc:
+        raise SearchError(f"News-Suche fehlgeschlagen: {exc}") from exc
+
+    results = []
+    for item in raw:
+        snippet = (item.get("body") or item.get("excerpt") or "").strip()
+        date = (item.get("date") or "").strip()
+        source = (item.get("source") or "").strip()
+        prefix = " · ".join(part for part in (date[:10], source) if part)
+        results.append(
+            SearchResult(
+                title=(item.get("title") or "").strip(),
+                url=(item.get("url") or item.get("href") or "").strip(),
+                snippet=f"[{prefix}] {snippet}" if prefix else snippet,
+            )
+        )
+    return _dedupe(results, count)
+

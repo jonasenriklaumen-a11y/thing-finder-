@@ -39,6 +39,10 @@ MIN_CONTENT_CHARS = 200
 MAX_TEXT_CHARS = 20_000
 #: Wie viel HTML laden wir maximal herunter?
 MAX_HTML_BYTES = 4_000_000
+#: Obergrenze fuer PDFs -- Datenblaetter sind klein, Scans riesig.
+MAX_PDF_BYTES = 25_000_000
+#: Mehr Seiten liest niemand am Stueck; haelt auch pypdf im Zaum.
+MAX_PDF_PAGES = 40
 
 
 @dataclass(slots=True)
@@ -140,6 +144,39 @@ def extract_text(html: str, url: str = "", rules: SiteRules | None = None) -> st
         # trafilatura gibt bei sehr kurzen Seiten gern nichts zurueck.
         text = HTMLParser(cleaned).text(separator="\n", strip=True) or ""
     return drop_consent_paragraphs(text, rules)
+
+
+def extract_pdf_text(data: bytes) -> tuple[str, str]:
+    """Zieht (Text, Titel) aus PDF-Bytes.
+
+    Datenblaetter, Speisekarten und Preislisten stecken oft in PDFs --
+    vorher war jedes davon ein blinder Fleck. Gescannte PDFs ohne Textebene
+    liefern leeren Text; OCR machen wir bewusst nicht.
+
+    Returns:
+        ("", "") wenn nichts lesbar ist.
+    """
+    import io
+
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return "", ""
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        pages = []
+        for page in reader.pages[:MAX_PDF_PAGES]:
+            pages.append(page.extract_text() or "")
+        text = "\n\n".join(part.strip() for part in pages if part.strip())
+        title = ""
+        metadata = reader.metadata
+        if metadata and metadata.title:
+            title = str(metadata.title)
+        return text.strip(), title.strip()
+    except Exception:
+        # pypdf wirft je nach Datei alles Moegliche -- ein kaputtes PDF ist
+        # ein uebersprungener Treffer, kein Absturz.
+        return "", ""
 
 
 def page_title(html: str) -> str:
@@ -373,12 +410,31 @@ class Fetcher:
             return result
 
         content_type = response.headers.get("content-type", "").lower()
+        final_path = urlparse(result.final_url or url).path.lower()
+        if "application/pdf" in content_type or final_path.endswith(".pdf"):
+            return self._finish_pdf(result, response.content)
         if content_type and not any(kind in content_type for kind in HTML_CONTENT_TYPES):
             result.skipped_reason = "unsupported_content_type"
             return result
 
         html = response.text[:MAX_HTML_BYTES]
         return self._finish(result, html, want_products=want_products)
+
+    def _finish_pdf(self, result: PageResult, data: bytes) -> PageResult:
+        """Text aus einem PDF ziehen -- Datenblaetter, Speisekarten, Preislisten."""
+        if len(data) > MAX_PDF_BYTES:
+            result.skipped_reason = "pdf_error"
+            return result
+        text, title = extract_pdf_text(data)
+        if len(text.strip()) < MIN_CONTENT_CHARS:
+            result.skipped_reason = "pdf_error" if not text.strip() else "empty"
+            return result
+        result.ok = True
+        result.via = "pdf"
+        result.title = title or Path(urlparse(result.final_url or result.url).path).name
+        result.truncated = len(text) > MAX_TEXT_CHARS
+        result.text = text[:MAX_TEXT_CHARS]
+        return result
 
     def _finish(self, result: PageResult, html: str, *, want_products: bool) -> PageResult:
         """Stufe 1 + 2 auf bereits geladenes HTML anwenden."""

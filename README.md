@@ -143,16 +143,34 @@ $ scoutr --location "Mönchengladbach" --lang de
 
 ## Kernprinzip
 
-Der Agent hat **genau zwei Werkzeuge** und kombiniert sie selbstständig, so oft er will:
+Der Agent hat eine Handvoll **generischer Werkzeuge** und kombiniert sie selbstständig,
+so oft er will:
 
 1. `web_search(query, count, country, lang)` — schickt eine Suchanfrage ans Web und
    bekommt Titel, URL und Snippet zurück.
-2. `fetch_page(url)` — lädt eine Seite und gibt den lesbaren Textinhalt zurück
-   (HTML-Ballast, Navigation und Werbung entfernt).
+2. `fetch_page(url)` — lädt eine Seite **oder ein PDF** und gibt den lesbaren Text
+   zurück (HTML-Ballast, Navigation und Werbung entfernt). Datenblätter, Speisekarten
+   und Preislisten sind damit keine blinden Flecken mehr.
+3. `search_news(query, count)` — Nachrichten mit Datum und Quelle, für alles Aktuelle.
+4. `calculate(expression)` — exakte Arithmetik (auch `1.099,99`), damit Preisvergleiche
+   nie auf Kopfrechnen kleiner Modelle beruhen.
+5. `remember(text)` — schreibt auf einen dauerhaften Merkzettel, aber nur auf
+   ausdrückliche Bitte („merk dir …"). Anzeigen mit `/notes` bzw. `scoutr notes`.
 
-Mehr braucht es nicht. Ob Instagram, Amazon, ein Branchenbuch oder die Website eines
-Ladens: Alles sind einfach Suchtreffer, die gelesen werden können. Es gibt bewusst keine
-plattformspezifischen Scraper.
+Ob Instagram, Amazon, ein Branchenbuch oder die Website eines Ladens: Alles sind einfach
+Suchtreffer, die gelesen werden können. Es gibt bewusst keine plattformspezifischen
+Scraper. Der Systemprompt trägt außerdem das **heutige Datum**, damit Modelle mit altem
+Wissensstand nicht nach „Test 2024" suchen.
+
+### Eingebaute Fallbacks
+
+| Fällt aus … | … übernimmt |
+|---|---|
+| konfigurierte Suchmaschine (SearXNG, Brave, Tavily) | die offene Metasuche |
+| News-Vertikale | die normale Websuche |
+| Subagenten-Modell (nicht geladen, abgestürzt) | das Hauptmodell |
+| einzelne Engine der Metasuche | die übrigen Engines |
+| JS-lose Seite ohne Inhalt | der Playwright-Browser (Stufe 3) |
 
 Pro Nutzeranfrage:
 
@@ -229,6 +247,7 @@ Was nicht gefunden wurde, wird als „nicht gefunden" gekennzeichnet — niemals
 | `/export html\|md\|csv` | Recherche dieser Sitzung speichern |
 | `/image <pfad>` | Bild beschreiben lassen, danach damit recherchieren |
 | `/history` | frühere Recherchen anzeigen |
+| `/notes` | Merkzettel anzeigen (pflegen: `scoutr notes --delete N`) |
 | `/clear` | Gesprächsverlauf verwerfen |
 | `/help` | Übersicht |
 | `/quit` | beenden (auch <kbd>Strg</kbd>+<kbd>D</kbd>) |

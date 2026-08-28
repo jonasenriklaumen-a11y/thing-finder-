@@ -153,18 +153,30 @@ def _run_one(
     ]
     budget = max(1, settings.subagent_budget)
     used = 0
+    # Faellt das kleine Subagenten-Modell aus (nicht geladen, abgestuerzt),
+    # uebernimmt das Hauptmodell -- langsamer, aber die Teilfrage wird
+    # beantwortet statt verworfen.
+    model_in_use = settings.effective_subagent_model
 
     try:
         while used < budget:
             try:
                 response = litellm.completion(
-                    model=settings.effective_subagent_model,
+                    model=model_in_use,
                     messages=messages,
                     tools=TOOL_SCHEMAS,
                     tool_choice="auto",
-                    **settings.llm_kwargs_for(settings.effective_subagent_model),
+                    **settings.llm_kwargs_for(model_in_use),
                 )
             except Exception as exc:
+                if model_in_use != settings.model:
+                    if on_event:
+                        on_event(
+                            "fallback",
+                            {"source": model_in_use, "target": settings.model},
+                        )
+                    model_in_use = settings.model
+                    continue
                 result.error = f"{type(exc).__name__}: {exc}"
                 return result
 
@@ -248,9 +260,9 @@ def _run_one(
             )
             try:
                 response = litellm.completion(
-                    model=settings.effective_subagent_model,
+                    model=model_in_use,
                     messages=messages,
-                    **settings.llm_kwargs_for(settings.effective_subagent_model),
+                    **settings.llm_kwargs_for(model_in_use),
                 )
                 result.summary = (response.choices[0].message.content or "").strip()
             except Exception as exc:

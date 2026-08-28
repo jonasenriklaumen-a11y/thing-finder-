@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS history (
     meta       TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS history_session_idx ON history(session_id);
+
+CREATE TABLE IF NOT EXISTS notes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at REAL NOT NULL,
+    text       TEXT NOT NULL
+);
 """
 
 
@@ -42,6 +48,15 @@ def cache_key(kind: str, *parts: Any) -> str:
     """Stabiler Schluessel aus Art und beliebigen Bestandteilen."""
     raw = "\x1f".join([kind, *(str(part) for part in parts)])
     return f"{kind}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
+
+
+@dataclass(slots=True)
+class Note:
+    """Ein Eintrag auf dem Merkzettel des Nutzers."""
+
+    id: int
+    created_at: float
+    text: str
 
 
 @dataclass(slots=True)
@@ -182,3 +197,38 @@ class Cache:
             )
             for row in reversed(rows)
         ]
+
+    # -- Merkzettel -------------------------------------------------------
+    MAX_NOTE_LENGTH = 500
+
+    def add_note(self, text: str) -> int:
+        """Merkt sich *text* dauerhaft -- ueber Sitzungen hinweg."""
+        text = " ".join(str(text).split())[: self.MAX_NOTE_LENGTH]
+        if not text:
+            return 0
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            cur.execute(
+                "INSERT INTO notes (created_at, text) VALUES (?, ?)", (time.time(), text)
+            )
+            return int(cur.lastrowid or 0)
+
+    def list_notes(self, limit: int = 50) -> list[Note]:
+        """Alle Notizen, neueste zuletzt."""
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            cur.execute("SELECT * FROM notes ORDER BY id DESC LIMIT ?", (limit,))
+            rows = cur.fetchall()
+        return [
+            Note(id=row["id"], created_at=row["created_at"], text=row["text"])
+            for row in reversed(rows)
+        ]
+
+    def delete_note(self, note_id: int) -> bool:
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            cur.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+            return cur.rowcount > 0
+
+    def clear_notes(self) -> int:
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            cur.execute("DELETE FROM notes")
+            return cur.rowcount
+

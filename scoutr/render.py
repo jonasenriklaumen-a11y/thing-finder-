@@ -116,6 +116,23 @@ class ChatRenderer:
                 )
             )
 
+    def _on_fallback(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            f"  [yellow][Ausweich][/yellow] {payload.get('source', '')} -> "
+            f"{payload.get('target', '')}"
+        )
+
+    def _on_calculate(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        expression = shorten(payload.get("expression", ""), 70)
+        self.console.print(Text.assemble(("  [Rechne] ", "bold cyan"), (expression, "white")))
+
+    def _on_remember(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        text = shorten(payload.get("text", ""), 70)
+        self.console.print(Text.assemble(("  [Merke]  ", "bold green"), (text, "white")))
+
     def _on_retry(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         detail = payload.get("detail", "")

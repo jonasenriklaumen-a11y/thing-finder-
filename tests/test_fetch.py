@@ -251,10 +251,10 @@ def test_fetch_skips_non_html() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(404)
-        return httpx.Response(200, content=b"%PDF-1.4", headers={"content-type": "application/pdf"})
+        return httpx.Response(200, content=b"\x89PNG...", headers={"content-type": "image/png"})
 
     with _fetcher(handler) as fetcher:
-        page = fetcher.fetch("https://example.de/datei.pdf")
+        page = fetcher.fetch("https://example.de/bild.png")
     assert page.skipped_reason == "unsupported_content_type"
 
 
@@ -324,3 +324,103 @@ def test_lookalike_domains_are_not_blocked(fixture_html) -> None:
 
     with _fetcher(handler) as fetcher:
         assert fetcher.fetch("https://notamazon.de/artikel").ok
+
+
+# ---------------------------------------------------------------------------
+# PDF-Abruf
+# ---------------------------------------------------------------------------
+def _tiny_pdf(text: str) -> bytes:
+    """Handgebautes Minimal-PDF mit echter Textebene."""
+    import io
+
+    stream = f"BT /F1 12 Tf 50 700 Td ({text}) Tj ET".encode("latin-1")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = io.BytesIO()
+    out.write(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, 1):
+        offsets.append(out.tell())
+        out.write(f"{number} 0 obj\n".encode())
+        out.write(body)
+        out.write(b"\nendobj\n")
+    xref = out.tell()
+    out.write(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
+    for offset in offsets:
+        out.write(f"{offset:010d} 00000 n \n".encode())
+    out.write(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref}\n%%EOF".encode()
+    )
+    return out.getvalue()
+
+
+PDF_TEXT = (
+    "Technische Daten des Notebooks: Prozessor Ryzen 7 8845HS, 32 GB Arbeitsspeicher, "
+    "1 TB SSD, Display 14,5 Zoll OLED. Strassenpreis zum Testzeitpunkt 1099 Euro. "
+    "Die Garantie betraegt 24 Monate ab Kaufdatum und umfasst auch den Akku."
+)
+
+
+def test_pdf_content_is_extracted() -> None:
+    """Datenblaetter und Preislisten stecken oft in PDFs -- vorher blinder Fleck."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(
+            200, content=_tiny_pdf(PDF_TEXT), headers={"content-type": "application/pdf"}
+        )
+
+    with _fetcher(handler) as fetcher:
+        page = fetcher.fetch("https://hersteller.de/datenblatt.pdf")
+    assert page.ok, page.skipped_reason
+    assert page.via == "pdf"
+    assert "Ryzen 7 8845HS" in page.text
+    assert "1099 Euro" in page.text
+
+
+def test_pdf_detected_by_url_suffix_without_content_type() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(200, content=_tiny_pdf(PDF_TEXT), headers={})
+
+    with _fetcher(handler) as fetcher:
+        assert fetcher.fetch("https://x.de/karte.pdf").ok
+
+
+def test_broken_pdf_is_skipped_cleanly() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(
+            200, content=b"%PDF-1.4 kaputt", headers={"content-type": "application/pdf"}
+        )
+
+    with _fetcher(handler) as fetcher:
+        page = fetcher.fetch("https://x.de/kaputt.pdf")
+    assert not page.ok
+    assert page.skipped_reason == "pdf_error"
+
+
+def test_oversized_pdf_is_skipped() -> None:
+    from scoutr import fetch as fetch_mod
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return httpx.Response(
+            200,
+            content=b"x" * (fetch_mod.MAX_PDF_BYTES + 1),
+            headers={"content-type": "application/pdf"},
+        )
+
+    with _fetcher(handler) as fetcher:
+        assert fetcher.fetch("https://x.de/riesig.pdf").skipped_reason == "pdf_error"

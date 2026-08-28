@@ -17,7 +17,7 @@ from typing import Any
 from scoutr.cache import Cache
 from scoutr.config import Settings
 from scoutr.models import Product
-from scoutr.tools import SUBAGENT_SCHEMA, TOOL_SCHEMAS, EventHook, Toolbox
+from scoutr.tools import MEMORY_SCHEMA, SUBAGENT_SCHEMA, TOOL_SCHEMAS, EventHook, Toolbox
 
 SYSTEM_PROMPT = """\
 Du bist scoutr, ein Rechercheagent in der Kommandozeile. Du beantwortest Fragen \
@@ -25,7 +25,11 @@ ausschliesslich auf Basis dessen, was du im Web tatsaechlich gefunden und gelese
 
 Deine Werkzeuge:
 - `web_search(query, count, country, lang)` -- schickt eine Suchanfrage ans Web.
-- `fetch_page(url)` -- laedt eine Seite und gibt den lesbaren Text zurueck.
+- `fetch_page(url)` -- laedt eine Seite (auch PDFs) und gibt den lesbaren Text zurueck.
+- `search_news(query, count)` -- Nachrichten mit Datum, fuer alles Aktuelle.
+- `calculate(expression)` -- exakte Arithmetik. Rechne nie selbst im Kopf.
+- `remember(text)` -- Notiz auf den dauerhaften Merkzettel, NUR auf ausdrueckliche \
+Bitte des Nutzers.
 
 So gehst du vor:
 1. Ueberlege, welche Suchanfragen sinnvoll sind, und formuliere MEHRERE Varianten -- \
@@ -169,7 +173,9 @@ class Agent:
         self.settings = settings
         self.cache = cache
         self.on_event = on_event
-        self.messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self.messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self._system_prompt(cache)}
+        ]
         self.toolbox = toolbox or Toolbox(
             settings,
             cache=cache,
@@ -185,10 +191,17 @@ class Agent:
 
     @property
     def tools(self) -> list[dict[str, Any]]:
-        """Die Werkzeuge, die dieser Agent anbietet."""
+        """Die Werkzeuge, die dieser Agent anbietet.
+
+        Merkzettel und Subagenten bekommt nur der Hauptagent -- Subagenten
+        sollen weder Notizen anlegen noch weitere Subagenten starten.
+        """
+        extra: list[dict[str, Any]] = []
+        if self.cache is not None:
+            extra.append(MEMORY_SCHEMA)
         if self.use_subagents:
-            return [*TOOL_SCHEMAS, SUBAGENT_SCHEMA]
-        return list(TOOL_SCHEMAS)
+            extra.append(SUBAGENT_SCHEMA)
+        return [*TOOL_SCHEMAS, *extra]
 
     def _auto_subagents_wanted(self) -> bool:
         """Soll vor der eigentlichen Runde automatisch vorrecherchiert werden?"""
@@ -281,8 +294,41 @@ class Agent:
 
     def clear(self) -> None:
         """Verwirft den Gespraechsverlauf, behaelt aber die Konfiguration."""
-        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self.messages = [{"role": "system", "content": self._system_prompt(self.cache)}]
         self.last_result = None
+
+    @staticmethod
+    def _system_prompt(cache: Cache | None) -> str:
+        """Systemprompt plus Tagesdatum und Merkzettel.
+
+        Lokale Modelle mit altem Wissensstand suchen sonst nach "Test 2024",
+        obwohl laengst ein anderes Jahr ist. Und der Merkzettel macht
+        "merk dir X" ueber Sitzungen hinweg nutzbar.
+        """
+        from datetime import date
+
+        weekdays = (
+            "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"
+        )
+        today = date.today()
+        prompt = (
+            f"{SYSTEM_PROMPT}\n"
+            f"Heute ist {weekdays[today.weekday()]}, der {today.strftime('%d.%m.%Y')}. "
+            f"Richte Suchanfragen nach Aktualitaet daran aus, nicht an deinem "
+            f"Wissensstand."
+        )
+        if cache is not None:
+            try:
+                notes = cache.list_notes(limit=8)
+            except Exception:
+                notes = []
+            if notes:
+                lines = "\n".join(f"- {note.text}" for note in notes)
+                prompt += (
+                    "\n\nMerkzettel des Nutzers aus frueheren Sitzungen "
+                    "(beruecksichtigen, wenn relevant):\n" + lines
+                )
+        return prompt
 
     def set_location(self, location: str, lang: str = "", country: str = "") -> None:
         """Setzt den Ortsfilter fuer alle folgenden Anfragen."""

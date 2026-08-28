@@ -125,7 +125,10 @@ SKIP_NOTES: dict[str, str] = {
     "timeout": "Zeitueberschreitung beim Abruf.",
     "http_error": "Server hat mit einem Fehlerstatus geantwortet.",
     "empty": "Kein lesbarer Textinhalt gefunden.",
-    "unsupported_content_type": "Kein HTML-Dokument (z.B. PDF, Bild, Video).",
+    "unsupported_content_type": "Kein lesbares Dokument (z.B. Bild, Video, Archiv).",
+    "pdf_error": (
+        "Das PDF liess sich nicht lesen (beschaedigt, gescannt ohne Textebene, oder zu gross)."
+    ),
     "network_error": "Netzwerkfehler beim Abruf.",
     "invalid_url": "Die URL ist ungueltig oder verwendet kein http(s).",
 }

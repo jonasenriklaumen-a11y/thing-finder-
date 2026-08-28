@@ -335,3 +335,43 @@ def test_subagents_share_one_fetcher(
     assert len(created) == 1
     # Und er wurde am Ende geschlossen.
     assert created[0]._client.is_closed
+
+
+def test_dead_subagent_model_falls_back_to_the_main_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Kleines Modell nicht geladen -> das Hauptmodell uebernimmt die Teilfrage."""
+    settings.subagent_model = "ollama_chat/qwen3:1.7b"
+    used: list[str] = []
+
+    def completion(**kwargs: Any):
+        used.append(kwargs["model"])
+        if kwargs["model"] == "ollama_chat/qwen3:1.7b":
+            raise RuntimeError("model not found")
+        return _reply(content="vom Hauptmodell beantwortet")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    events: list[str] = []
+    results = run_subagents(
+        ["Teilfrage"], settings, on_event=lambda name, payload: events.append(name), parallel=1
+    )
+    assert results[0].summary == "vom Hauptmodell beantwortet"
+    assert used == ["ollama_chat/qwen3:1.7b", settings.model]
+    assert "fallback" in events
+
+
+def test_dead_main_model_stays_dead(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Ohne eigenes Subagenten-Modell gibt es nichts zum Ausweichen."""
+    settings.subagent_model = ""
+    calls = {"n": 0}
+
+    def failing(**kwargs: Any):
+        calls["n"] += 1
+        raise RuntimeError("weg")
+
+    monkeypatch.setattr("litellm.completion", failing)
+    results = run_subagents(["Teilfrage"], settings, parallel=1)
+    assert results[0].error
+    assert calls["n"] == 1

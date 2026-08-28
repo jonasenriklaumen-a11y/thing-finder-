@@ -16,7 +16,7 @@ from scoutr.config import Settings
 from scoutr.extract import extract_product, has_spec_heading
 from scoutr.fetch import Fetcher, load_rules
 from scoutr.models import PageResult, Product, SearchResult, domain_of
-from scoutr.search import SearchError, search_web
+from scoutr.search import OPEN_BACKEND_NAMES, SearchError, search_news, search_web
 
 #: Callback fuer die Live-Anzeige: (event, payload)
 EventHook = Callable[[str, dict[str, Any]], None]
@@ -109,26 +109,109 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+
+NEWS_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "search_news",
+        "description": (
+            "Sucht in aktuellen Nachrichten -- fuer Ereignisse, Ankuendigungen und alles, "
+            "wo das Datum zaehlt. Jeder Treffer traegt Datum und Quelle im Snippet. "
+            "Fuer zeitlose Fakten nimm weiter web_search."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Die Suchanfrage."},
+                "count": {"type": "integer", "description": "Trefferzahl (1-20, Default 8)."},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+CALC_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "calculate",
+        "description": (
+            "Rechnet einen arithmetischen Ausdruck exakt aus -- Preise pro Einheit, "
+            "Durchschnitte, Rabatte, Umrechnungen. Erlaubt: Zahlen (auch 1.099,99), "
+            "+ - * / // % ** und Klammern. Rechne NIE selbst im Kopf, benutze dieses "
+            "Werkzeug."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "Der Ausdruck, z.B. '(1099 + 1149) / 2'.",
+                }
+            },
+            "required": ["expression"],
+        },
+    },
+}
+
+#: Nur fuer den Hauptagenten -- Subagenten sollen keine Notizen anlegen.
+MEMORY_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "remember",
+        "description": (
+            "Schreibt eine kurze Notiz auf den dauerhaften Merkzettel des Nutzers -- er "
+            "gilt ueber Sitzungen hinweg. Benutze es NUR, wenn der Nutzer ausdruecklich "
+            "darum bittet (\"merk dir\", \"notier dir\"), nie von dir aus."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Die Notiz, ein bis zwei Saetze."}
+            },
+            "required": ["text"],
+        },
+    },
+}
+
+
+# News-Suche und Rechner gehoeren zum Kern -- auch Subagenten sollen aktuelle
+# Meldungen finden und richtig rechnen koennen.
+TOOL_SCHEMAS.extend([NEWS_SCHEMA, CALC_SCHEMA])
+
+
 @dataclass
 class ToolStats:
     """Was in einem Durchlauf passiert ist -- fuer Ausgabe und Verlauf."""
 
     searches: list[str] = field(default_factory=list)
+    news_searches: list[str] = field(default_factory=list)
     fetched: list[str] = field(default_factory=list)
     skipped: dict[str, str] = field(default_factory=dict)
     products: list[Product] = field(default_factory=list)
     sources: list[dict[str, str]] = field(default_factory=list)
+    calculations: int = 0
+    notes_saved: int = 0
 
     @property
     def tool_calls(self) -> int:
-        return len(self.searches) + len(self.fetched) + len(self.skipped)
+        return (
+            len(self.searches)
+            + len(self.news_searches)
+            + len(self.fetched)
+            + len(self.skipped)
+            + self.calculations
+            + self.notes_saved
+        )
 
     def reset(self) -> None:
         self.searches.clear()
+        self.news_searches.clear()
         self.fetched.clear()
         self.skipped.clear()
         self.products.clear()
         self.sources.clear()
+        self.calculations = 0
+        self.notes_saved = 0
 
 
 class Toolbox:
@@ -211,8 +294,18 @@ class Toolbox:
                     instance_url=self.settings.searxng_url,
                 )
             except SearchError as exc:
-                self._emit("error", message=str(exc))
-                return {"query": query, "results": [], "error": str(exc)}
+                # Fallback: faellt das konfigurierte Backend aus (SearXNG down,
+                # API-Limit), uebernimmt die offene Metasuche -- die braucht
+                # nichts und ist praktisch immer da.
+                if self.settings.search_backend in OPEN_BACKEND_NAMES:
+                    self._emit("error", message=str(exc))
+                    return {"query": query, "results": [], "error": str(exc)}
+                self._emit("fallback", source=self.settings.search_backend, target="metasuche")
+                try:
+                    results = search_web(query, count=count, country=country, lang=lang)
+                except SearchError as second:
+                    self._emit("error", message=str(second))
+                    return {"query": query, "results": [], "error": str(second)}
             if self.cache:
                 self.cache.set(
                     key,
@@ -315,11 +408,91 @@ class Toolbox:
             )
         if name == "fetch_page":
             return self.fetch_page(url=str(arguments.get("url", "")))
+        if name == "search_news":
+            return self.search_news(
+                query=str(arguments.get("query", "")), count=int(arguments.get("count") or 0)
+            )
+        if name == "calculate":
+            return self.calculate(expression=str(arguments.get("expression", "")))
+        if name == "remember":
+            return self.remember(text=str(arguments.get("text", "")))
         if name == "research_subtasks":
             return self.research_subtasks(arguments.get("tasks") or [])
         return {"error": f"Unbekanntes Werkzeug '{name}'."}
 
-    # -- Werkzeug 3 (nur fuer den Hauptagenten) ---------------------------
+    # -- Werkzeug 3: News -------------------------------------------------
+    def search_news(self, query: str, count: int = 0) -> dict[str, Any]:
+        """News-Suche; faellt bei Ausfall auf die normale Websuche zurueck."""
+        query = (query or "").strip()
+        count = int(count or self.settings.max_results_default)
+        self.stats.news_searches.append(query)
+        self._emit("search", query=f"News: {query}", count=count)
+        if not query:
+            return {"query": query, "results": [], "error": "Leere Suchanfrage."}
+
+        key = cache_key("news", query, count, self.settings.country, self.settings.lang)
+        cached = self.cache.get(key) if self.cache else None
+        if cached is not None:
+            results = [SearchResult(**item) for item in cached]
+        else:
+            try:
+                results = search_news(
+                    query, count=count, country=self.settings.country, lang=self.settings.lang
+                )
+            except SearchError:
+                # Fallback: lieber normale Treffer als gar keine.
+                self._emit("fallback", source="news", target="websuche")
+                try:
+                    results = search_web(
+                        query,
+                        count=count,
+                        country=self.settings.country,
+                        lang=self.settings.lang,
+                    )
+                except SearchError as exc:
+                    self._emit("error", message=str(exc))
+                    return {"query": query, "results": [], "error": str(exc)}
+            if self.cache:
+                # News veralten schnell -- eine Stunde statt 24.
+                self.cache.set(
+                    key,
+                    [result.model_dump() for result in results],
+                    kind="news",
+                    label=query,
+                    ttl=3600,
+                )
+
+        for result in results:
+            self.seen_results.setdefault(result.url, result)
+        self._emit("search_done", query=query, hits=len(results))
+        return {"query": query, "results": [result.as_tool_dict() for result in results]}
+
+    # -- Werkzeug 4: Rechner ----------------------------------------------
+    def calculate(self, expression: str) -> dict[str, Any]:
+        """Exakte Arithmetik -- damit das Modell nie selbst rechnen muss."""
+        from scoutr.calc import CalcError, calculate_pretty
+
+        self.stats.calculations += 1
+        self._emit("calculate", expression=expression)
+        try:
+            return {"expression": expression, "result": calculate_pretty(expression)}
+        except CalcError as exc:
+            return {"expression": expression, "error": str(exc)}
+
+    # -- Werkzeug 5: Merkzettel (nur Hauptagent) --------------------------
+    def remember(self, text: str) -> dict[str, Any]:
+        """Notiz auf den dauerhaften Merkzettel des Nutzers schreiben."""
+        text = (text or "").strip()
+        if not text:
+            return {"error": "Leere Notiz."}
+        if self.cache is None:
+            return {"error": "Kein Speicher verfuegbar -- Notiz nicht abgelegt."}
+        note_id = self.cache.add_note(text)
+        self.stats.notes_saved += 1
+        self._emit("remember", text=text)
+        return {"saved": True, "note_id": note_id, "text": text}
+
+    # -- Werkzeug 6 (nur fuer den Hauptagenten) ---------------------------
     def research_subtasks(self, tasks: Any) -> dict[str, Any]:
         """Gibt Teilfragen an parallele Subagenten ab."""
         if self.subagent_runner is None:

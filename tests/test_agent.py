@@ -123,7 +123,8 @@ def test_tools_are_offered_to_the_llm(
     monkeypatch.setattr("litellm.completion", llm)
     Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
-    assert names == ["web_search", "fetch_page", "research_subtasks"]
+    # Ohne Cache kein Merkzettel-Werkzeug.
+    assert names == ["web_search", "fetch_page", "search_news", "calculate", "research_subtasks"]
 
 
 def test_subagents_can_be_switched_off(
@@ -135,7 +136,7 @@ def test_subagents_can_be_switched_off(
     monkeypatch.setattr("litellm.completion", llm)
     Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
-    assert names == ["web_search", "fetch_page"]
+    assert names == ["web_search", "fetch_page", "search_news", "calculate"]
 
 
 def test_budget_limit_forces_interim_answer(
@@ -839,3 +840,42 @@ def test_final_answer_sends_a_sanitized_history(
     for message in sent[0]:
         for call in message.get("tool_calls") or []:
             json.loads(call["function"]["arguments"])
+
+
+# ---------------------------------------------------------------------------
+# Datum und Merkzettel im Systemprompt
+# ---------------------------------------------------------------------------
+def test_system_prompt_carries_todays_date(settings: Settings, toolbox: Toolbox) -> None:
+    """Sonst sucht ein Modell mit altem Wissensstand nach "Test 2024"."""
+    from datetime import date
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert date.today().strftime("%d.%m.%Y") in agent.messages[0]["content"]
+
+
+def test_notes_are_injected_into_the_system_prompt(
+    settings: Settings, toolbox: Toolbox, tmp_path
+) -> None:
+    from scoutr.cache import Cache
+
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_note("Budget fuer den Laptop: 1200 Euro")
+    agent = Agent(settings, cache=cache, toolbox=toolbox)
+    assert "Budget fuer den Laptop: 1200 Euro" in agent.messages[0]["content"]
+    # /clear behaelt den Merkzettel.
+    agent.clear()
+    assert "Budget fuer den Laptop" in agent.messages[0]["content"]
+
+
+def test_memory_tool_is_offered_only_with_a_cache(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
+) -> None:
+    from scoutr.cache import Cache
+
+    llm = ScriptedLLM(_message(content="ok"))
+    monkeypatch.setattr("litellm.completion", llm)
+    Agent(settings, cache=Cache(tmp_path / "c.sqlite3"), toolbox=toolbox).ask(
+        "Frage", stream=False
+    )
+    names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
+    assert "remember" in names

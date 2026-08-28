@@ -33,9 +33,9 @@ def _html_handler(html: str):
     return handler
 
 
-def test_tool_schemas_are_exactly_two() -> None:
+def test_core_tool_schemas() -> None:
     names = [schema["function"]["name"] for schema in TOOL_SCHEMAS]
-    assert names == ["web_search", "fetch_page"]
+    assert names == ["web_search", "fetch_page", "search_news", "calculate"]
 
 
 def test_web_search_uses_settings_defaults(
@@ -257,3 +257,114 @@ def test_stable_failures_stay_cached(settings: Settings, tmp_path: Path) -> None
     box.fetch_page("https://zu.example/")
     box.fetch_page("https://zu.example/")
     assert attempts["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# News, Rechner, Merkzettel, Fallbacks
+# ---------------------------------------------------------------------------
+def test_search_news_carries_date_and_source(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    monkeypatch.setattr(
+        "scoutr.tools.search_news",
+        lambda query, **kwargs: [
+            SearchResult(
+                title="Neuer Laptop vorgestellt",
+                url="https://news.example/artikel",
+                snippet="[2026-08-24 · heise online] Der Hersteller zeigt ...",
+            )
+        ],
+    )
+    box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    payload = box.search_news("laptop neuheiten")
+    assert payload["results"][0]["snippet"].startswith("[2026-08-24")
+    assert box.stats.news_searches == ["laptop neuheiten"]
+    assert box.stats.tool_calls == 1
+
+
+def test_news_falls_back_to_web_search(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Faellt die News-Vertikale aus, gibt es normale Treffer statt keiner."""
+    from scoutr.search import SearchError
+
+    def failing_news(query, **kwargs):
+        raise SearchError("News tot")
+
+    monkeypatch.setattr("scoutr.tools.search_news", failing_news)
+    monkeypatch.setattr(
+        "scoutr.tools.search_web",
+        lambda query, **kwargs: [SearchResult(title="Web-Treffer", url="https://a.de/")],
+    )
+    events: list[str] = []
+    box = Toolbox(
+        settings,
+        on_event=lambda name, payload: events.append(name),
+        fetcher=_mock_fetcher(_html_handler("<html></html>")),
+    )
+    payload = box.search_news("aktuelles")
+    assert payload["results"][0]["title"] == "Web-Treffer"
+    assert "fallback" in events
+
+
+def test_web_search_falls_back_to_open_metasearch(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """SearXNG down -> die offene Metasuche uebernimmt."""
+    from scoutr.search import SearchError
+
+    settings.search_backend = "searxng"
+    calls: list[str] = []
+
+    def routing(query, count, country, lang, backend="duckduckgo", **kwargs):
+        calls.append(backend)
+        if backend == "searxng":
+            raise SearchError("Instanz nicht erreichbar")
+        return [SearchResult(title="Metasuche-Treffer", url="https://b.de/")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", routing)
+    box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    payload = box.web_search("frage")
+    assert payload["results"][0]["title"] == "Metasuche-Treffer"
+    assert calls == ["searxng", "duckduckgo"]
+
+
+def test_open_metasearch_has_no_further_fallback(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from scoutr.search import SearchError
+
+    settings.search_backend = "duckduckgo"
+    calls: list[str] = []
+
+    def failing(query, count, country, lang, backend="duckduckgo", **kwargs):
+        calls.append(backend)
+        raise SearchError("alles tot")
+
+    monkeypatch.setattr("scoutr.tools.search_web", failing)
+    box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    assert "error" in box.web_search("frage")
+    assert calls == ["duckduckgo"]
+
+
+def test_calculate_tool(settings: Settings) -> None:
+    box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    assert box.call("calculate", {"expression": "(1099 + 1149) / 2"})["result"] == "1124"
+    assert "error" in box.call("calculate", {"expression": "__import__('os')"})
+    assert box.stats.calculations == 2
+
+
+def test_remember_tool_persists_notes(settings: Settings, tmp_path: Path) -> None:
+    from scoutr.cache import Cache
+
+    cache = Cache(tmp_path / "c.sqlite3")
+    box = Toolbox(settings, cache=cache, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    payload = box.call("remember", {"text": "Budget: 1200 Euro"})
+    assert payload["saved"] is True
+    assert [note.text for note in cache.list_notes()] == ["Budget: 1200 Euro"]
+    assert box.stats.notes_saved == 1
+
+
+def test_remember_without_cache_reports_it(settings: Settings) -> None:
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    assert "error" in box.remember("etwas")

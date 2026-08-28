@@ -484,6 +484,32 @@ def version_command() -> None:
 # ---------------------------------------------------------------------------
 # history / install-browser
 # ---------------------------------------------------------------------------
+@app.command("notes")
+def notes_command(
+    delete: int = typer.Option(0, "--delete", help="Notiz mit dieser Nummer loeschen."),
+    clear: bool = typer.Option(False, "--clear", help="Alle Notizen loeschen."),
+) -> None:
+    """Zeigt oder pflegt den dauerhaften Merkzettel."""
+    settings = get_settings()
+    cache = Cache(settings.db_path, settings.cache_ttl_hours)
+    if clear:
+        console.print(f"[green]{cache.clear_notes()} Notizen geloescht.[/green]")
+        return
+    if delete:
+        if cache.delete_note(delete):
+            console.print(f"[green]Notiz {delete} geloescht.[/green]")
+        else:
+            console.print(f"[yellow]Keine Notiz mit Nummer {delete}.[/yellow]")
+        return
+    notes = cache.list_notes()
+    if not notes:
+        console.print('[dim]Der Merkzettel ist leer. Im Chat: "merk dir ..."[/dim]')
+        return
+    for note in notes:
+        when = datetime.fromtimestamp(note.created_at).strftime("%d.%m.%Y")
+        console.print(f"  [cyan]{note.id:>3}[/cyan]  [dim]{when}[/dim]  {note.text}")
+
+
 @app.command("history")
 def history_command(
     limit: int = typer.Option(20, "--limit", "-n", help="Wie viele Eintraege?"),
@@ -960,7 +986,8 @@ HELP_TEXT = """\
   [cyan]/model <name>[/cyan]        Modell wechseln, z.B. openai/gpt-4o
   [cyan]/export html|md|csv[/cyan]  Recherche dieser Sitzung speichern
   [cyan]/image <pfad>[/cyan]        Bild beschreiben lassen und danach recherchieren
-  [cyan]/history[/cyan]             Frueherer Recherchen anzeigen
+  [cyan]/history[/cyan]             Fruehere Recherchen anzeigen
+  [cyan]/notes[/cyan]               Merkzettel anzeigen (verwalten: scoutr notes)
   [cyan]/clear[/cyan]               Gespraechsverlauf verwerfen
   [cyan]/help[/cyan]                Diese Uebersicht
   [cyan]/quit[/cyan]                Beenden (auch Strg+D)
@@ -1267,6 +1294,8 @@ def _handle_slash(
                 _record_turn(turns, f"Bild: {argument}", result)
     elif command == "history":
         history_command(limit=15)
+    elif command == "notes":
+        notes_command(delete=0, clear=False)
     elif command == "clear":
         agent.clear()
         turns.clear()
@@ -1323,6 +1352,7 @@ COMMANDS = {
     "fetch",
     "cache",
     "history",
+    "notes",
     "export",
     "install-browser",
     "install-model",
