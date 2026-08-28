@@ -435,6 +435,34 @@ def recommend_dual_model(memory_gb: float | None = None) -> LocalModel:
     return _recommend(DUAL_MODELS, memory_gb)
 
 
+def known_model(name: str) -> LocalModel | None:
+    """Findet *name* im Katalog -- oder `None` bei einem freien Namen."""
+    bare = name.split("/", 1)[-1].strip()
+    for model in (*DUAL_MODELS, *LOCAL_MODELS, *VISION_MODELS):
+        if model.name == bare:
+            return model
+    return None
+
+
+def too_big(name: str, memory_gb: float | None = None) -> str:
+    """Warnt, wenn ein Modell nicht in den Speicher passt.
+
+    Returns:
+        Leerer String, wenn alles passt oder die Groesse unbekannt ist --
+        bei freien Namen raten wir nicht.
+    """
+    model = known_model(name)
+    if model is None:
+        return ""
+    available = memory_gb if memory_gb is not None else usable_memory_gb()
+    if available is None or model.needs_gb <= available:
+        return ""
+    return (
+        f"{model.name} braucht etwa {model.needs_gb} GB, verfuegbar sind {available} GB. "
+        "Der Ollama-Runner stirbt dann meist mitten im Aufruf."
+    )
+
+
 def fits_together(main: LocalModel, vision: LocalModel, memory_gb: float | None) -> bool:
     """Passen zwei Modelle gleichzeitig in den Speicher?
 

@@ -758,3 +758,104 @@ def test_out_of_memory_offers_a_smaller_vision_model(
     assert result.exit_code == 0, result.output
     assert any("moondream" in attempt for attempt in attempts)
     assert "SCOUTR_VISION_MODEL=ollama_chat/moondream" in target.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Empfohlen oder genommen?
+# ---------------------------------------------------------------------------
+def test_without_yes_the_user_confirms_the_recommendation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Der VRAM waehlt die Vorauswahl -- bestaetigt wird sie vom Nutzer."""
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
+    target = tmp_path / ".env"
+    # Leere Eingabe = Vorauswahl uebernehmen, danach kein Vision-Modell.
+    result = runner.invoke(
+        cli.app, ["install-model", "--no-vision", "--env-file", str(target)], input="\n"
+    )
+    assert result.exit_code == 0, result.output
+    assert "Auswahl" in result.output
+    # Fuer 12 GB ist das ein Modell, das auch Bilder kann.
+    assert state["pulled"] == ["gemma4:12b"]
+
+
+def test_yes_takes_the_recommendation_without_asking(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--yes darf nicht an einer Rueckfrage haengen bleiben."""
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
+    target = tmp_path / ".env"
+    result = runner.invoke(
+        cli.app, ["install-model", "--yes", "--env-file", str(target)], input=""
+    )
+    assert result.exit_code == 0, result.output
+    assert "Ohne Rueckfrage gewaehlt" in result.output
+    assert state["pulled"] == ["gemma4:12b"]
+
+
+def test_a_chosen_model_that_is_too_big_needs_confirmation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--model wird gegen den Speicher geprueft, statt blind zu laden."""
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
+    result = runner.invoke(
+        cli.app,
+        ["install-model", "--model", "gemma4:26b", "--env-file", str(tmp_path / ".env")],
+        input="n\n",
+    )
+    assert result.exit_code == 1
+    assert "braucht etwa 24 GB" in result.output
+    assert state["pulled"] == []
+
+
+def test_a_too_big_model_can_be_forced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
+    result = runner.invoke(
+        cli.app,
+        [
+            "install-model",
+            "--model", "gemma4:26b",
+            "--no-vision",
+            "--env-file", str(tmp_path / ".env"),
+        ],
+        input="y\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert state["pulled"] == ["gemma4:26b"]
+
+
+def test_a_free_model_name_is_not_second_guessed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Unbekannte Namen laufen ohne Warnung durch -- wir kennen ihre Groesse nicht."""
+    from scoutr import local_model as lm
+
+    state = _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 4.0)
+    result = runner.invoke(
+        cli.app,
+        [
+            "install-model",
+            "--model", "eigenes-modell:99b",
+            "--no-vision",
+            "--yes",
+            "--env-file", str(tmp_path / ".env"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert state["pulled"] == ["eigenes-modell:99b"]
+    assert "braucht etwa" not in result.output

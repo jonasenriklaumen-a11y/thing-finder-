@@ -566,8 +566,17 @@ def _ensure_ollama(assume_yes: bool = False) -> bool:
     return True
 
 
-def _pick_local_model(models, recommended, already: set[str], label: str) -> str:
-    """Zeigt eine Modellauswahl und gibt den gewaehlten Ollama-Namen zurueck."""
+def _pick_local_model(
+    models, recommended, already: set[str], label: str, assume_yes: bool = False
+) -> str:
+    """Zeigt eine Modellauswahl und gibt den gewaehlten Ollama-Namen zurueck.
+
+    Mit *assume_yes* wird nicht gefragt, sondern die Empfehlung genommen --
+    sonst haenge `--yes` an einer Rueckfrage, die es gerade abschalten soll.
+    """
+    if assume_yes:
+        console.print(f"  [dim]Ohne Rueckfrage gewaehlt:[/dim] [bold]{recommended.name}[/bold]")
+        return recommended.name
     table = Table(show_header=True, box=None, header_style="dim")
     table.add_column(" ", style="cyan", no_wrap=True)
     table.add_column(label)
@@ -598,6 +607,24 @@ def _pick_local_model(models, recommended, already: set[str], label: str) -> str
     if answer.isdigit() and 1 <= int(answer) <= len(models):
         return models[int(answer) - 1].name
     return answer
+
+
+def _confirm_size(name: str, budget: float | None, assume_yes: bool) -> bool:
+    """Warnt, wenn ein ausdruecklich genanntes Modell zu gross ist.
+
+    Bei einem freien Ollama-Namen kennen wir die Groesse nicht und lassen ihn
+    kommentarlos durch -- wir raten nicht.
+    """
+    from scoutr import local_model as lm
+
+    warning = lm.too_big(name, budget)
+    if not warning:
+        return True
+    console.print(f"  [yellow]{warning}[/yellow]")
+    if assume_yes:
+        console.print("  [dim]--yes gesetzt, wird trotzdem geladen.[/dim]")
+        return True
+    return bool(typer.confirm("  Trotzdem laden?", default=False))
 
 
 def _pull_if_needed(name: str, already: set[str]) -> bool:
@@ -650,9 +677,13 @@ def _run_vision_setup(
     already = set(lm.installed_models())
     if model_name:
         chosen = model_name
+        if not _confirm_size(chosen, lm.usable_memory_gb(), assume_yes):
+            return ""
     else:
-        recommended = lm.recommend_vision_model(lm.total_memory_gb())
-        chosen = _pick_local_model(lm.VISION_MODELS, recommended, already, "Vision-Modell")
+        recommended = lm.recommend_vision_model(lm.usable_memory_gb())
+        chosen = _pick_local_model(
+            lm.VISION_MODELS, recommended, already, "Vision-Modell", assume_yes
+        )
 
     if not _pull_if_needed(chosen, already):
         return ""
@@ -732,12 +763,14 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
     already = set(lm.installed_models())
     if model_name:
         chosen = model_name
+        if not _confirm_size(chosen, budget, assume_yes):
+            return ""
     else:
         main, _, why = lm.plan_setup(budget)
         console.print(f"  [cyan]{why}[/cyan]")
         # Modelle, die auch Bilder koennen, zuerst -- sie sparen ein zweites.
         candidates = tuple(lm.DUAL_MODELS) + tuple(lm.LOCAL_MODELS)
-        chosen = _pick_local_model(candidates, main, already, "Modell")
+        chosen = _pick_local_model(candidates, main, already, "Modell", assume_yes)
 
     # -- 4. Laden ----------------------------------------------------------
     if not _pull_if_needed(chosen, already):

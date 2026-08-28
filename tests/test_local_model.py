@@ -589,3 +589,33 @@ def test_crashed_runner_in_the_tool_test(monkeypatch: pytest.MonkeyPatch) -> Non
     ok, detail = lm.verify_tool_calling("ollama_chat/qwen2.5:32b")
     assert not ok
     assert "kleineres Modell" in detail
+
+
+# ---------------------------------------------------------------------------
+# Groessenpruefung bei ausdruecklich genannten Modellen
+# ---------------------------------------------------------------------------
+def test_known_model_lookup() -> None:
+    assert lm.known_model("gemma4:12b") is not None
+    assert lm.known_model("ollama_chat/gemma4:12b") is not None
+    assert lm.known_model("irgendwas-eigenes:7b") is None
+
+
+def test_too_big_warns_with_numbers() -> None:
+    warning = lm.too_big("gemma4:26b", memory_gb=12.0)
+    assert "24 GB" in warning and "12.0 GB" in warning
+
+
+def test_fitting_model_gets_no_warning() -> None:
+    assert lm.too_big("gemma4:12b", memory_gb=12.0) == ""
+    assert lm.too_big("moondream", memory_gb=4.0) == ""
+
+
+def test_unknown_names_are_not_guessed() -> None:
+    """Bei freien Ollama-Namen kennen wir die Groesse nicht -- also kein Urteil."""
+    assert lm.too_big("exotisches-modell:70b", memory_gb=4.0) == ""
+
+
+def test_without_memory_info_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Laesst sich der Speicher nicht ermitteln, wird nicht gewarnt."""
+    monkeypatch.setattr(lm, "usable_memory_gb", lambda: None)
+    assert lm.too_big("gemma4:26b") == ""
