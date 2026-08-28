@@ -8,6 +8,7 @@ Settings). Danach gibt er den Zwischenstand aus.
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -117,6 +118,25 @@ TRANSIENT_MARKERS = (
     "too many requests",
 )
 
+#: Offensichtlicher Small-Talk -- dafuer wird gar nichts gefragt, auch kein
+#: Modell. Bewusst eng gefasst: im Zweifel entscheidet die Vorpruefung.
+SMALL_TALK_RE = re.compile(
+    r"^(hallo|hi|hey|moin|servus|guten\s+(morgen|tag|abend)|"
+    r"danke(\s+(dir|schoen|schön|sehr))?|vielen\s+dank|thx|thanks|"
+    r"ok(ay)?|cool|super|top|passt|perfekt|nice|"
+    r"tsch(ue|ü)ss|bye|ciao|bis\s+(dann|morgen|spaeter|später)|gute\s+nacht|"
+    r"wie\s+geht('?s|\s+es)(\s+dir)?|alles\s+klar|aha|hm+|test)"
+    r"[\s!?.,:;)~-]*$",
+    re.IGNORECASE,
+)
+
+TRIAGE_PROMPT = (
+    "Entscheide, ob die folgende Nutzernachricht eine Web-Recherche braucht oder nur "
+    "normale Konversation ist (Gruss, Dank, Meinung, Frage an dich selbst, Kommentar "
+    "zum Gespraech). Nachfragen zu einer laufenden Recherche zaehlen als Recherche. "
+    "Antworte mit GENAU einem Wort: RECHERCHE oder CHAT.\n\nNachricht: %s"
+)
+
 #: Beginn der internen Nachricht mit den Vorrecherche-Ergebnissen.
 PRE_RESEARCH_PREFIX = "Zu deiner Unterstuetzung wurde die Anfrage"
 
@@ -206,6 +226,45 @@ class Agent:
     def _auto_subagents_wanted(self) -> bool:
         """Soll vor der eigentlichen Runde automatisch vorrecherchiert werden?"""
         return self.use_subagents and self.settings.subagents_auto
+
+    def _needs_research(self, question: str) -> bool:
+        """Kurze Vorpruefung: braucht diese Nachricht ueberhaupt eine Recherche?
+
+        "hallo" oder "danke" sollen keinen Planungs- und Subagenten-Apparat
+        anwerfen. Stufe 1 ist eine Heuristik (kostet nichts), Stufe 2 ein
+        winziger Modellaufruf mit hartem Zeitlimit. Faellt der aus oder
+        dauert er zu lange, gilt sicherheitshalber: Recherche -- lieber
+        einmal zu viel geplant als eine echte Frage unbeantwortet.
+        """
+        text = question.strip()
+        if not text or SMALL_TALK_RE.match(text):
+            self._emit("triage", decision="chat", source="heuristik")
+            return False
+
+        import litellm
+
+        litellm.suppress_debug_info = True
+        model = self.settings.effective_subagent_model
+        started = time.monotonic()
+        try:
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": TRIAGE_PROMPT % text[:400]}],
+                max_tokens=10,
+                timeout=max(1.0, self.settings.triage_timeout),
+                **self.settings.llm_kwargs_for(model),
+            )
+            answer = (response.choices[0].message.content or "").strip().lower()
+        except Exception:
+            self._emit("triage", decision="recherche", source="fallback")
+            return True
+
+        elapsed = round(time.monotonic() - started, 2)
+        if "chat" in answer and "recherche" not in answer:
+            self._emit("triage", decision="chat", source="modell", seconds=elapsed)
+            return False
+        self._emit("triage", decision="recherche", source="modell", seconds=elapsed)
+        return True
 
     def _recent_context(self, turns: int = 2) -> str:
         """Die letzten Wortmeldungen -- damit Nachfragen verstaendlich bleiben.
@@ -493,7 +552,7 @@ class Agent:
         # Automatische Vorrecherche: die Anfrage wird zerlegt und die Teile
         # laufen parallel, bevor der Hauptagent uebernimmt. Was die
         # Subagenten schon gefunden haben, steht ihm dann zur Verfuegung.
-        if self._auto_subagents_wanted():
+        if self._auto_subagents_wanted() and self._needs_research(question):
             used += self._auto_research(question, budget)
 
         while True:

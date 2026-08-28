@@ -183,7 +183,15 @@ Pro Nutzeranfrage:
 
 ### Subagenten: Teilfragen parallel
 
-scoutr zerlegt **jede** Anfrage von sich aus in Teilfragen und lässt sie parallel
+Vor jeder Planung schaut scoutr kurz auf die Nachricht: **Braucht das überhaupt eine
+Recherche?** Offensichtlicher Small-Talk („hallo", „danke") wird per Heuristik erkannt und
+kostet keinen einzigen Modellaufruf; bei allem anderen entscheidet das kleine
+Subagenten-Modell mit einem Wort — hart begrenzt auf 5 Sekunden
+(`SCOUTR_TRIAGE_TIMEOUT`). Fällt die Prüfung aus oder dauert zu lange, gilt
+sicherheitshalber „Recherche" — lieber einmal zu viel geplant als eine echte Frage
+unbeantwortet.
+
+Recherche-Anfragen zerlegt scoutr dann von sich aus in Teilfragen und lässt sie parallel
 bearbeiten, bevor der Hauptagent übernimmt:
 
 ```
@@ -584,6 +592,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
 | `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `4` |
 | `SCOUTR_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
+| `SCOUTR_TRIAGE_TIMEOUT` | Zeitlimit der Chat-oder-Recherche-Prüfung (s) | `5` |
 | `SCOUTR_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
 | `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
 | `SCOUTR_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |

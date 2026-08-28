@@ -212,6 +212,8 @@ class Settings:
     max_subagents: int = 4
     #: Zerlegt scoutr jede Frage von sich aus in Teilaufgaben?
     subagents_auto: bool = True
+    #: Zeitlimit fuer die Chat-oder-Recherche-Vorpruefung in Sekunden.
+    triage_timeout: float = 5.0
     #: Eigenes, leichtes Modell fuer die Subagenten. Leer = Hauptmodell.
     subagent_model: str = ""
     #: Werkzeug-Budget je Subagent.
@@ -312,6 +314,7 @@ def get_settings() -> Settings:
         keep_full_results=_env_int("SCOUTR_KEEP_FULL_RESULTS", 4),
         max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 4),
         subagents_auto=_env_bool("SCOUTR_SUBAGENTS_AUTO", True),
+        triage_timeout=float(_env_int("SCOUTR_TRIAGE_TIMEOUT", 5)),
         subagent_model=_env_str("SCOUTR_SUBAGENT_MODEL"),
         subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),

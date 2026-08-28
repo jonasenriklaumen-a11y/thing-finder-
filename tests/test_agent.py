@@ -476,9 +476,14 @@ def test_subagent_tool_without_runner_is_reported(settings: Settings, toolbox: T
 # Automatische Vorrecherche
 # ---------------------------------------------------------------------------
 def _planner_llm(monkeypatch: pytest.MonkeyPatch, tasks: list[str], *answers: str):
-    """Erst die Planungsantwort, dann die normalen Antworten."""
+    """Erst die Planungsantwort, dann die normalen Antworten.
+
+    Die Chat-oder-Recherche-Vorpruefung wird hier fest auf "Recherche"
+    gesetzt -- diese Tests pruefen den Planer, nicht die Vorpruefung.
+    """
     import json as _json
 
+    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
     queue = [_message(content=_json.dumps(tasks))] + [
         _message(content=answer) for answer in answers
     ]
@@ -527,6 +532,7 @@ def test_a_failed_plan_does_not_stop_the_run(
 ) -> None:
     """Scheitert die Planung, macht der Hauptagent einfach selbst weiter."""
     settings.subagents_auto = True
+    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
     monkeypatch.setattr(
         "scoutr.subagents.plan_subtasks",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Planer weg")),
@@ -542,6 +548,7 @@ def test_follow_up_questions_get_the_conversation_as_context(
 ) -> None:
     """'nur die mit 4+ Sternen' ist ohne Vorgeschichte nicht recherchierbar."""
     settings.subagents_auto = True
+    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
     contexts: list[str] = []
 
     def fake_plan(question, settings_arg, context="", limit=4):
@@ -631,6 +638,7 @@ def test_planner_sees_the_location_filter(
 ) -> None:
     """Mit --location muessen auch die Teilfragen den Ort kennen."""
     settings.subagents_auto = True
+    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
     settings.location = "Mönchengladbach"
     seen: dict[str, str] = {}
 
@@ -879,3 +887,147 @@ def test_memory_tool_is_offered_only_with_a_cache(
     )
     names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
     assert "remember" in names
+
+
+# ---------------------------------------------------------------------------
+# Vorpruefung: Chat oder Recherche?
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "greeting",
+    ["hallo", "Hi!", "danke", "Vielen Dank!", "guten Morgen", "ok", "tschüss", "wie geht's?"],
+)
+def test_small_talk_skips_planning_without_any_llm_call(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, greeting: str
+) -> None:
+    """"hallo" darf weder Planer noch Subagenten anwerfen -- und die
+    Vorpruefung selbst kostet hier null Modellaufrufe."""
+    settings.subagents_auto = True
+    calls: list[str] = []
+
+    def completion(**kwargs: Any):
+        calls.append(kwargs["messages"][0]["content"][:30])
+        return _message(content="Hallo! Was soll ich recherchieren?")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    researched: list[Any] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._auto_research",
+        lambda self, q, b: researched.append(q) or 0,
+    )
+    result = Agent(settings, cache=None, toolbox=toolbox).ask(greeting, stream=False)
+    assert researched == []
+    # Genau ein Aufruf: die Antwort selbst. Keine Triage, kein Planer.
+    assert len(calls) == 1
+    assert result.answer
+
+
+def test_ambiguous_messages_ask_the_small_model_with_a_time_limit(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+    settings.subagent_model = "ollama_chat/qwen3:1.7b"
+    settings.triage_timeout = 5.0
+    triage: dict[str, Any] = {}
+
+    def completion(**kwargs: Any):
+        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
+            triage.update(kwargs)
+            return _message(content="CHAT")
+        return _message(content="Gern geschehen!")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    researched: list[Any] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+    )
+    Agent(settings, cache=None, toolbox=toolbox).ask(
+        "das zweite klingt gut, oder was meinst du?", stream=False
+    )
+    assert researched == []
+    # Die Vorpruefung laeuft auf dem kleinen Modell, kurz und hart begrenzt.
+    assert triage["model"] == "ollama_chat/qwen3:1.7b"
+    assert triage["timeout"] == 5.0
+    assert triage["max_tokens"] <= 10
+
+
+def test_research_verdict_starts_the_planner(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+
+    def completion(**kwargs: Any):
+        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
+            return _message(content="RECHERCHE")
+        return _message(content="Ergebnis.")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    researched: list[Any] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+    )
+    Agent(settings, cache=None, toolbox=toolbox).ask(
+        "welche kaffeemuehle bis 150 euro", stream=False
+    )
+    assert researched == ["welche kaffeemuehle bis 150 euro"]
+
+
+def test_triage_failure_defaults_to_research(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Timeout oder toter Server: lieber einmal zu viel geplant als eine
+    echte Frage unbeantwortet."""
+    settings.subagents_auto = True
+
+    def completion(**kwargs: Any):
+        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
+            raise TimeoutError("zu langsam")
+        return _message(content="Ergebnis.")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    researched: list[Any] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+    )
+    events: list[dict[str, Any]] = []
+    agent = Agent(
+        settings,
+        cache=None,
+        toolbox=toolbox,
+        on_event=lambda name, payload: events.append(payload) if name == "triage" else None,
+    )
+    agent.ask("irgendeine frage", stream=False)
+    assert researched == ["irgendeine frage"]
+    assert events[0] == {"decision": "recherche", "source": "fallback"}
+
+
+def test_unclear_triage_answers_default_to_research(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+
+    def completion(**kwargs: Any):
+        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
+            return _message(content="Vielleicht ein bisschen von beidem?")
+        return _message(content="Ergebnis.")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    researched: list[Any] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+    )
+    Agent(settings, cache=None, toolbox=toolbox).ask("hmm schwierig", stream=False)
+    assert researched == ["hmm schwierig"]
+
+
+def test_real_questions_are_never_smalltalk() -> None:
+    """Die Heuristik darf keine echten Fragen schlucken."""
+    from scoutr.agent import SMALL_TALK_RE
+
+    for question in (
+        "hallo, welche cafés in köln haben wlan?",
+        "danke -- und was kostet das teurere?",
+        "wie geht das mit dem export?",
+        "test von notebooks bis 1200 euro",
+        "ok und sonntags?",
+    ):
+        assert not SMALL_TALK_RE.match(question), question
