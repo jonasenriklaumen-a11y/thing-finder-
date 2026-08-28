@@ -1031,3 +1031,142 @@ def test_real_questions_are_never_smalltalk() -> None:
         "ok und sonntags?",
     ):
         assert not SMALL_TALK_RE.match(question), question
+
+
+def test_agent_requests_the_large_context_from_ollama(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Der Hauptaufruf muss num_ctx wirklich mitschicken -- sonst schneidet
+    Ollama den Verlauf still ab und Nachfragen gehen ins Leere."""
+    settings.model = "ollama_chat/gemma4:12b"
+    seen: dict[str, Any] = {}
+
+    def completion(**kwargs: Any):
+        seen.update(kwargs)
+        return _message(content="ok")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
+    assert seen["num_ctx"] == settings.context_tokens
+
+
+# ---------------------------------------------------------------------------
+# Kontext ueber mehrere Turns
+# ---------------------------------------------------------------------------
+def _bare_agent(context_tokens: int) -> Agent:
+    from scoutr.config import Settings as RealSettings
+
+    agent = Agent.__new__(Agent)
+    agent.settings = RealSettings(model="ollama_chat/x", context_tokens=context_tokens)
+    agent.messages = [{"role": "system", "content": "Systemprompt"}]
+    return agent
+
+
+def test_pre_research_blocks_do_not_pile_up(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Jeder Turn hinterliess einen Vorrecherche-Block von mehreren Kilobyte,
+    der nie gekuerzt wurde -- nach zwei Turns lief jedes kleine Fenster ueber
+    und der Anbieter warf den Anfang weg."""
+    from scoutr.agent import PRE_RESEARCH_PREFIX, TRIMMED_RESEARCH
+
+    settings.subagents_auto = True
+    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr(
+        "scoutr.subagents.plan_subtasks", lambda q, s, context="", limit=4: [q]
+    )
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._run_subagents",
+        lambda self, tasks: [{"task": tasks[0], "summary": "Ergebnis. " * 200}],
+    )
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: _message(content="Antwort."),
+    )
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    sizes = []
+    for number in range(4):
+        agent.ask(f"Frage {number}", stream=False)
+        agent._trim_history()
+        sizes.append(sum(len(str(m.get("content") or "")) for m in agent.messages))
+
+    full_blocks = [
+        m
+        for m in agent.messages
+        if str(m.get("content") or "").startswith(PRE_RESEARCH_PREFIX)
+    ]
+    assert len(full_blocks) == 1, "nur der juengste Block darf voll bleiben"
+    assert any(m.get("content") == TRIMMED_RESEARCH for m in agent.messages)
+    # Der Verlauf waechst nur noch um die Antworten, nicht um die Bloecke.
+    assert sizes[-1] - sizes[-2] < 500
+
+
+def test_history_stays_within_the_context_window() -> None:
+    """Laeuft das Fenster ueber, wirft der Anbieter STILL den Anfang weg --
+    lieber selbst kuerzen und den Systemprompt behalten."""
+    for window in (2048, 4096, 16384):
+        agent = _bare_agent(window)
+        for number in range(12):
+            agent.messages.append({"role": "user", "content": f"Frage {number}: " + "x" * 900})
+            agent.messages.append({"role": "assistant", "content": "y" * 900})
+        agent._trim_history()
+        assert agent._history_chars() <= agent._budget_chars(), window
+        assert agent.messages[0]["role"] == "system", window
+
+
+def test_the_current_question_is_never_shortened() -> None:
+    agent = _bare_agent(2048)
+    for number in range(12):
+        agent.messages.append({"role": "user", "content": f"alte Frage {number} " + "x" * 900})
+        agent.messages.append({"role": "assistant", "content": "y" * 900})
+    agent.messages.append({"role": "user", "content": "Die aktuelle Frage " + "z" * 900})
+    agent._trim_history()
+    assert agent.messages[-1]["content"].endswith("z" * 100)
+
+
+def test_tool_calls_and_answers_stay_paired_while_trimming() -> None:
+    """Ein Aufruf ohne Antwort (oder umgekehrt) macht den Verlauf ungueltig."""
+    agent = _bare_agent(1024)
+    for number in range(8):
+        agent.messages.append({"role": "user", "content": "F" * 400})
+        agent.messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"c{number}",
+                        "type": "function",
+                        "function": {"name": "web_search", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        agent.messages.append(
+            {"role": "tool", "tool_call_id": f"c{number}", "name": "web_search",
+             "content": "R" * 400}
+        )
+        agent.messages.append({"role": "assistant", "content": "A" * 400})
+
+    agent._trim_history()
+    call_ids = {
+        call["id"] for message in agent.messages for call in (message.get("tool_calls") or [])
+    }
+    answer_ids = {m["tool_call_id"] for m in agent.messages if m.get("role") == "tool"}
+    assert call_ids == answer_ids
+    assert agent.messages[1]["role"] != "tool", "keine verwaiste Tool-Antwort vorn"
+
+
+def test_earlier_questions_survive_a_normal_conversation(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Der eigentliche Wunsch: Nachfragen muessen die frueheren Turns kennen."""
+    settings.context_tokens = 16384
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(*[_message(content="ok")] * 5))
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    for number in range(5):
+        agent.ask(f"Frage Nummer {number}", stream=False)
+    text = " ".join(str(m.get("content") or "") for m in agent.messages)
+    for number in range(5):
+        assert f"Frage Nummer {number}" in text

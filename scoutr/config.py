@@ -214,6 +214,12 @@ class Settings:
     subagents_auto: bool = True
     #: Zeitlimit fuer die Chat-oder-Recherche-Vorpruefung in Sekunden.
     triage_timeout: float = 5.0
+    #: Kontextfenster fuer lokale Ollama-Modelle in Token. Ollama nimmt sonst
+    #: seinen winzigen Default (2048-4096) und wirft bei Ueberlauf STILL den
+    #: Anfang des Verlaufs weg -- Systemprompt und fruehere Fragen zuerst.
+    #: Genau so fuehlt sich "er erinnert sich nicht an die letzte Frage" an.
+    #: 0 = Ollama-Default benutzen.
+    context_tokens: int = 16384
     #: Eigenes, leichtes Modell fuer die Subagenten. Leer = Hauptmodell.
     subagent_model: str = ""
     #: Werkzeug-Budget je Subagent.
@@ -256,12 +262,7 @@ class Settings:
 
     def llm_kwargs(self) -> dict[str, object]:
         """Zusatzargumente fuer `litellm.completion` mit dem Hauptmodell."""
-        kwargs: dict[str, object] = {}
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        return kwargs
+        return self.llm_kwargs_for(self.model)
 
     def llm_kwargs_for(self, model: str) -> dict[str, object]:
         """Zusatzargumente fuer einen Aufruf mit *model*.
@@ -271,10 +272,20 @@ class Settings:
         sie falsch -- eine lokale Ollama-Basis-URL an Anthropic zu schicken
         bricht den Aufruf. Dann lieber nichts mitgeben: LiteLLM findet den
         richtigen Key selbst in der Umgebung.
+
+        Ollama-Modelle bekommen zusaetzlich `num_ctx`: ohne das gilt Ollamas
+        winziger Default und der Verlauf wird bei Ueberlauf still vorn
+        abgeschnitten -- das Modell "vergisst" dann die letzte Frage.
         """
+        kwargs: dict[str, object] = {}
         if provider_of(model) == provider_of(self.model):
-            return self.llm_kwargs()
-        return {}
+            if self.api_base:
+                kwargs["api_base"] = self.api_base
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+        if provider_of(model) in ("ollama", "ollama_chat") and self.context_tokens > 0:
+            kwargs["num_ctx"] = self.context_tokens
+        return kwargs
 
     def missing_requirements(self) -> list[str]:
         """Liste menschenlesbarer Hinweise auf fehlende Pflichtangaben."""
@@ -315,6 +326,7 @@ def get_settings() -> Settings:
         max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 4),
         subagents_auto=_env_bool("SCOUTR_SUBAGENTS_AUTO", True),
         triage_timeout=float(_env_int("SCOUTR_TRIAGE_TIMEOUT", 5)),
+        context_tokens=_env_int("SCOUTR_CONTEXT_TOKENS", 16384),
         subagent_model=_env_str("SCOUTR_SUBAGENT_MODEL"),
         subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),

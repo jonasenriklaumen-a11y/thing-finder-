@@ -446,10 +446,28 @@ scoutr search "cafés mönchengladbach" -n 5
 Lokale Modelle scheitern anders als Cloud-Modelle. scoutr fängt die drei häufigsten Fälle
 ab:
 
-* **Kontextüberlauf.** Zwanzig Werkzeug-Ergebnisse mit je mehreren Kilobyte sprengen ein
-  8k-Fenster sicher. scoutr kürzt ältere Ausgaben im Verlauf auf einen Platzhalter und
-  behält nur die jüngsten vollständig (`SCOUTR_KEEP_FULL_RESULTS`, Default 4). Einzelne
-  Ergebnisse sind auf `SCOUTR_MAX_TOOL_CHARS` (Default 8000) begrenzt.
+* **Kontextüberlauf — die häufigste Ursache für „er vergisst die letzte Frage".**
+  Läuft das Fenster über, wirft der Anbieter *still* den **Anfang** weg: erst den
+  Systemprompt, dann die früheren Fragen. Das Gespräch wirkt dann wie zurückgesetzt.
+  scoutr beugt zweifach vor:
+
+  1. **Ein ausreichend großes Fenster anfordern.** Ollama nimmt sonst seinen Default von
+     2048–4096 Token — nach einer recherchierten Antwort ist der schon voll. scoutr
+     schickt `num_ctx` mit (`SCOUTR_CONTEXT_TOKENS`, Default 16384). Bei Cloud-Anbietern
+     entfällt das, die kennen den Parameter nicht.
+  2. **Selbst kürzen statt gekürzt werden**, in fünf Stufen: ältere Werkzeug-Ausgaben →
+     Platzhalter (`SCOUTR_KEEP_FULL_RESULTS`, Default 4); ältere Vorrecherche-Blöcke →
+     Platzhalter (sie wiederholten sich sonst jeden Turn); dann älteste Nachrichten
+     eindampfen, notfalls ganz verwerfen. Systemprompt und aktuelle Frage bleiben immer
+     stehen, und Werkzeugaufrufe werden nie von ihren Antworten getrennt.
+
+  Einzelne Ergebnisse sind zusätzlich auf `SCOUTR_MAX_TOOL_CHARS` (Default 8000) begrenzt.
+
+  Passt dein Modell mehr, dreh auf — `gemma4:12b` kann 128k, kostet aber VRAM:
+
+  ```bash
+  SCOUTR_CONTEXT_TOKENS=32768
+  ```
 * **Abgestürzter Runner.** Bei `model runner has unexpectedly stopped` entlädt scoutr alle
   Modelle und versucht es erneut, statt den Durchlauf zu verlieren.
 * **Wackelige Verbindung.** Timeouts, 502/503 und Rate-Limits werden bis zu
@@ -593,6 +611,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `4` |
 | `SCOUTR_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
 | `SCOUTR_TRIAGE_TIMEOUT` | Zeitlimit der Chat-oder-Recherche-Prüfung (s) | `5` |
+| `SCOUTR_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
 | `SCOUTR_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
 | `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
 | `SCOUTR_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |

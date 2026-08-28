@@ -143,6 +143,24 @@ PRE_RESEARCH_PREFIX = "Zu deiner Unterstuetzung wurde die Anfrage"
 #: Platzhalter fuer aeltere Werkzeug-Ergebnisse, die aus dem Verlauf fliegen.
 TRIMMED_NOTE = "[gekuerzt -- aeltere Werkzeug-Ausgabe, die Fakten stehen in der Antwort]"
 
+#: Platzhalter fuer aeltere Vorrecherche-Bloecke.
+TRIMMED_RESEARCH = "[gekuerzt -- Vorrecherche eines frueheren Turns, das Ergebnis steht unten]"
+
+#: Grob: ein Token sind etwa vier Zeichen. Reicht, um den Verlauf unter dem
+#: Fenster zu halten -- genau zaehlen muessten wir je Modell anders.
+CHARS_PER_TOKEN = 4
+
+#: Wie viel des Fensters fuer die Antwort und die naechste Werkzeugrunde
+#: frei bleiben muss.
+ANSWER_RESERVE = 0.30
+
+#: So viele Nachrichten am Ende bleiben immer unangetastet -- der laufende
+#: Turn darf nie beschnitten werden.
+PROTECTED_TAIL = 6
+
+#: Auf so viel wird eine alte Nachricht eingedampft, wenn der Platz knapp wird.
+SHRUNK_LENGTH = 300
+
 
 #: Fehler, die ein zweiter Versuch sicher NICHT behebt -- auch wenn LiteLLM
 #: sie als APIConnectionError etikettiert.
@@ -607,15 +625,32 @@ class Agent:
 
         return self._finish(result, question)
 
-    def _trim_history(self) -> None:
-        """Haelt den Verlauf klein genug fuer kleine Kontextfenster.
+    def _history_chars(self) -> int:
+        return sum(len(str(message.get("content") or "")) for message in self.messages)
 
-        Lokale Modelle haben oft nur ein paar tausend Token Platz. Zwanzig
-        Werkzeug-Ergebnisse mit je mehreren Kilobyte sprengen das sicher --
-        und ein ueberlaufender Kontext ist die haeufigste Ursache dafuer, dass
-        ein lokaler Lauf mittendrin unbrauchbar wird. Aeltere Ausgaben werden
-        deshalb durch einen Platzhalter ersetzt; die juengsten bleiben ganz.
+    def _budget_chars(self) -> int:
+        """Wie viele Zeichen der Verlauf hoechstens belegen darf."""
+        window = self.settings.context_tokens
+        if window <= 0:
+            window = 8192  # Annahme fuer Anbieter ohne eigene Angabe
+        return int(window * CHARS_PER_TOKEN * (1 - ANSWER_RESERVE))
+
+    def _trim_history(self) -> None:
+        """Haelt den Verlauf sicher unter dem Kontextfenster.
+
+        Laeuft das Fenster ueber, wirft der Anbieter still den ANFANG weg --
+        Systemprompt und fruehere Fragen zuerst. Genau so fuehlt sich
+        "er erinnert sich nicht mehr an die letzte Frage" an. Deshalb kuerzen
+        wir lieber selbst und kontrolliert, in drei Stufen:
+
+        1. Aeltere Werkzeug-Ausgaben werden zu einem Platzhalter.
+        2. Aeltere Vorrecherche-Bloecke ebenso -- sie wiederholen sich sonst
+           jeden Turn und fressen das Fenster auf.
+        3. Reicht das nicht, werden aelteste Nachrichten eingedampft. Nie
+           geloescht: ein Werkzeugaufruf ohne Antwort macht den Verlauf
+           ungueltig. Systemprompt und laufender Turn bleiben unangetastet.
         """
+        # -- Stufe 1: alte Werkzeug-Ausgaben ------------------------------
         keep = max(1, self.settings.keep_full_results)
         tool_indexes = [
             index
@@ -626,6 +661,65 @@ class Agent:
             message = self.messages[index]
             if message.get("content") != TRIMMED_NOTE:
                 message["content"] = TRIMMED_NOTE
+
+        # -- Stufe 2: alte Vorrecherche-Bloecke ---------------------------
+        research_indexes = [
+            index
+            for index, message in enumerate(self.messages)
+            if str(message.get("content") or "").startswith(PRE_RESEARCH_PREFIX)
+        ]
+        for index in research_indexes[:-1]:
+            self.messages[index]["content"] = TRIMMED_RESEARCH
+
+        # -- Stufe 3: notfalls die aeltesten Nachrichten eindampfen -------
+        budget = self._budget_chars()
+        if self._history_chars() <= budget:
+            return
+        last_protected = max(1, len(self.messages) - PROTECTED_TAIL)
+        if self._shrink_range(1, last_protected, budget):
+            return
+
+        # -- Stufe 4: aelteste Nachrichten ganz verwerfen ------------------
+        self._drop_oldest(budget)
+
+        # -- Stufe 5: bei sehr kleinem Fenster auch den Schwanz ------------
+        # Sechs volle Nachrichten koennen ein 2k-Fenster allein sprengen.
+        # Dann muss auch der laufende Turn dran -- nur die letzten beiden
+        # (aktuelle Frage und eine laufende Werkzeugantwort) bleiben ganz,
+        # sonst wuesste das Modell nicht mehr, worum es gerade geht.
+        self._shrink_range(
+            max(1, len(self.messages) - PROTECTED_TAIL),
+            max(1, len(self.messages) - 2),
+            budget,
+        )
+
+    def _drop_oldest(self, budget: int) -> None:
+        """Verwirft die aeltesten Nachrichten, bis der Verlauf passt.
+
+        Vorsichtig: eine Assistant-Nachricht mit Werkzeugaufrufen darf nie
+        ohne ihre Antworten stehenbleiben, und eine Tool-Antwort nie ohne
+        ihren Aufruf -- beides macht den Verlauf fuer die API ungueltig.
+        Deshalb wird nach jedem Wurf so lange weiter verworfen, bis vorne
+        wieder eine eigenstaendige Nachricht steht.
+        """
+        while self._history_chars() > budget and len(self.messages) > PROTECTED_TAIL + 1:
+            del self.messages[1]
+            # Verwaiste Tool-Antworten hinterherwerfen.
+            while len(self.messages) > PROTECTED_TAIL + 1 and (
+                self.messages[1].get("role") == "tool"
+            ):
+                del self.messages[1]
+
+    def _shrink_range(self, start: int, stop: int, budget: int) -> bool:
+        """Dampft Nachrichten von *start* bis *stop* ein. `True`, wenn es reicht."""
+        for index in range(start, stop):
+            if self._history_chars() <= budget:
+                return True
+            content = str(self.messages[index].get("content") or "")
+            if len(content) <= SHRUNK_LENGTH:
+                continue
+            self.messages[index]["content"] = content[:SHRUNK_LENGTH].rstrip() + " […]"
+        return self._history_chars() <= budget
 
     def _run_tool_call(self, call: dict[str, Any]) -> None:
         """Fuehrt einen einzelnen Tool-Call aus und haengt das Ergebnis an."""

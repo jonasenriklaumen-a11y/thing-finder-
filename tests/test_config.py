@@ -195,7 +195,8 @@ def test_kwargs_for_the_same_provider_are_passed_through(
         model="ollama_chat/gemma4:12b", api_base="http://localhost:11434"
     )
     assert settings.llm_kwargs_for("ollama_chat/llava:7b") == {
-        "api_base": "http://localhost:11434"
+        "api_base": "http://localhost:11434",
+        "num_ctx": 16384,
     }
 
 
@@ -216,4 +217,42 @@ def test_main_model_key_is_not_sent_to_other_providers(
     settings = config.Settings(
         model="anthropic/claude-sonnet-4-6", subagent_model="ollama_chat/qwen3:1.7b"
     )
-    assert settings.llm_kwargs_for(settings.effective_subagent_model) == {}
+    kwargs = settings.llm_kwargs_for(settings.effective_subagent_model)
+    # Kein fremder Key -- aber das Kontextfenster bekommt das lokale Modell.
+    assert "api_key" not in kwargs and "api_base" not in kwargs
+    assert kwargs["num_ctx"] == 16384
+
+
+
+# ---------------------------------------------------------------------------
+# Kontextfenster fuer lokale Modelle
+# ---------------------------------------------------------------------------
+def test_ollama_models_get_a_real_context_window() -> None:
+    """Ohne num_ctx nimmt Ollama 2048-4096 Token und wirft bei Ueberlauf
+    still den Verlaufsanfang weg -- "er erinnert sich nicht an die letzte
+    Frage" ist genau dieses Symptom."""
+    settings = config.Settings(model="ollama_chat/gemma4:12b")
+    assert settings.llm_kwargs()["num_ctx"] == 16384
+    assert config.Settings(model="ollama/llama3.1").llm_kwargs()["num_ctx"] == 16384
+
+
+def test_cloud_models_never_get_num_ctx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fremde Anbieter kennen den Parameter nicht -- er darf nie mitgehen."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    for model in ("anthropic/claude-sonnet-4-6", "openai/gpt-4o", "nvidia_nim/meta/llama-3.3"):
+        settings = config.Settings(model=model)
+        assert "num_ctx" not in settings.llm_kwargs(), model
+
+
+def test_context_tokens_is_configurable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SCOUTR_MODEL", "ollama_chat/gemma4:12b")
+    monkeypatch.setenv("SCOUTR_CONTEXT_TOKENS", "32768")
+    assert config.get_settings().llm_kwargs()["num_ctx"] == 32768
+
+
+def test_context_tokens_zero_uses_the_ollama_default() -> None:
+    settings = config.Settings(model="ollama_chat/x", context_tokens=0)
+    assert "num_ctx" not in settings.llm_kwargs()
