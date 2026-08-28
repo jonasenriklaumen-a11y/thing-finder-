@@ -74,6 +74,12 @@ class ChatRenderer:
         self._skips.append(f"{_domain(payload.get('url', ''))} uebersprungen: {reason}")
         self._update_reading()
 
+    def _on_planning(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(("  [Plane] ", "bold magenta"), ("zerlege die Anfrage ...", "dim"))
+        )
+
     def _on_subagents(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         tasks = payload.get("tasks", [])

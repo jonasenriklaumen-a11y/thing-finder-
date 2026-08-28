@@ -192,3 +192,92 @@ def test_result_serialisation() -> None:
     broken = SubagentResult(task="Frage", error="kaputt").as_dict()
     assert broken["error"] == "kaputt"
     assert "summary" not in broken
+
+
+# ---------------------------------------------------------------------------
+# Planung
+# ---------------------------------------------------------------------------
+def test_planner_returns_the_task_list(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from scoutr.subagents import plan_subtasks
+
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: _reply(content='["Teil A", "Teil B", "Teil C"]'),
+    )
+    assert plan_subtasks("Frage", settings) == ["Teil A", "Teil B", "Teil C"]
+
+
+def test_planner_respects_the_limit(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    from scoutr.subagents import plan_subtasks
+
+    monkeypatch.setattr(
+        "litellm.completion", lambda **kwargs: _reply(content='["a","b","c","d","e","f"]')
+    )
+    assert len(plan_subtasks("Frage", settings, limit=2)) == 2
+
+
+def test_planner_falls_back_to_the_question(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Unbrauchbare Planung darf den Ablauf nicht aendern."""
+    from scoutr.subagents import plan_subtasks
+
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="keine Ahnung"))
+    assert plan_subtasks("Meine Frage", settings) == ["Meine Frage"]
+
+
+def test_planner_survives_a_dead_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from scoutr.subagents import plan_subtasks
+
+    def failing(**kwargs: Any):
+        raise RuntimeError("weg")
+
+    monkeypatch.setattr("litellm.completion", failing)
+    assert plan_subtasks("Meine Frage", settings) == ["Meine Frage"]
+
+
+def test_planner_gets_the_context(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    from scoutr.subagents import plan_subtasks
+
+    captured: dict[str, Any] = {}
+
+    def completion(**kwargs: Any):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return _reply(content='["x"]')
+
+    monkeypatch.setattr("litellm.completion", completion)
+    plan_subtasks("nur die sonntags", settings, context="Nutzer: Cafés in Köln")
+    assert "Cafés in Köln" in captured["prompt"]
+
+
+def test_subagents_use_their_own_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Ein leichtes Modell fuer die Teilfragen, das grosse bleibt beim Hauptagenten."""
+    settings.subagent_model = "ollama_chat/qwen3:1.7b"
+    used: list[str] = []
+
+    def completion(**kwargs: Any):
+        used.append(kwargs["model"])
+        return _reply(content="fertig")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    run_subagents(["Teilfrage"], settings, parallel=1)
+    assert used == ["ollama_chat/qwen3:1.7b"]
+
+
+def test_without_its_own_model_the_main_one_is_used(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    settings.subagent_model = ""
+    used: list[str] = []
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: used.append(kwargs["model"]) or _reply(content="fertig"),
+    )
+    run_subagents(["Teilfrage"], settings, parallel=1)
+    assert used == [settings.model]

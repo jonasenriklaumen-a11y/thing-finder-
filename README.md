@@ -165,12 +165,13 @@ Pro Nutzeranfrage:
 
 ### Subagenten: Teilfragen parallel
 
-Zerfällt eine Anfrage in unabhängige Teile, darf das Hauptmodell sie abgeben, statt alles
-selbst nacheinander abzuarbeiten:
+scoutr zerlegt **jede** Anfrage von sich aus in Teilfragen und lässt sie parallel
+bearbeiten, bevor der Hauptagent übernimmt:
 
 ```
 > vergleiche das Lenovo Yoga Pro 7, das ThinkPad X1 und das Zenbook 14
 
+  [Plane] zerlege die Anfrage ...
   [Teile] 3 Teilfragen
           Specs und Straßenpreis des Lenovo Yoga Pro 7 (14", Ryzen 7)
           Specs und Straßenpreis des ThinkPad X1 Carbon Gen 12
@@ -182,11 +183,39 @@ selbst nacheinander abzuarbeiten:
 Jeder Subagent hat dieselben zwei Werkzeuge, ein eigenes kleines Budget (Default 6
 Aufrufe) und liefert eine knappe Zusammenfassung mit Quellen zurück. Zwei laufen
 gleichzeitig — bei lokalen Modellen bringt mehr wenig, weil die GPU ohnehin nacheinander
-rechnet. Der Hauptverlauf bleibt dadurch kurz, was bei kleinen Kontextfenstern den
-Unterschied macht.
+rechnet. Lässt sich eine Anfrage nicht sinnvoll teilen, entsteht genau eine Teilfrage und
+der Ablauf bleibt wie zuvor. Nachfragen wie „nur die mit 4+ Sternen" bekommen das
+bisherige Gespräch als Zusammenhang mit, damit die Teilfragen für sich verständlich sind.
 
-Abschalten mit `SCOUTR_MAX_SUBAGENTS=0` — dann bleiben es die ursprünglichen zwei
-Werkzeuge.
+Der Hauptagent darf zusätzlich jederzeit selbst weitere Teilfragen abgeben
+(`research_subtasks`), wenn ihm im Verlauf etwas fehlt.
+
+**Abschalten** fragt `scoutr setup` direkt ab, oder von Hand:
+
+```bash
+SCOUTR_SUBAGENTS_AUTO=false     # nur noch auf Wunsch des Modells
+SCOUTR_MAX_SUBAGENTS=0          # ganz aus, zurück zu zwei Werkzeugen
+```
+
+#### Eigenes Modell für die Subagenten
+
+Teilfragen sind eng umrissen — dafür reicht ein kleines Modell, das neben dem
+Hauptmodell in den Speicher passt. `scoutr install-model` fragt danach; Stand August 2026:
+
+| Modell | ca. Größe | ab VRAM |
+|---|---|---|
+| `qwen3:0.6b` | 0,5 GB | 2 GB |
+| `qwen3:1.7b` | 1,4 GB | 3 GB |
+| `gemma4:e2b` | 1,8 GB | 3 GB |
+| `qwen2.5:3b` | 1,9 GB | 4 GB |
+| `qwen3:4b` | 2,5 GB | 5 GB |
+
+```bash
+SCOUTR_SUBAGENT_MODEL=ollama_chat/qwen3:1.7b   # leer = Hauptmodell
+```
+
+Wichtig ist hier nur eines: Das Modell muss zuverlässig Werkzeuge aufrufen. Klug sein
+darf das Hauptmodell, das die Ergebnisse am Ende zusammenführt.
 
 **Grenzen:** maximal 20 Tool-Calls pro Anfrage, dann wird der Zwischenstand ausgegeben.
 Was nicht gefunden wurde, wird als „nicht gefunden" gekennzeichnet — niemals geraten.
@@ -535,6 +564,8 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_LANG` / `SCOUTR_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
 | `SCOUTR_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
 | `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `4` |
+| `SCOUTR_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
+| `SCOUTR_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
 | `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
 | `SCOUTR_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
 | `SCOUTR_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
@@ -620,6 +651,12 @@ Modell im Speicher liegt. Stand August 2026:
 scoutr liest den VRAM per `nvidia-smi` aus und schlägt danach vor — ohne GPU rechnet er
 mit 70 % des Arbeitsspeichers, weil auf der CPU nicht alles nutzbar ist. Passt ein
 Modell, das beides kann, wird kein zweites geladen.
+
+**Die Hardware empfiehlt, sie entscheidet nicht.** Die Liste zeigt immer alle Modelle,
+und du kannst jedes davon wählen — oder einen beliebigen Namen aus dem Ollama-Katalog
+eintippen. Passt eines rechnerisch nicht, sagt scoutr das als Hinweis und lädt es
+trotzdem: Ein Modell läuft notfalls teilweise auf der CPU, das ist langsam, aber deine
+Entscheidung.
 
 Jedes andere Ollama-Modell mit Werkzeug-Unterstützung geht auch — `--model` nimmt jeden
 Namen aus dem [Ollama-Katalog](https://ollama.com/library).

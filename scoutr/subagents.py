@@ -39,6 +39,78 @@ Deine Teilfrage lautet:
 %(task)s"""
 
 
+PLANNER_PROMPT = """\
+Zerlege die folgende Nutzeranfrage in eigenstaendige Teilfragen, die sich \
+unabhaengig voneinander im Web recherchieren lassen.
+
+Regeln:
+- Hoechstens %(limit)d Teilfragen, lieber weniger.
+- Jede Teilfrage muss FUER SICH verstaendlich sein: Ort, Produkt, Zeitraum und \
+Kriterium gehoeren hinein, auch wenn sie in der Anfrage nur einmal vorkommen.
+- Zerlege nach Sachen, die getrennt gesucht werden koennen: einzelne Kandidaten, \
+einzelne Orte, einzelne Kriterien.
+- Laesst sich die Anfrage nicht sinnvoll teilen, gib GENAU EINE Teilfrage \
+zurueck, die die Anfrage wiedergibt.
+- Antworte NUR mit einem JSON-Array aus Strings, ohne Erklaerung.
+
+%(context)s
+Anfrage: %(question)s"""
+
+
+def plan_subtasks(
+    question: str,
+    settings: Settings,
+    context: str = "",
+    limit: int = 4,
+) -> list[str]:
+    """Laesst das Hauptmodell die Anfrage in Teilfragen zerlegen.
+
+    Gibt bei Zweifeln eine einzige Teilfrage zurueck -- die Anfrage selbst.
+    So bleibt der Ablauf gleich, auch wenn sich nichts sinnvoll teilen laesst.
+    """
+    import litellm
+
+    litellm.suppress_debug_info = True
+    prompt = PLANNER_PROMPT % {
+        "limit": max(1, limit),
+        "question": question.strip(),
+        "context": f"Bisheriges Gespraech:\n{context}\n" if context.strip() else "",
+    }
+    try:
+        response = litellm.completion(
+            model=settings.model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+            **settings.llm_kwargs(),
+        )
+        raw = (response.choices[0].message.content or "").strip()
+    except Exception:
+        return [question.strip()]
+
+    tasks = _parse_task_list(raw)
+    return tasks[: max(1, limit)] if tasks else [question.strip()]
+
+
+def _parse_task_list(raw: str) -> list[str]:
+    """Zieht ein JSON-Array aus der Antwort des Modells."""
+    if not raw:
+        return []
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        raw = raw.split("\n", 1)[-1] if "\n" in raw else raw
+        raw = raw.rsplit("```", 1)[0]
+    start, end = raw.find("["), raw.rfind("]")
+    if start == -1 or end == -1:
+        return []
+    try:
+        data = json.loads(raw[start : end + 1])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(item).strip() for item in data if str(item).strip()]
+
+
 @dataclass
 class SubagentResult:
     """Was ein Subagent herausgefunden hat."""
@@ -86,7 +158,7 @@ def _run_one(
         while used < budget:
             try:
                 response = litellm.completion(
-                    model=settings.model,
+                    model=settings.effective_subagent_model,
                     messages=messages,
                     tools=TOOL_SCHEMAS,
                     tool_choice="auto",
@@ -158,7 +230,9 @@ def _run_one(
             )
             try:
                 response = litellm.completion(
-                    model=settings.model, messages=messages, **settings.llm_kwargs()
+                    model=settings.effective_subagent_model,
+                    messages=messages,
+                    **settings.llm_kwargs(),
                 )
                 result.summary = (response.choices[0].message.content or "").strip()
             except Exception as exc:

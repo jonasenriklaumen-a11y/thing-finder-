@@ -23,6 +23,7 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SCOUTR_MODEL", "openai/gpt-4o")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("SCOUTR_SUBAGENTS_AUTO", "false")
     monkeypatch.delenv("SCOUTR_LOCATION", raising=False)
     from scoutr.config import reset_settings_cache
 
@@ -574,6 +575,7 @@ def test_blind_vision_model_is_not_written(
             "install-model",
             "--model", "qwen2.5:7b",
             "--vision-model", "blind:1b",
+            "--no-subagents",
             "--env-file", str(target),
         ],
         input="n\n",
@@ -589,7 +591,13 @@ def test_no_vision_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     target = tmp_path / ".env"
     result = runner.invoke(
         cli.app,
-        ["install-model", "--model", "qwen2.5:7b", "--no-vision", "--env-file", str(target)],
+        [
+            "install-model",
+            "--model", "qwen2.5:7b",
+            "--no-vision",
+            "--no-subagents",
+            "--env-file", str(target),
+        ],
     )
     assert result.exit_code == 0, result.output
     assert state["pulled"] == ["qwen2.5:7b"]
@@ -752,7 +760,7 @@ def test_out_of_memory_offers_a_smaller_vision_model(
     target = tmp_path / ".env"
     result = runner.invoke(
         cli.app,
-        ["install-model", "--model", "qwen2.5:7b", "--env-file", str(target)],
+        ["install-model", "--model", "qwen2.5:7b", "--no-subagents", "--env-file", str(target)],
         input="1\n\n1\ny\n",
     )
     assert result.exit_code == 0, result.output
@@ -774,7 +782,8 @@ def test_without_yes_the_user_confirms_the_recommendation(
     target = tmp_path / ".env"
     # Leere Eingabe = Vorauswahl uebernehmen, danach kein Vision-Modell.
     result = runner.invoke(
-        cli.app, ["install-model", "--no-vision", "--env-file", str(target)], input="\n"
+        cli.app, ["install-model", "--no-vision", "--no-subagents", "--env-file", str(target)],
+        input="\n",
     )
     assert result.exit_code == 0, result.output
     assert "Auswahl" in result.output
@@ -799,43 +808,54 @@ def test_yes_takes_the_recommendation_without_asking(
     assert state["pulled"] == ["gemma4:12b"]
 
 
-def test_a_chosen_model_that_is_too_big_needs_confirmation(
+def test_a_chosen_model_that_is_too_big_is_only_flagged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """--model wird gegen den Speicher geprueft, statt blind zu laden."""
+    """Die Hardware empfiehlt -- sie verbietet nichts."""
     from scoutr import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
-    result = runner.invoke(
-        cli.app,
-        ["install-model", "--model", "gemma4:26b", "--env-file", str(tmp_path / ".env")],
-        input="n\n",
-    )
-    assert result.exit_code == 1
-    assert "braucht etwa 24 GB" in result.output
-    assert state["pulled"] == []
-
-
-def test_a_too_big_model_can_be_forced(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from scoutr import local_model as lm
-
-    state = _fake_ollama(monkeypatch)
-    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
+    target = tmp_path / ".env"
     result = runner.invoke(
         cli.app,
         [
             "install-model",
             "--model", "gemma4:26b",
             "--no-vision",
-            "--env-file", str(tmp_path / ".env"),
+            "--no-subagents",
+            "--env-file", str(target),
         ],
-        input="y\n",
     )
     assert result.exit_code == 0, result.output
+    assert "Hinweis:" in result.output
+    assert "braucht etwa 24 GB" in result.output
+    # Trotz Warnung wird geladen, ohne Rueckfrage.
     assert state["pulled"] == ["gemma4:26b"]
+    assert "SCOUTR_MODEL=ollama_chat/gemma4:26b" in target.read_text(encoding="utf-8")
+
+
+def test_no_question_is_asked_about_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ohne jede Eingabe muss der Lauf durchgehen -- es wird nichts gefragt."""
+    from scoutr import local_model as lm
+
+    _fake_ollama(monkeypatch)
+    monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 4.0)
+    result = runner.invoke(
+        cli.app,
+        [
+            "install-model",
+            "--model", "qwen2.5:14b",
+            "--no-vision",
+            "--no-subagents",
+            "--env-file", str(tmp_path / ".env"),
+        ],
+        input="",
+    )
+    assert result.exit_code == 0, result.output
+    assert "Trotzdem laden" not in result.output
 
 
 def test_a_free_model_name_is_not_second_guessed(
@@ -852,6 +872,7 @@ def test_a_free_model_name_is_not_second_guessed(
             "install-model",
             "--model", "eigenes-modell:99b",
             "--no-vision",
+            "--no-subagents",
             "--yes",
             "--env-file", str(tmp_path / ".env"),
         ],

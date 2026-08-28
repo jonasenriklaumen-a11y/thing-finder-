@@ -180,6 +180,60 @@ class Agent:
             return [*TOOL_SCHEMAS, SUBAGENT_SCHEMA]
         return list(TOOL_SCHEMAS)
 
+    def _auto_subagents_wanted(self) -> bool:
+        """Soll vor der eigentlichen Runde automatisch vorrecherchiert werden?"""
+        return self.use_subagents and self.settings.subagents_auto
+
+    def _recent_context(self, turns: int = 2) -> str:
+        """Die letzten Wortmeldungen -- damit Nachfragen verstaendlich bleiben."""
+        parts: list[str] = []
+        for message in self.messages[1:-1]:
+            role = message.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            content = str(message.get("content") or "").strip()
+            if not content:
+                continue
+            parts.append(f"{'Nutzer' if role == 'user' else 'scoutr'}: {content[:400]}")
+        return "\n".join(parts[-turns * 2 :])
+
+    def _auto_research(self, question: str, budget: int) -> int:
+        """Zerlegt die Frage, laesst die Teile parallel bearbeiten, meldet zurueck.
+
+        Returns:
+            Wie viele Werkzeug-Aufrufe das gekostet hat.
+        """
+        from scoutr.subagents import plan_subtasks
+
+        limit = max(1, min(self.settings.max_subagents, 4))
+        self._emit("planning", question=question)
+        try:
+            tasks = plan_subtasks(
+                question, self.settings, context=self._recent_context(), limit=limit
+            )
+        except Exception as exc:
+            # Scheitert die Planung, macht der Hauptagent es eben selbst.
+            self._emit("error", message=f"Planung fehlgeschlagen: {exc}")
+            return 0
+
+        results = self._run_subagents(tasks)
+        spent = sum(int(result.get("tool_calls", 0) or 0) for result in results)
+
+        findings = json.dumps({"vorrecherche": results}, ensure_ascii=False)
+        self.messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "Zu deiner Unterstuetzung wurde die Anfrage bereits in Teilfragen "
+                    "zerlegt und vorrecherchiert. Nutze diese Ergebnisse, pruefe sie "
+                    "gegen die Kriterien des Nutzers und recherchiere nur nach, wo "
+                    "etwas fehlt.\n\n"
+                    + findings[: max(2000, self.settings.max_tool_chars * 2)]
+                ),
+            }
+        )
+        return min(spent, max(0, budget - 1))
+
     def _run_subagents(self, tasks: list[str]) -> list[dict[str, Any]]:
         """Fuehrt Teilfragen parallel aus und zaehlt ihr Budget mit."""
         from scoutr.subagents import run_subagents
@@ -194,7 +248,12 @@ class Agent:
         for result in results:
             self.toolbox.stats.sources.extend(result.sources)
             self.toolbox.stats.searches.extend(result.searches)
-        return [result.as_dict() for result in results]
+        payloads = []
+        for result in results:
+            payload = result.as_dict()
+            payload["tool_calls"] = result.tool_calls
+            payloads.append(payload)
+        return payloads
 
     # -- Zustand ----------------------------------------------------------
     def close(self) -> None:
@@ -341,6 +400,12 @@ class Agent:
 
         budget = max(1, self.settings.max_tool_calls)
         used = 0
+
+        # Automatische Vorrecherche: die Anfrage wird zerlegt und die Teile
+        # laufen parallel, bevor der Hauptagent uebernimmt. Was die
+        # Subagenten schon gefunden haben, steht ihm dann zur Verfuegung.
+        if self._auto_subagents_wanted():
+            used += self._auto_research(question, budget)
 
         while True:
             remaining = budget - used

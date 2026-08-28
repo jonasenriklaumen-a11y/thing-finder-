@@ -91,6 +91,21 @@ VISION_MODELS: tuple[LocalModel, ...] = (
 
 DEFAULT_VISION_MODEL = VISION_MODELS[0]
 
+#: Leichte Modelle fuer die Subagenten. Sie bekommen eng umrissene
+#: Teilfragen und muessen vor allem eines koennen: zuverlaessig Werkzeuge
+#: aufrufen. Klein ist hier wichtiger als klug -- mehrere laufen parallel
+#: neben dem Hauptmodell, und der Speicher ist endlich.
+#: Stand August 2026, Groessen sind Richtwerte fuer Q4.
+SUBAGENT_MODELS: tuple[LocalModel, ...] = (
+    LocalModel("qwen3:1.7b", 1.4, 3, "Klein und flink, ruft zuverlaessig Werkzeuge auf"),
+    LocalModel("qwen2.5:3b", 1.9, 4, "Etwas groesser, etwas gruendlicher"),
+    LocalModel("gemma4:e2b", 1.8, 3, "Sparsamste Gemma-Variante"),
+    LocalModel("qwen3:4b", 2.5, 5, "Merklich besser, wenn Platz ist"),
+    LocalModel("qwen3:0.6b", 0.5, 2, "Winzig -- nur fuer sehr enge Teilfragen"),
+)
+
+DEFAULT_SUBAGENT_MODEL = SUBAGENT_MODELS[0]
+
 
 class LocalModelError(RuntimeError):
     """Etwas an der lokalen Einrichtung ist schiefgegangen."""
@@ -435,10 +450,24 @@ def recommend_dual_model(memory_gb: float | None = None) -> LocalModel:
     return _recommend(DUAL_MODELS, memory_gb)
 
 
+def recommend_subagent_model(
+    memory_gb: float | None = None, main: LocalModel | None = None
+) -> LocalModel:
+    """Waehlt ein leichtes Modell fuer die Subagenten.
+
+    Gerechnet wird mit dem Platz, der neben dem Hauptmodell uebrig bleibt --
+    beide liegen im Betrieb gleichzeitig im Speicher.
+    """
+    available = memory_gb if memory_gb is not None else usable_memory_gb()
+    if available is not None and main is not None:
+        available = max(1.0, available - main.size_gb - 1.0)
+    return _recommend(SUBAGENT_MODELS, available)
+
+
 def known_model(name: str) -> LocalModel | None:
     """Findet *name* im Katalog -- oder `None` bei einem freien Namen."""
     bare = name.split("/", 1)[-1].strip()
-    for model in (*DUAL_MODELS, *LOCAL_MODELS, *VISION_MODELS):
+    for model in (*DUAL_MODELS, *LOCAL_MODELS, *VISION_MODELS, *SUBAGENT_MODELS):
         if model.name == bare:
             return model
     return None

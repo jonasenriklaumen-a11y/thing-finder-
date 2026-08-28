@@ -210,6 +210,10 @@ class Settings:
     keep_full_results: int = 4
     #: Obergrenze fuer parallele Subagenten.
     max_subagents: int = 4
+    #: Zerlegt scoutr jede Frage von sich aus in Teilaufgaben?
+    subagents_auto: bool = True
+    #: Eigenes, leichtes Modell fuer die Subagenten. Leer = Hauptmodell.
+    subagent_model: str = ""
     #: Werkzeug-Budget je Subagent.
     subagent_budget: int = 6
     fetch_timeout: float = 15.0
@@ -233,6 +237,11 @@ class Settings:
     @property
     def effective_vision_model(self) -> str:
         return self.vision_model or self.model
+
+    @property
+    def effective_subagent_model(self) -> str:
+        """Womit die Subagenten arbeiten -- notfalls mit dem Hauptmodell."""
+        return self.subagent_model or self.model
 
     @property
     def api_key_name(self) -> str:
@@ -289,6 +298,8 @@ def get_settings() -> Settings:
         max_tool_chars=_env_int("SCOUTR_MAX_TOOL_CHARS", 8000),
         keep_full_results=_env_int("SCOUTR_KEEP_FULL_RESULTS", 4),
         max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 4),
+        subagents_auto=_env_bool("SCOUTR_SUBAGENTS_AUTO", True),
+        subagent_model=_env_str("SCOUTR_SUBAGENT_MODEL"),
         subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),
         cache_ttl_hours=_env_int("SCOUTR_CACHE_TTL_HOURS", 24),

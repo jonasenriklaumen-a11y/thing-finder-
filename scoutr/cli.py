@@ -232,15 +232,23 @@ def setup_command(
             backend_key_name, default=current, hide_input=not current
         ).strip()
 
+    # -- Subagenten ---------------------------------------------------------
+    console.print("\n[bold]3. Subagenten[/bold]")
+    console.print(
+        "  [dim]scoutr kann jede Anfrage in Teilfragen zerlegen und parallel "
+        "recherchieren.\n  Das ist gruendlicher, kostet aber mehr Aufrufe.[/dim]"
+    )
+    subagents_on = typer.confirm("  Subagenten automatisch nutzen?", default=True)
+
     # -- Ort ---------------------------------------------------------------
-    console.print("\n[bold]3. Voreinstellungen[/bold]")
+    console.print("\n[bold]4. Voreinstellungen[/bold]")
     location = typer.prompt("Standard-Ort (optional, z.B. Moenchengladbach)", default="").strip()
     lang = typer.prompt("Sprache (ISO-Code)", default="de").strip() or "de"
     country = typer.prompt("Land (ISO-Code)", default="de").strip() or "de"
 
     # -- Proben ------------------------------------------------------------
     if not no_probe:
-        console.print("\n[bold]4. Verbindungstest[/bold]")
+        console.print("\n[bold]5. Verbindungstest[/bold]")
         if api_key:
             os.environ[key_name] = api_key
         if backend_key:
@@ -269,6 +277,7 @@ def setup_command(
         "SCOUTR_LOCATION": location,
         "SCOUTR_LANG": lang,
         "SCOUTR_COUNTRY": country,
+        "SCOUTR_SUBAGENTS_AUTO": "true" if subagents_on else "false",
     }
     if key_name and api_key:
         values[key_name] = api_key
@@ -609,22 +618,20 @@ def _pick_local_model(
     return answer
 
 
-def _confirm_size(name: str, budget: float | None, assume_yes: bool) -> bool:
-    """Warnt, wenn ein ausdruecklich genanntes Modell zu gross ist.
+def _note_size(name: str, budget: float | None) -> None:
+    """Weist darauf hin, wenn ein Modell knapp werden koennte.
 
-    Bei einem freien Ollama-Namen kennen wir die Groesse nicht und lassen ihn
-    kommentarlos durch -- wir raten nicht.
+    Es bleibt bei einem Hinweis: Was installiert wird, entscheidet der
+    Nutzer. Die Hardware liefert nur Empfehlungen, keine Sperren -- ein
+    Modell laeuft notfalls auch teilweise auf der CPU, das ist langsam,
+    aber nicht verboten.
     """
     from scoutr import local_model as lm
 
     warning = lm.too_big(name, budget)
-    if not warning:
-        return True
-    console.print(f"  [yellow]{warning}[/yellow]")
-    if assume_yes:
-        console.print("  [dim]--yes gesetzt, wird trotzdem geladen.[/dim]")
-        return True
-    return bool(typer.confirm("  Trotzdem laden?", default=False))
+    if warning:
+        console.print(f"  [yellow]Hinweis:[/yellow] {warning}")
+        console.print("  [dim]Wird trotzdem geladen -- du hast es so gewaehlt.[/dim]")
 
 
 def _pull_if_needed(name: str, already: set[str]) -> bool:
@@ -649,6 +656,62 @@ def _pull_if_needed(name: str, already: set[str]) -> bool:
     suffix = f" [dim]({size} GB)[/dim]" if size else ""
     console.print(f"  [green]geladen[/green]{suffix}")
     return True
+
+
+def _run_subagent_setup(model_name: str = "", assume_yes: bool = False) -> str:
+    """Richtet ein leichtes Modell fuer die Subagenten ein.
+
+    Sie bearbeiten eng umrissene Teilfragen -- dafuer reicht ein kleines
+    Modell, und es laeuft neben dem Hauptmodell im Speicher.
+    """
+    from scoutr import local_model as lm
+
+    console.print("\n[bold]6. Modell fuer die Subagenten[/bold] [dim](optional)[/dim]")
+    console.print(
+        "  [dim]Teilfragen sind eng umrissen -- ein kleines Modell reicht dafuer "
+        "und laeuft neben dem Hauptmodell.[/dim]"
+    )
+    if not (model_name or assume_yes) and not typer.confirm(
+        "  Eigenes, leichtes Modell dafuer laden?", default=True
+    ):
+        console.print("  [dim]Uebersprungen -- die Subagenten nutzen das Hauptmodell.[/dim]")
+        return ""
+
+    already = set(lm.installed_models())
+    if model_name:
+        chosen = model_name
+        _note_size(chosen, lm.usable_memory_gb())
+    else:
+        main = lm.known_model(_current_main_model())
+        recommended = lm.recommend_subagent_model(lm.usable_memory_gb(), main)
+        chosen = _pick_local_model(
+            lm.SUBAGENT_MODELS, recommended, already, "Subagenten-Modell", assume_yes
+        )
+
+    if not _pull_if_needed(chosen, already):
+        return ""
+
+    model_id = f"{lm.MODEL_PREFIX}/{chosen}"
+    lm.free_memory()
+    console.print("  [dim]Tool-Calling pruefen ...[/dim]")
+    works, detail = lm.verify_tool_calling(model_id)
+    if works:
+        console.print(f"  [green]OK[/green]  {detail}")
+        return model_id
+    console.print(f"  [red]FEHLER[/red]  {detail}")
+    console.print(
+        "  [yellow]Ohne Werkzeugaufrufe kann ein Subagent nicht recherchieren.[/yellow] "
+        "[dim]Die Subagenten nutzen weiter das Hauptmodell.[/dim]"
+    )
+    return ""
+
+
+#: Merkt sich das gewaehlte Hauptmodell fuer die Speicherrechnung.
+_MAIN_MODEL_NAME = ""
+
+
+def _current_main_model() -> str:
+    return _MAIN_MODEL_NAME
 
 
 def _run_vision_setup(
@@ -677,8 +740,7 @@ def _run_vision_setup(
     already = set(lm.installed_models())
     if model_name:
         chosen = model_name
-        if not _confirm_size(chosen, lm.usable_memory_gb(), assume_yes):
-            return ""
+        _note_size(chosen, lm.usable_memory_gb())
     else:
         recommended = lm.recommend_vision_model(lm.usable_memory_gb())
         chosen = _pick_local_model(
@@ -763,20 +825,22 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
     already = set(lm.installed_models())
     if model_name:
         chosen = model_name
-        if not _confirm_size(chosen, budget, assume_yes):
-            return ""
+        _note_size(chosen, budget)
     else:
         main, _, why = lm.plan_setup(budget)
         console.print(f"  [cyan]{why}[/cyan]")
         # Modelle, die auch Bilder koennen, zuerst -- sie sparen ein zweites.
         candidates = tuple(lm.DUAL_MODELS) + tuple(lm.LOCAL_MODELS)
         chosen = _pick_local_model(candidates, main, already, "Modell", assume_yes)
+        _note_size(chosen, budget)
 
     # -- 4. Laden ----------------------------------------------------------
     if not _pull_if_needed(chosen, already):
         return ""
 
     # -- 5. Tool-Calling pruefen ------------------------------------------
+    global _MAIN_MODEL_NAME
+    _MAIN_MODEL_NAME = chosen
     model_id = f"{lm.MODEL_PREFIX}/{chosen}"
     lm.free_memory()
     console.print("\n[bold]4. Tool-Calling pruefen[/bold]")
@@ -809,6 +873,12 @@ def install_model_command(
     ),
     vision_only: bool = typer.Option(
         False, "--vision-only", help="Nur das Vision-Modell einrichten."
+    ),
+    subagent_model: str = typer.Option(
+        "", "--subagent-model", help="Leichtes Modell fuer die Subagenten, z.B. qwen3:1.7b."
+    ),
+    subagents: bool = typer.Option(
+        True, "--subagents/--no-subagents", help="Eigenes Modell fuer die Subagenten laden."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Rueckfragen ueberspringen."),
     env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
@@ -849,6 +919,13 @@ def install_model_command(
                 values.update(vision_env_values(vision_id))
         elif main_can_see:
             _run_vision_setup(assume_yes=True, main_can_see=True)
+
+        # Ein kleines Modell fuer die Teilfragen -- es laeuft neben dem
+        # Hauptmodell, deshalb lieber sparsam.
+        if subagent_model or (subagents and not yes):
+            helper = _run_subagent_setup(subagent_model, assume_yes=yes)
+            if helper:
+                values["SCOUTR_SUBAGENT_MODEL"] = helper
 
     target = env_file or find_env_file() or DEFAULT_ENV_PATH
     written = write_env_file(values, target)

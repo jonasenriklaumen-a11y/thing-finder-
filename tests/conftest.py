@@ -30,4 +30,7 @@ def settings(tmp_path: Path):
         request_delay_seconds=0.0,
         fetch_timeout=5.0,
         enable_playwright=False,
+        # Die automatische Vorrecherche wird gezielt in eigenen Tests
+        # geprueft -- sonst verbraucht sie hier ueberall einen LLM-Aufruf.
+        subagents_auto=False,
     )

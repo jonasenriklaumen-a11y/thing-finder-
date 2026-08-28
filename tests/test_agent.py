@@ -469,3 +469,108 @@ def test_subagent_results_reach_the_parent(
 
 def test_subagent_tool_without_runner_is_reported(settings: Settings, toolbox: Toolbox) -> None:
     assert "nicht aktiv" in toolbox.call("research_subtasks", {"tasks": ["x"]})["error"]
+
+
+# ---------------------------------------------------------------------------
+# Automatische Vorrecherche
+# ---------------------------------------------------------------------------
+def _planner_llm(monkeypatch: pytest.MonkeyPatch, tasks: list[str], *answers: str):
+    """Erst die Planungsantwort, dann die normalen Antworten."""
+    import json as _json
+
+    queue = [_message(content=_json.dumps(tasks))] + [
+        _message(content=answer) for answer in answers
+    ]
+    llm = ScriptedLLM(*queue)
+    monkeypatch.setattr("litellm.completion", llm)
+    return llm
+
+
+def test_every_question_is_split_automatically(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+    _planner_llm(monkeypatch, ["Teil A", "Teil B"], "Endantwort")
+
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._run_subagents",
+        lambda self, tasks: seen.append(tasks) or [{"task": t, "summary": "ok"} for t in tasks],
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Zusammengesetzte Frage", stream=False)
+
+    assert seen == [["Teil A", "Teil B"]]
+    assert result.answer == "Endantwort"
+    # Die Vorrecherche steht dem Hauptagenten zur Verfuegung.
+    assert any("vorrecherche" in str(m.get("content", "")) for m in agent.messages)
+
+
+def test_auto_research_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = False
+    llm = ScriptedLLM(_message(content="direkt geantwortet"))
+    monkeypatch.setattr("litellm.completion", llm)
+    called: list[Any] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._run_subagents", lambda self, tasks: called.append(tasks) or []
+    )
+    result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
+    assert called == []
+    assert result.answer == "direkt geantwortet"
+
+
+def test_a_failed_plan_does_not_stop_the_run(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Scheitert die Planung, macht der Hauptagent einfach selbst weiter."""
+    settings.subagents_auto = True
+    monkeypatch.setattr(
+        "scoutr.subagents.plan_subtasks",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Planer weg")),
+    )
+    llm = ScriptedLLM(_message(content="trotzdem geantwortet"))
+    monkeypatch.setattr("litellm.completion", llm)
+    result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
+    assert result.answer == "trotzdem geantwortet"
+
+
+def test_follow_up_questions_get_the_conversation_as_context(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """'nur die mit 4+ Sternen' ist ohne Vorgeschichte nicht recherchierbar."""
+    settings.subagents_auto = True
+    contexts: list[str] = []
+
+    def fake_plan(question, settings_arg, context="", limit=4):
+        contexts.append(context)
+        return [question]
+
+    monkeypatch.setattr("scoutr.subagents.plan_subtasks", fake_plan)
+    monkeypatch.setattr("scoutr.agent.Agent._run_subagents", lambda self, tasks: [])
+    llm = ScriptedLLM(_message(content="erste"), _message(content="zweite"))
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Cafés in Köln", stream=False)
+    agent.ask("nur die mit 4+ Sternen", stream=False)
+
+    assert contexts[0] == ""
+    assert "Cafés in Köln" in contexts[1]
+
+
+def test_subagent_calls_count_towards_the_budget(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+    settings.max_tool_calls = 10
+    _planner_llm(monkeypatch, ["A"], "fertig")
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._run_subagents",
+        lambda self, tasks: [{"task": "A", "summary": "ok", "tool_calls": 5}],
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Frage", stream=False)
+    # Der Hauptagent darf danach nicht so tun, als haette er das volle Budget.
+    assert agent.last_result is not None
