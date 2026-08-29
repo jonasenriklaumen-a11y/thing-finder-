@@ -375,3 +375,114 @@ def test_dead_main_model_stays_dead(
     results = run_subagents(["Teilfrage"], settings, parallel=1)
     assert results[0].error
     assert calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Tempo: ein Aufruf, kleines Modell, kein Denk-Modus
+# ---------------------------------------------------------------------------
+def test_plan_request_returns_decision_and_tasks(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from scoutr.subagents import plan_request
+
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: _reply(content='{"recherche": true, "teilfragen": ["A", "B"]}'),
+    )
+    assert plan_request("Frage", settings) == (True, ["A", "B"])
+
+
+def test_plan_request_detects_chat(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    from scoutr.subagents import plan_request
+
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: _reply(content='{"recherche": false, "teilfragen": []}'),
+    )
+    assert plan_request("danke dir", settings) == (False, [])
+
+
+def test_plan_request_uses_the_small_model_without_thinking(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Der Planer lief frueher auf dem grossen Modell -- auf einer knappen
+    Karte kostete allein der Modellwechsel mehr als der Aufruf."""
+    from scoutr.subagents import plan_request
+
+    settings.model = "ollama_chat/gemma4:12b"
+    settings.subagent_model = "ollama_chat/qwen3:1.7b"
+    captured: dict[str, Any] = {}
+
+    def completion(**kwargs: Any):
+        captured.update(kwargs)
+        return _reply(content='{"recherche": true, "teilfragen": ["A"]}')
+
+    monkeypatch.setattr("litellm.completion", completion)
+    plan_request("Frage", settings)
+    assert captured["model"] == "ollama_chat/qwen3:1.7b"
+    assert captured["reasoning_effort"] == "disable"
+    assert captured["num_ctx"] == 2048
+    assert captured["max_tokens"] <= 200
+    assert captured["response_format"]["json_schema"]["schema"]["required"] == [
+        "recherche",
+        "teilfragen",
+    ]
+
+
+def test_plan_request_survives_garbage(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from scoutr.subagents import plan_request
+
+    for answer in ("kein JSON", "", '{"kaputt":'):
+        monkeypatch.setattr(
+            "litellm.completion",
+            lambda _answer=answer, **kwargs: _reply(content=_answer),
+        )
+        needs, tasks = plan_request("Meine Frage", settings)
+        assert needs is True
+        assert tasks == ["Meine Frage"]
+
+
+def test_plan_request_accepts_a_bare_array(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Manche Modelle ignorieren das Schema und liefern nur die Liste."""
+    from scoutr.subagents import plan_request
+
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content='["A", "B"]'))
+    assert plan_request("Frage", settings) == (True, ["A", "B"])
+
+
+def test_plan_request_respects_the_limit(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from scoutr.subagents import plan_request
+
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: _reply(
+            content='{"recherche": true, "teilfragen": ["a","b","c","d","e"]}'
+        ),
+    )
+    assert len(plan_request("Frage", settings, limit=2)[1]) == 2
+
+
+def test_subagents_run_without_thinking_mode(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Vier parallele Subagenten, die erst seitenlang ueberlegen, sind der
+    Unterschied zwischen zehn und dreissig Sekunden."""
+    settings.model = "ollama_chat/gemma4:12b"
+    settings.subagent_model = "ollama_chat/qwen3:1.7b"
+    captured: dict[str, Any] = {}
+
+    def completion(**kwargs: Any):
+        captured.update(kwargs)
+        return _reply(content="fertig")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    run_subagents(["Teilfrage"], settings, parallel=1)
+    assert captured["reasoning_effort"] == "disable"
+    # Aber volles Fenster -- Subagenten lesen ganze Seiten.
+    assert captured["num_ctx"] == settings.context_tokens

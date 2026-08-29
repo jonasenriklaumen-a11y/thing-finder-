@@ -226,6 +226,8 @@ class Agent:
         if self.use_subagents:
             self.toolbox.subagent_runner = self._run_subagents
         self.last_result: AgentResult | None = None
+        #: Teilfragen aus der Vorpruefung, damit nicht zweimal geplant wird.
+        self._planned_tasks: list[str] | None = None
 
     @property
     def tools(self) -> list[dict[str, Any]]:
@@ -246,43 +248,46 @@ class Agent:
         return self.use_subagents and self.settings.subagents_auto
 
     def _needs_research(self, question: str) -> bool:
-        """Kurze Vorpruefung: braucht diese Nachricht ueberhaupt eine Recherche?
+        """Vorpruefung UND Planung in einem Schritt.
 
-        "hallo" oder "danke" sollen keinen Planungs- und Subagenten-Apparat
-        anwerfen. Stufe 1 ist eine Heuristik (kostet nichts), Stufe 2 ein
-        winziger Modellaufruf mit hartem Zeitlimit. Faellt der aus oder
-        dauert er zu lange, gilt sicherheitshalber: Recherche -- lieber
-        einmal zu viel geplant als eine echte Frage unbeantwortet.
+        Frueher waren das zwei Aufrufe auf zwei Modellen -- Vorpruefung
+        klein, Planung gross. Auf einer Karte, die nur eines gleichzeitig
+        haelt, kostete der Wechsel dazwischen mehr als beide Aufrufe. Jetzt:
+        ein Aufruf auf dem kleinen Modell, ohne Denk-Modus, mit erzwungenem
+        JSON. Die Teilfragen fallen dabei ab und werden gemerkt, damit
+        `_auto_research` nicht noch einmal fragen muss.
+
+        Stufe 1 bleibt die Heuristik: "hallo" kostet weiterhin gar nichts.
         """
+        from scoutr.subagents import plan_request
+
+        self._planned_tasks = None
         text = question.strip()
         if not text or SMALL_TALK_RE.match(text):
             self._emit("triage", decision="chat", source="heuristik")
             return False
 
-        import litellm
-
-        litellm.suppress_debug_info = True
-        model = self.settings.effective_subagent_model
         started = time.monotonic()
-        try:
-            response = litellm.completion(
-                model=model,
-                messages=[{"role": "user", "content": TRIAGE_PROMPT % text[:400]}],
-                max_tokens=10,
-                timeout=max(1.0, self.settings.triage_timeout),
-                **self.settings.llm_kwargs_for(model),
-            )
-            answer = (response.choices[0].message.content or "").strip().lower()
-        except Exception:
-            self._emit("triage", decision="recherche", source="fallback")
-            return True
-
+        needs, tasks = plan_request(
+            text,
+            self.settings,
+            context=self._planner_context(),
+            limit=max(1, min(self.settings.max_subagents, 4)),
+        )
         elapsed = round(time.monotonic() - started, 2)
-        if "chat" in answer and "recherche" not in answer:
+        if not needs:
             self._emit("triage", decision="chat", source="modell", seconds=elapsed)
             return False
+        self._planned_tasks = tasks
         self._emit("triage", decision="recherche", source="modell", seconds=elapsed)
         return True
+
+    def _planner_context(self) -> str:
+        """Gespraechskontext plus Ortsfilter fuer die Planung."""
+        context = self._recent_context()
+        if self.settings.location:
+            context = f"[Ortsfilter: {self.settings.location}]\n{context}".strip()
+        return context
 
     def _recent_context(self, turns: int = 2) -> str:
         """Die letzten Wortmeldungen -- damit Nachfragen verstaendlich bleiben.
@@ -312,18 +317,21 @@ class Agent:
         from scoutr.subagents import plan_subtasks
 
         limit = max(1, min(self.settings.max_subagents, 4))
-        self._emit("planning", question=question)
-        context = self._recent_context()
-        if self.settings.location:
-            # Sonst planen die Teilfragen ohne den Ort aus --location/.env
-            # und die Subagenten suchen weltweit.
-            context = f"[Ortsfilter: {self.settings.location}]\n{context}".strip()
-        try:
-            tasks = plan_subtasks(question, self.settings, context=context, limit=limit)
-        except Exception as exc:
-            # Scheitert die Planung, macht der Hauptagent es eben selbst.
-            self._emit("error", message=f"Planung fehlgeschlagen: {exc}")
-            return 0
+        tasks = getattr(self, "_planned_tasks", None)
+        if tasks:
+            # Die Vorpruefung hat die Teilfragen schon mitgeliefert -- ein
+            # zweiter Planungsaufruf waere reine Wartezeit.
+            self._planned_tasks = None
+        else:
+            self._emit("planning", question=question)
+            try:
+                tasks = plan_subtasks(
+                    question, self.settings, context=self._planner_context(), limit=limit
+                )
+            except Exception as exc:
+                # Scheitert die Planung, macht der Hauptagent es eben selbst.
+                self._emit("error", message=f"Planung fehlgeschlagen: {exc}")
+                return 0
 
         results = self._run_subagents(tasks)
         spent = sum(int(result.get("tool_calls", 0) or 0) for result in results)

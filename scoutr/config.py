@@ -214,6 +214,8 @@ class Settings:
     subagents_auto: bool = True
     #: Zeitlimit fuer die Chat-oder-Recherche-Vorpruefung in Sekunden.
     triage_timeout: float = 5.0
+    #: Zeitlimit fuer den Planungsschritt in Sekunden.
+    planner_timeout: float = 20.0
     #: Kontextfenster fuer lokale Ollama-Modelle in Token. Ollama nimmt sonst
     #: seinen winzigen Default (2048-4096) und wirft bei Ueberlauf STILL den
     #: Anfang des Verlaufs weg -- Systemprompt und fruehere Fragen zuerst.
@@ -287,6 +289,20 @@ class Settings:
             kwargs["num_ctx"] = self.context_tokens
         return kwargs
 
+    def fast_kwargs_for(self, model: str) -> dict[str, object]:
+        """Wie :meth:`llm_kwargs_for`, aber auf Tempo getrimmt.
+
+        Fuer Vorpruefung und Planung: kein Denk-Modus (Qwen3 & Co. wuerden
+        sonst erst seitenweise ueberlegen, bevor drei Stichworte kommen) und
+        ein kleines Kontextfenster -- die Prompts sind ein paar hundert
+        Token lang, ein 16k-Fenster kostet dort nur Ladezeit.
+        """
+        kwargs = self.llm_kwargs_for(model)
+        if provider_of(model) in ("ollama", "ollama_chat"):
+            kwargs["num_ctx"] = 2048
+            kwargs["reasoning_effort"] = "disable"
+        return kwargs
+
     def missing_requirements(self) -> list[str]:
         """Liste menschenlesbarer Hinweise auf fehlende Pflichtangaben."""
         problems: list[str] = []
@@ -326,6 +342,7 @@ def get_settings() -> Settings:
         max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 4),
         subagents_auto=_env_bool("SCOUTR_SUBAGENTS_AUTO", True),
         triage_timeout=float(_env_int("SCOUTR_TRIAGE_TIMEOUT", 5)),
+        planner_timeout=float(_env_int("SCOUTR_PLANNER_TIMEOUT", 20)),
         context_tokens=_env_int("SCOUTR_CONTEXT_TOKENS", 16384),
         subagent_model=_env_str("SCOUTR_SUBAGENT_MODEL"),
         subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),

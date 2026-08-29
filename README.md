@@ -185,11 +185,25 @@ Pro Nutzeranfrage:
 
 Vor jeder Planung schaut scoutr kurz auf die Nachricht: **Braucht das überhaupt eine
 Recherche?** Offensichtlicher Small-Talk („hallo", „danke") wird per Heuristik erkannt und
-kostet keinen einzigen Modellaufruf; bei allem anderen entscheidet das kleine
-Subagenten-Modell mit einem Wort — hart begrenzt auf 5 Sekunden
-(`SCOUTR_TRIAGE_TIMEOUT`). Fällt die Prüfung aus oder dauert zu lange, gilt
-sicherheitshalber „Recherche" — lieber einmal zu viel geplant als eine echte Frage
-unbeantwortet.
+kostet keinen einzigen Modellaufruf. Bei allem anderen liefert **ein einziger Aufruf**
+Entscheidung *und* Teilfragen — auf dem kleinen Subagenten-Modell, mit abgeschaltetem
+Denk-Modus, kleinem Fenster und erzwungenem JSON-Schema. Fällt er aus oder dauert zu
+lange (`SCOUTR_PLANNER_TIMEOUT`, Default 20 s), gilt sicherheitshalber „Recherche" —
+lieber einmal zu viel geplant als eine echte Frage unbeantwortet.
+
+Warum das schnell ist — vier Hebel:
+
+| Vorher | Jetzt |
+|---|---|
+| zwei Aufrufe (Prüfung + Planung) | **einer** |
+| Planung auf dem **großen** Modell | auf dem kleinen |
+| dadurch 4 Modellwechsel pro Anfrage | **einer** |
+| Denk-Modus an, `max_tokens=400`, 16k-Fenster | aus, `200`, 2k-Fenster |
+
+Der dritte Punkt ist auf knappen Karten der größte: Wenn Ollama zwischen großem und
+kleinem Modell hin- und herladen muss, kostet allein das mehr als alle Aufrufe zusammen.
+Jetzt läuft alles vor der eigentlichen Antwort auf dem kleinen Modell. Auch die
+Subagenten arbeiten ohne Denk-Modus — bei vier parallelen summiert sich das.
 
 Recherche-Anfragen zerlegt scoutr dann von sich aus in Teilfragen und lässt sie parallel
 bearbeiten, bevor der Hauptagent übernimmt:
@@ -610,7 +624,8 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
 | `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `4` |
 | `SCOUTR_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
-| `SCOUTR_TRIAGE_TIMEOUT` | Zeitlimit der Chat-oder-Recherche-Prüfung (s) | `5` |
+| `SCOUTR_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
+| `SCOUTR_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
 | `SCOUTR_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
 | `SCOUTR_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
 | `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |

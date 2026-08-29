@@ -40,21 +40,102 @@ Deine Teilfrage lautet:
 
 
 PLANNER_PROMPT = """\
-Zerlege die folgende Nutzeranfrage in eigenstaendige Teilfragen, die sich \
-unabhaengig voneinander im Web recherchieren lassen.
+Du bist die Vorstufe eines Rechercheagenten. Entscheide zweierlei und antworte \
+NUR mit JSON.
 
-Regeln:
-- Hoechstens %(limit)d Teilfragen, lieber weniger.
-- Jede Teilfrage muss FUER SICH verstaendlich sein: Ort, Produkt, Zeitraum und \
-Kriterium gehoeren hinein, auch wenn sie in der Anfrage nur einmal vorkommen.
-- Zerlege nach Sachen, die getrennt gesucht werden koennen: einzelne Kandidaten, \
-einzelne Orte, einzelne Kriterien.
-- Laesst sich die Anfrage nicht sinnvoll teilen, gib GENAU EINE Teilfrage \
-zurueck, die die Anfrage wiedergibt.
-- Antworte NUR mit einem JSON-Array aus Strings, ohne Erklaerung.
+1. Braucht die Nachricht eine Web-Recherche? Blosse Konversation (Gruss, Dank, \
+Meinung, Frage an dich selbst) braucht keine. Nachfragen zu einer laufenden \
+Recherche brauchen eine.
+2. Wenn ja: zerlege sie in hoechstens %(limit)d eigenstaendige Teilfragen. Jede muss \
+FUER SICH verstaendlich sein -- Ort, Produkt, Zeitraum und Kriterium gehoeren hinein. \
+Laesst sich nichts sinnvoll teilen, gib genau eine zurueck.
 
-%(context)s
-Anfrage: %(question)s"""
+Format: {"recherche": true, "teilfragen": ["...", "..."]}
+Bei blosser Konversation: {"recherche": false, "teilfragen": []}
+
+%(context)sNachricht: %(question)s"""
+
+#: Ein knappes Schema haelt kleine Modelle bei der Sache und beendet die
+#: Ausgabe frueher -- das ist der Loewenanteil der Wartezeit.
+PLANNER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "recherche": {"type": "boolean"},
+        "teilfragen": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["recherche", "teilfragen"],
+}
+
+
+def plan_request(
+    question: str,
+    settings: Settings,
+    context: str = "",
+    limit: int = 4,
+) -> tuple[bool, list[str]]:
+    """Entscheidet Recherche-oder-Chat UND zerlegt -- in EINEM Aufruf.
+
+    Vorher waren das zwei Aufrufe auf zwei verschiedenen Modellen: die
+    Vorpruefung auf dem kleinen, die Planung auf dem grossen. Auf einer
+    Karte, die nur eines gleichzeitig haelt, kostete allein der Wechsel
+    mehr als beide Aufrufe zusammen. Jetzt laeuft beides auf dem kleinen
+    Modell, ohne Denk-Modus und mit erzwungenem JSON.
+
+    Returns:
+        (braucht_recherche, teilfragen). Im Zweifel `(True, [question])` --
+        lieber einmal zu viel recherchiert als eine Frage verschluckt.
+    """
+    import litellm
+
+    litellm.suppress_debug_info = True
+    model = settings.effective_subagent_model
+    prompt = PLANNER_PROMPT % {
+        "limit": max(1, limit),
+        "question": question.strip()[:600],
+        "context": f"Bisheriges Gespraech:\n{context}\n\n" if context.strip() else "",
+    }
+    try:
+        response = litellm.completion(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            timeout=max(2.0, settings.planner_timeout),
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "plan", "schema": PLANNER_SCHEMA},
+            },
+            **settings.fast_kwargs_for(model),
+        )
+        raw = (response.choices[0].message.content or "").strip()
+    except Exception:
+        return True, [question.strip()]
+
+    return _parse_plan(raw, question, limit)
+
+
+def _parse_plan(raw: str, question: str, limit: int) -> tuple[bool, list[str]]:
+    """Liest die Planer-Antwort; faellt bei Unklarheit auf Recherche zurueck."""
+    payload: Any = None
+    if raw:
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end != -1:
+            try:
+                payload = json.loads(raw[start : end + 1])
+            except json.JSONDecodeError:
+                payload = None
+
+    if not isinstance(payload, dict):
+        # Vielleicht kam nur ein nacktes Array -- auch das nehmen wir.
+        tasks = _parse_task_list(raw)
+        return True, (tasks[:limit] if tasks else [question.strip()])
+
+    if payload.get("recherche") is False:
+        return False, []
+
+    tasks = [
+        str(item).strip() for item in (payload.get("teilfragen") or []) if str(item).strip()
+    ]
+    return True, (tasks[:limit] if tasks else [question.strip()])
 
 
 def plan_subtasks(
@@ -63,32 +144,9 @@ def plan_subtasks(
     context: str = "",
     limit: int = 4,
 ) -> list[str]:
-    """Laesst das Hauptmodell die Anfrage in Teilfragen zerlegen.
-
-    Gibt bei Zweifeln eine einzige Teilfrage zurueck -- die Anfrage selbst.
-    So bleibt der Ablauf gleich, auch wenn sich nichts sinnvoll teilen laesst.
-    """
-    import litellm
-
-    litellm.suppress_debug_info = True
-    prompt = PLANNER_PROMPT % {
-        "limit": max(1, limit),
-        "question": question.strip(),
-        "context": f"Bisheriges Gespraech:\n{context}\n" if context.strip() else "",
-    }
-    try:
-        response = litellm.completion(
-            model=settings.model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=400,
-            **settings.llm_kwargs(),
-        )
-        raw = (response.choices[0].message.content or "").strip()
-    except Exception:
-        return [question.strip()]
-
-    tasks = _parse_task_list(raw)
-    return tasks[: max(1, limit)] if tasks else [question.strip()]
+    """Nur die Zerlegung -- fuer Aufrufer, die die Entscheidung schon kennen."""
+    _, tasks = plan_request(question, settings, context, limit)
+    return tasks or [question.strip()]
 
 
 def _parse_task_list(raw: str) -> list[str]:
@@ -109,6 +167,21 @@ def _parse_task_list(raw: str) -> list[str]:
     if not isinstance(data, list):
         return []
     return [str(item).strip() for item in data if str(item).strip()]
+
+
+def _subagent_kwargs(settings: Settings, model: str) -> dict[str, Any]:
+    """Aufrufargumente fuer einen Subagenten.
+
+    Volles Kontextfenster (sie lesen ganze Seiten), aber ohne Denk-Modus:
+    eine eng umrissene Teilfrage braucht keine seitenlange Ueberlegung, und
+    bei vier parallelen Subagenten summiert sich das spuerbar.
+    """
+    kwargs = settings.llm_kwargs_for(model)
+    from scoutr.config import provider_of
+
+    if provider_of(model) in ("ollama", "ollama_chat"):
+        kwargs["reasoning_effort"] = "disable"
+    return kwargs
 
 
 @dataclass
@@ -166,7 +239,7 @@ def _run_one(
                     messages=messages,
                     tools=TOOL_SCHEMAS,
                     tool_choice="auto",
-                    **settings.llm_kwargs_for(model_in_use),
+                    **_subagent_kwargs(settings, model_in_use),
                 )
             except Exception as exc:
                 if model_in_use != settings.model:
@@ -262,7 +335,7 @@ def _run_one(
                 response = litellm.completion(
                     model=model_in_use,
                     messages=messages,
-                    **settings.llm_kwargs_for(model_in_use),
+                    **_subagent_kwargs(settings, model_in_use),
                 )
                 result.summary = (response.choices[0].message.content or "").strip()
             except Exception as exc:

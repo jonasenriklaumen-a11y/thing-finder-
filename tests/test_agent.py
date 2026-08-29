@@ -924,15 +924,17 @@ def test_small_talk_skips_planning_without_any_llm_call(
 def test_ambiguous_messages_ask_the_small_model_with_a_time_limit(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
+    """Ein Aufruf, kleines Modell, kein Denk-Modus, erzwungenes JSON."""
     settings.subagents_auto = True
     settings.subagent_model = "ollama_chat/qwen3:1.7b"
-    settings.triage_timeout = 5.0
-    triage: dict[str, Any] = {}
+    settings.model = "ollama_chat/gemma4:12b"
+    settings.planner_timeout = 20.0
+    planner: dict[str, Any] = {}
 
     def completion(**kwargs: Any):
-        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
-            triage.update(kwargs)
-            return _message(content="CHAT")
+        if "response_format" in kwargs:
+            planner.update(kwargs)
+            return _message(content='{"recherche": false, "teilfragen": []}')
         return _message(content="Gern geschehen!")
 
     monkeypatch.setattr("litellm.completion", completion)
@@ -944,10 +946,39 @@ def test_ambiguous_messages_ask_the_small_model_with_a_time_limit(
         "das zweite klingt gut, oder was meinst du?", stream=False
     )
     assert researched == []
-    # Die Vorpruefung laeuft auf dem kleinen Modell, kurz und hart begrenzt.
-    assert triage["model"] == "ollama_chat/qwen3:1.7b"
-    assert triage["timeout"] == 5.0
-    assert triage["max_tokens"] <= 10
+    # Laeuft auf dem kleinen Modell, nicht auf dem grossen -- das spart auf
+    # einer knappen Karte den Modellwechsel.
+    assert planner["model"] == "ollama_chat/qwen3:1.7b"
+    assert planner["timeout"] == 20.0
+    assert planner["max_tokens"] <= 200
+    assert planner["reasoning_effort"] == "disable"
+    assert planner["num_ctx"] == 2048
+
+
+def test_one_call_covers_triage_and_planning(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Frueher zwei Aufrufe -- jetzt liefert einer Entscheidung UND Teilfragen."""
+    settings.subagents_auto = True
+    planner_calls = {"n": 0}
+
+    def completion(**kwargs: Any):
+        if "response_format" in kwargs:
+            planner_calls["n"] += 1
+            return _message(
+                content='{"recherche": true, "teilfragen": ["Teil A", "Teil B"]}'
+            )
+        return _message(content="Antwort.")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._run_subagents",
+        lambda self, tasks: seen.append(tasks) or [{"task": t, "summary": "ok"} for t in tasks],
+    )
+    Agent(settings, cache=None, toolbox=toolbox).ask("Zusammengesetzte Frage", stream=False)
+    assert seen == [["Teil A", "Teil B"]]
+    assert planner_calls["n"] == 1, "kein zweiter Planungsaufruf"
 
 
 def test_research_verdict_starts_the_planner(
@@ -956,8 +987,8 @@ def test_research_verdict_starts_the_planner(
     settings.subagents_auto = True
 
     def completion(**kwargs: Any):
-        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
-            return _message(content="RECHERCHE")
+        if "response_format" in kwargs:
+            return _message(content='{"recherche": true, "teilfragen": ["Teil"]}')
         return _message(content="Ergebnis.")
 
     monkeypatch.setattr("litellm.completion", completion)
@@ -979,7 +1010,7 @@ def test_triage_failure_defaults_to_research(
     settings.subagents_auto = True
 
     def completion(**kwargs: Any):
-        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
+        if "response_format" in kwargs:
             raise TimeoutError("zu langsam")
         return _message(content="Ergebnis.")
 
@@ -988,16 +1019,8 @@ def test_triage_failure_defaults_to_research(
     monkeypatch.setattr(
         "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
-    events: list[dict[str, Any]] = []
-    agent = Agent(
-        settings,
-        cache=None,
-        toolbox=toolbox,
-        on_event=lambda name, payload: events.append(payload) if name == "triage" else None,
-    )
-    agent.ask("irgendeine frage", stream=False)
+    Agent(settings, cache=None, toolbox=toolbox).ask("irgendeine frage", stream=False)
     assert researched == ["irgendeine frage"]
-    assert events[0] == {"decision": "recherche", "source": "fallback"}
 
 
 def test_unclear_triage_answers_default_to_research(
@@ -1006,7 +1029,7 @@ def test_unclear_triage_answers_default_to_research(
     settings.subagents_auto = True
 
     def completion(**kwargs: Any):
-        if "RECHERCHE oder CHAT" in str(kwargs["messages"][0]["content"]):
+        if "response_format" in kwargs:
             return _message(content="Vielleicht ein bisschen von beidem?")
         return _message(content="Ergebnis.")
 
