@@ -486,3 +486,13 @@ def test_subagents_run_without_thinking_mode(
     assert captured["reasoning_effort"] == "disable"
     # Aber volles Fenster -- Subagenten lesen ganze Seiten.
     assert captured["num_ctx"] == settings.context_tokens
+
+
+def test_subagent_prompt_asks_for_detail() -> None:
+    """Was der Subagent weglaesst, ist fuer den Hauptagenten verloren."""
+    from scoutr.subagents import SUBAGENT_PROMPT
+
+    assert "ausfuehrlich" in SUBAGENT_PROMPT.lower()
+    assert "400 Woerter" in SUBAGENT_PROMPT
+    assert "hoechstens 200 Woerter" not in SUBAGENT_PROMPT
+    assert "Rate nie" in SUBAGENT_PROMPT

@@ -29,8 +29,11 @@ Vorgehen: ein bis zwei Suchanfragen, die aussichtsreichsten Treffer lesen, \
 dann antworten.
 
 Regeln:
-- Antworte knapp: hoechstens 200 Woerter.
-- Nenne zu jeder Angabe die Quelle (Domain).
+- Sei ausfuehrlich: gib ALLE gefundenen Fakten weiter, auch Details am Rand \
+(Adresse, Zeiten, Preise, Ausstattung, Einschraenkungen). Deine Antwort ist \
+Rohmaterial fuer den Hauptagenten -- was du weglaesst, ist fuer ihn verloren. \
+Bis zu 400 Woerter.
+- Nenne zu JEDER Angabe die Quelle (Domain), am besten direkt dahinter.
 - Rate nie. Was du nicht gefunden hast, schreibst du als "nicht gefunden".
 - Liefert `fetch_page` einen `skipped_reason`, nimm eine andere Quelle.
 - Kein Vorwort, keine Wiederholung der Frage -- nur das Ergebnis.
@@ -327,7 +330,8 @@ def _run_one(
             messages.append(
                 {
                     "role": "user",
-                    "content": "Fasse jetzt zusammen, was du gefunden hast. "
+                    "content": "Fasse jetzt zusammen, was du gefunden hast -- "
+                    "vollstaendig und mit allen Details samt Quelle je Angabe. "
                     "Offene Punkte kennzeichnest du als 'nicht gefunden'.",
                 }
             )

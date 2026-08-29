@@ -178,8 +178,15 @@ Pro Nutzeranfrage:
    Varianten — nicht nur eine.
 2. Es sucht, sichtet die Treffer und entscheidet, welche Seiten sich zu lesen lohnen.
 3. Es liest die relevanten Seiten und zieht die gewünschten Informationen heraus.
-4. Es fasst zusammen, bewertet gegen die Kriterien des Nutzers und nennt zu jeder Angabe
-   die Quelle.
+4. Es fasst **ausführlich** zusammen, bewertet gegen die Kriterien des Nutzers und nennt
+   zu jeder Angabe die Quelle.
+
+Die Antwort ist bewusst großzügig: Jeder Treffer bekommt alle relevanten Fakten
+(Adresse, Zeiten, Preise, Ausstattung, Einschränkungen), dazu Nebenbefunde, die nicht
+erfragt waren aber nützen — Anfahrt, Alternativen, bekannte Nachteile. Danach ein
+Vergleich der Ergebnisse untereinander, ein kurzes Fazit mit Empfehlung und ein Abschnitt
+„Nicht gefunden:" mit jedem offenen Punkt samt Grund. Vollständigkeit ersetzt dabei nie
+Genauigkeit: gekürzt wird nur, wo sonst geraten werden müsste.
 
 ### Subagenten: Teilfragen parallel
 
@@ -629,6 +636,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
 | `SCOUTR_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
 | `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
+| `SCOUTR_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud `4` |
 | `SCOUTR_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
 | `SCOUTR_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
 | `SCOUTR_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |

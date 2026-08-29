@@ -68,24 +68,40 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 - Kommt `fetch_page` mit strukturierten `products`-Daten zurueck, verwende deren Werte \
 (inklusive `image_url`) woertlich.
 
-Antwortformat:
-- Deutsch, knapp, ohne Vorrede und ohne Wiederholung der Frage.
-- Nummerierte Liste bei mehreren Ergebnissen, je Eintrag: Name, die harten Fakten, dann \
-eine Zeile "Quelle: ...".
-- Am Ende hoechstens ein Satz zu dem, was du nicht klaeren konntest.
+Antwortformat -- sei ausfuehrlich:
+- Deutsch, ohne Vorrede und ohne Wiederholung der Frage, aber GROSSZUEGIG im Inhalt. \
+Gib alles wieder, was du gefunden hast und was fuer die Entscheidung des Nutzers zaehlt.
+- Nummerierte Liste bei mehreren Ergebnissen. Je Eintrag: Name, dann ALLE relevanten \
+Fakten in mehreren Zeilen -- Adresse, Oeffnungszeiten, Preise, Ausstattung, Besonderheiten, \
+Einschraenkungen -- und am Ende eine Zeile "Quelle: ...".
+- Nenne auch Nebenbefunde, die der Nutzer nicht erfragt hat, aber gebrauchen kann: \
+Anfahrt, Alternativen in der Naehe, saisonale Hinweise, bekannte Nachteile.
+- Vergleiche die Ergebnisse aktiv miteinander: Was unterscheidet sie, was passt am besten \
+zu den genannten Kriterien, wovon wuerdest du abraten und warum.
+- Schliesse mit einem kurzen Fazit (zwei bis vier Saetze): deine Empfehlung mit \
+Begruendung.
+- Danach ein Abschnitt "Nicht gefunden:" mit allem, was offen blieb, je Punkt eine Zeile \
+samt Grund (blockiert, nicht oeffentlich, nirgends genannt).
+- Lieber zu viel Information als zu wenig. Kuerze nur, wenn du sonst etwas erfinden \
+muesstest -- Vollstaendigkeit ersetzt niemals Genauigkeit.
 """
 
 BUDGET_PROMPT = """\
 Das Werkzeug-Budget ist aufgebraucht. Beantworte die Frage jetzt mit dem, was du bereits \
-gelesen hast. Kennzeichne offene Punkte ausdruecklich als "nicht gefunden" und weise in \
-einem Satz darauf hin, dass die Recherche am Limit abgebrochen wurde."""
+gelesen hast -- und zwar vollstaendig: gib alle Fakten wieder, die du gesammelt hast, \
+auch Teilergebnisse und Nebenbefunde. Vergleiche, was sich vergleichen laesst, und \
+schliesse mit einer Empfehlung, soweit die Datenlage sie traegt. Liste danach unter \
+"Nicht gefunden:" jeden offenen Punkt einzeln auf und weise darauf hin, dass die \
+Recherche am Limit abgebrochen wurde."""
 
 IMAGE_PROMPT = """\
 Beschreibe, was auf diesem Bild zu sehen ist -- mit Blick darauf, wonach man im Web \
 suchen wuerde. Nenne, wenn erkennbar: Produkt- oder Objektart, Marke, Modellbezeichnung, \
 Aufschriften, Logos, Text im Bild, Farbe und auffaellige Merkmale. Rate nicht: Was du \
-nicht sicher erkennst, laesst du weg. Antworte in hoechstens 120 Woertern auf Deutsch und \
-haenge eine Zeile "Suchbegriffe: ..." mit 3 bis 5 konkreten Suchbegriffen an."""
+nicht sicher erkennst, laesst du weg. Beschreibe ausfuehrlich, was zu sehen ist -- \
+lieber ein Detail zu viel als eines zu wenig, denn daraus entstehen die Suchbegriffe. \
+Antworte auf Deutsch und haenge eine Zeile "Suchbegriffe: ..." mit 3 bis 6 konkreten \
+Suchbegriffen an."""
 
 SPEC_PROMPT = """\
 Aus dem folgenden Seitentext sollen technische Daten eines Produkts als JSON-Objekt \
@@ -267,6 +283,9 @@ class Agent:
             self._emit("triage", decision="chat", source="heuristik")
             return False
 
+        # Sichtbar machen, dass gerade etwas passiert -- der Aufruf kann ein
+        # paar Sekunden dauern, und eine stumme CLI wirkt haengen.
+        self._emit("planning", question=question)
         started = time.monotonic()
         needs, tasks = plan_request(
             text,
@@ -336,17 +355,17 @@ class Agent:
         results = self._run_subagents(tasks)
         spent = sum(int(result.get("tool_calls", 0) or 0) for result in results)
 
-        findings = json.dumps({"vorrecherche": results}, ensure_ascii=False)
+        findings = format_findings(results)
         self.messages.append(
             {
                 "role": "user",
                 "content": (
                     PRE_RESEARCH_PREFIX
                     + " bereits in Teilfragen "
-                    "zerlegt und vorrecherchiert. Nutze diese Ergebnisse, pruefe sie "
-                    "gegen die Kriterien des Nutzers und recherchiere nur nach, wo "
-                    "etwas fehlt.\n\n"
-                    + findings[: max(2000, self.settings.max_tool_chars * 2)]
+                    "zerlegt und vorrecherchiert. Nutze diese Ergebnisse vollstaendig "
+                    "in deiner Antwort, pruefe sie gegen die Kriterien des Nutzers und "
+                    "recherchiere nur nach, wo etwas fehlt.\n\n"
+                    + findings[: max(4000, self.settings.max_tool_chars * 2)]
                 ),
             }
         )
@@ -361,7 +380,7 @@ class Agent:
             self.settings,
             cache=self.cache,
             on_event=self.on_event,
-            parallel=2,
+            parallel=self.settings.effective_parallel,
         )
         for result in results:
             self.toolbox.stats.sources.extend(result.sources)
@@ -898,6 +917,30 @@ class Agent:
 # ---------------------------------------------------------------------------
 # Hilfen
 # ---------------------------------------------------------------------------
+def format_findings(results: list[dict[str, Any]]) -> str:
+    """Vorrecherche als lesbarer Text statt JSON.
+
+    JSON kostet gut ein Achtel mehr Zeichen fuer Klammern und
+    Anfuehrungszeichen -- Platz, der im Kontextfenster fehlt. Und kleine
+    Modelle lesen Fliesstext zuverlaessiger als verschachtelte Objekte.
+    """
+    blocks: list[str] = []
+    for result in results:
+        task = str(result.get("task", "")).strip()
+        lines = [f"### {task}" if task else "###"]
+        if result.get("error"):
+            lines.append(f"(nicht beantwortet: {result['error']})")
+        else:
+            summary = str(result.get("summary", "")).strip()
+            if summary:
+                lines.append(summary)
+            sources = [str(url) for url in (result.get("sources") or []) if url]
+            if sources:
+                lines.append("Quellen: " + ", ".join(dict.fromkeys(sources)))
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 def _tool_calls_to_dicts(tool_calls: Any) -> list[dict[str, Any]]:
     """Normalisiert LiteLLM-Objekte auf einfache Dicts."""
     out: list[dict[str, Any]] = []

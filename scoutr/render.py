@@ -88,7 +88,23 @@ class ChatRenderer:
     def _on_planning(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         self.console.print(
-            Text.assemble(("  [Plane] ", "bold magenta"), ("zerlege die Anfrage ...", "dim"))
+            Text.assemble(("  [Plane] ", "bold magenta"), ("sichte die Anfrage ...", "dim"))
+        )
+
+    def _on_triage(self, payload: dict[str, Any]) -> None:
+        """Nur melden, wenn KEINE Recherche folgt -- sonst spricht [Teile]."""
+        if payload.get("decision") != "chat":
+            return
+        self._flush_reading()
+        if payload.get("source") == "heuristik":
+            return  # Gruss: gar keine Meldung, das waere nur Laerm
+        seconds = payload.get("seconds")
+        suffix = f" ({seconds}s)" if seconds else ""
+        self.console.print(
+            Text.assemble(
+                ("  [Ohne Suche]", "dim"),
+                (f" direkt beantwortet{suffix}", "dim"),
+            )
         )
 
     def _on_subagents(self, payload: dict[str, Any]) -> None:

@@ -226,6 +226,10 @@ class Settings:
     subagent_model: str = ""
     #: Werkzeug-Budget je Subagent.
     subagent_budget: int = 6
+    #: Wie viele Subagenten gleichzeitig laufen. Bei lokalen Modellen bringt
+    #: mehr als zwei wenig -- die GPU rechnet ohnehin nacheinander. Bei
+    #: Cloud-Modellen ist mehr fast geschenkt.
+    subagent_parallel: int = 0
     fetch_timeout: float = 15.0
     cache_ttl_hours: int = 24
     max_results_default: int = 8
@@ -247,6 +251,19 @@ class Settings:
     @property
     def effective_vision_model(self) -> str:
         return self.vision_model or self.model
+
+    @property
+    def effective_parallel(self) -> int:
+        """Wie viele Subagenten gleichzeitig laufen duerfen.
+
+        Ohne eigene Angabe: zwei bei lokalen Modellen (die GPU rechnet
+        ohnehin nacheinander, mehr bringt nur Speicherdruck), vier in der
+        Cloud, wo die Aufrufe wirklich nebenlaeufig sind.
+        """
+        if self.subagent_parallel > 0:
+            return self.subagent_parallel
+        local = provider_of(self.effective_subagent_model) in ("ollama", "ollama_chat")
+        return 2 if local else 4
 
     @property
     def effective_subagent_model(self) -> str:
@@ -346,6 +363,7 @@ def get_settings() -> Settings:
         context_tokens=_env_int("SCOUTR_CONTEXT_TOKENS", 16384),
         subagent_model=_env_str("SCOUTR_SUBAGENT_MODEL"),
         subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),
+        subagent_parallel=_env_int("SCOUTR_SUBAGENT_PARALLEL", 0),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),
         cache_ttl_hours=_env_int("SCOUTR_CACHE_TTL_HOURS", 24),
         enable_playwright=_env_bool("SCOUTR_ENABLE_PLAYWRIGHT", True),

@@ -508,8 +508,16 @@ def test_every_question_is_split_automatically(
 
     assert seen == [["Teil A", "Teil B"]]
     assert result.answer == "Endantwort"
-    # Die Vorrecherche steht dem Hauptagenten zur Verfuegung.
-    assert any("vorrecherche" in str(m.get("content", "")) for m in agent.messages)
+    # Die Vorrecherche steht dem Hauptagenten zur Verfuegung -- als Text,
+    # nicht als JSON.
+    from scoutr.agent import PRE_RESEARCH_PREFIX
+
+    blob = next(
+        str(m.get("content", ""))
+        for m in agent.messages
+        if str(m.get("content", "")).startswith(PRE_RESEARCH_PREFIX)
+    )
+    assert "### Teil A" in blob and "### Teil B" in blob
 
 
 def test_auto_research_can_be_switched_off(
@@ -1193,3 +1201,85 @@ def test_earlier_questions_survive_a_normal_conversation(
     text = " ".join(str(m.get("content") or "") for m in agent.messages)
     for number in range(5):
         assert f"Frage Nummer {number}" in text
+
+
+# ---------------------------------------------------------------------------
+# Ausfuehrlichkeit und Kontext-Sparsamkeit
+# ---------------------------------------------------------------------------
+def test_system_prompt_asks_for_thorough_answers() -> None:
+    """Der Prompt hat frueher zur Knappheit gedraengt ("knapp", "hoechstens
+    ein Satz") -- genau das machte die Antworten duenn."""
+    from scoutr.agent import SYSTEM_PROMPT
+
+    assert "ausfuehrlich" in SYSTEM_PROMPT.lower()
+    assert "GROSSZUEGIG" in SYSTEM_PROMPT
+    assert "Fazit" in SYSTEM_PROMPT
+    assert "Nicht gefunden:" in SYSTEM_PROMPT
+    # Die alten Bremsen sind weg.
+    assert "Deutsch, knapp" not in SYSTEM_PROMPT
+    assert "hoechstens ein Satz" not in SYSTEM_PROMPT
+    # Vollstaendigkeit darf Genauigkeit nie ersetzen.
+    assert "Vollstaendigkeit ersetzt niemals Genauigkeit" in SYSTEM_PROMPT
+
+
+def test_budget_prompt_still_wants_everything() -> None:
+    from scoutr.agent import BUDGET_PROMPT
+
+    assert "vollstaendig" in BUDGET_PROMPT
+    assert "Nicht gefunden:" in BUDGET_PROMPT
+
+
+def test_findings_are_plain_text_not_json() -> None:
+    """JSON kostet ein Achtel mehr Zeichen und liest sich fuer kleine
+    Modelle schlechter."""
+    from scoutr.agent import format_findings
+
+    text = format_findings(
+        [
+            {
+                "task": "Cafés mit WLAN",
+                "summary": "Zwei gefunden.",
+                "sources": ["https://a.de", "https://a.de", "https://b.de"],
+            }
+        ]
+    )
+    assert text.startswith("### Cafés mit WLAN")
+    assert '{"' not in text
+    # Doppelte Quellen fliegen raus, Reihenfolge bleibt.
+    assert text.count("https://a.de") == 1
+    assert text.index("https://a.de") < text.index("https://b.de")
+
+
+def test_findings_report_failed_subtasks() -> None:
+    from scoutr.agent import format_findings
+
+    text = format_findings([{"task": "Bewertungen", "error": "Modell weg"}])
+    assert "nicht beantwortet" in text and "Modell weg" in text
+
+
+def test_pre_research_reaches_the_agent_as_text(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr(
+        "scoutr.subagents.plan_subtasks", lambda q, s, context="", limit=4: ["Teil A"]
+    )
+    monkeypatch.setattr(
+        "scoutr.agent.Agent._run_subagents",
+        lambda self, tasks: [
+            {"task": "Teil A", "summary": "Ausfuehrliches Ergebnis.",
+             "sources": ["https://a.de"]}
+        ],
+    )
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Antwort.")))
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Frage", stream=False)
+    blob = next(
+        m["content"] for m in agent.messages if str(m.get("content", "")).startswith(
+            "Zu deiner Unterstuetzung"
+        )
+    )
+    assert "### Teil A" in blob
+    assert "Ausfuehrliches Ergebnis." in blob
+    assert '"summary"' not in blob

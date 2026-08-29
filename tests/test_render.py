@@ -158,3 +158,30 @@ def test_singular_and_plural_of_calls() -> None:
     output = console.export_text()
     assert "(1 Aufruf)" in output
     assert "(4 Aufrufe)" in output
+
+
+def test_planning_is_announced_before_the_call() -> None:
+    console = _console()
+    ChatRenderer(console, show_images=False).handle("planning", {"question": "Frage"})
+    assert "[Plane]" in console.export_text()
+
+
+def test_chat_verdict_is_shown_only_when_the_model_decided() -> None:
+    """Bei "hallo" waere eine Meldung nur Laerm -- da entschied die Heuristik."""
+    console = _console()
+    renderer = ChatRenderer(console, show_images=False)
+    renderer.handle("triage", {"decision": "chat", "source": "heuristik"})
+    assert console.export_text().strip() == ""
+
+    renderer.handle("triage", {"decision": "chat", "source": "modell", "seconds": 1.2})
+    output = console.export_text()
+    assert "[Ohne Suche]" in output and "1.2s" in output
+
+
+def test_research_verdict_stays_silent() -> None:
+    """Danach kommt ohnehin [Teile] -- zwei Meldungen waeren doppelt."""
+    console = _console()
+    ChatRenderer(console, show_images=False).handle(
+        "triage", {"decision": "recherche", "source": "modell"}
+    )
+    assert console.export_text().strip() == ""

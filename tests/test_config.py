@@ -256,3 +256,31 @@ def test_context_tokens_is_configurable(
 def test_context_tokens_zero_uses_the_ollama_default() -> None:
     settings = config.Settings(model="ollama_chat/x", context_tokens=0)
     assert "num_ctx" not in settings.llm_kwargs()
+
+
+# ---------------------------------------------------------------------------
+# Parallelitaet der Subagenten
+# ---------------------------------------------------------------------------
+def test_local_models_run_two_subagents() -> None:
+    """Mehr bringt lokal nichts -- die GPU rechnet ohnehin nacheinander."""
+    settings = config.Settings(model="ollama_chat/gemma4:12b")
+    assert settings.effective_parallel == 2
+
+
+def test_cloud_models_run_four_subagents(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    assert config.Settings(model="anthropic/claude-sonnet-4-6").effective_parallel == 4
+
+
+def test_parallelism_follows_the_subagent_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Entscheidend ist, wo die Subagenten laufen -- nicht das Hauptmodell."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    settings = config.Settings(
+        model="anthropic/claude-sonnet-4-6", subagent_model="ollama_chat/qwen3:1.7b"
+    )
+    assert settings.effective_parallel == 2
+
+
+def test_explicit_parallelism_wins() -> None:
+    settings = config.Settings(model="ollama_chat/x", subagent_parallel=6)
+    assert settings.effective_parallel == 6
