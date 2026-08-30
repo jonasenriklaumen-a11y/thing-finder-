@@ -158,6 +158,17 @@ class ChatRenderer:
             f"{payload.get('reason', '')}{suffix}"
         )
 
+    def _on_ask(self, payload: dict[str, Any]) -> None:
+        """Vor einer Rueckfrage muss die Live-Anzeige weg.
+
+        Sonst schreibt rich weiter in denselben Bereich, in dem gerade die
+        Eingabeaufforderung steht -- die Frage waere dann nicht mehr lesbar.
+        """
+        self._stop_live()
+        self._streaming_answer = False
+        self._fetch_count = 0
+        self._skips.clear()
+
     def _on_error(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         self.console.print(f"  [red][Fehler][/red] {payload.get('message', '')}")

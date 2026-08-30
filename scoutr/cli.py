@@ -1201,6 +1201,10 @@ def chat_command(
             return
 
         # -- Chat --------------------------------------------------------
+        # Erst hier sitzt jemand, der auf eine Rueckfrage antworten kann. Beim
+        # einmaligen Durchlauf oben laeuft niemand mit -- da soll der Agent
+        # eine Annahme treffen statt ins Leere zu fragen.
+        agent.set_ask_handler(_console_ask)
         console.print(_banner(settings))
         if prefix:
             result = _run_turn(agent, renderer, prefix, stream, show_images)
@@ -1370,6 +1374,22 @@ def _handle_slash(
     else:
         console.print(f"[yellow]Unbekannter Befehl '/{command}'.[/yellow] /help zeigt alle.")
     return False
+
+
+def _console_ask(question: str, options: list[str]) -> str:
+    """Rueckfrage des Agenten im Terminal stellen."""
+    console.print(f"\n[bold yellow]?[/bold yellow] [bold]{question}[/bold]")
+    for index, option in enumerate(options, start=1):
+        console.print(f"    [cyan]{index}[/cyan]  {option}")
+    hint = "Zahl oder eigene Antwort" if options else "Antwort"
+    try:
+        answer = console.input(f"  [dim]{hint} (Enter = ueberspringen):[/dim] ").strip()
+    except (EOFError, KeyboardInterrupt):
+        console.print("  [dim]uebersprungen[/dim]")
+        return ""
+    if options and answer.isdigit() and 1 <= int(answer) <= len(options):
+        return options[int(answer) - 1]
+    return answer
 
 
 def _enable_readline() -> None:

@@ -1283,3 +1283,47 @@ def test_pre_research_reaches_the_agent_as_text(
     assert "### Teil A" in blob
     assert "Ausfuehrliches Ergebnis." in blob
     assert '"summary"' not in blob
+
+
+# -- Rueckfragen nur mit Gegenueber --------------------------------------
+def test_ask_tool_appears_only_with_a_handler(settings: Settings) -> None:
+    """Ohne jemanden am anderen Ende waere das Werkzeug eine Falle."""
+    agent = Agent(settings)
+    assert "ask_user" not in [tool["function"]["name"] for tool in agent.tools]
+
+    agent.set_ask_handler(lambda question, options: "ja")
+    assert "ask_user" in [tool["function"]["name"] for tool in agent.tools]
+
+    agent.set_ask_handler(None)
+    assert "ask_user" not in [tool["function"]["name"] for tool in agent.tools]
+
+
+def test_ask_instructions_follow_the_handler(settings: Settings) -> None:
+    agent = Agent(settings)
+    assert "ask_user" not in agent.messages[0]["content"]
+
+    agent.set_ask_handler(lambda question, options: "ja")
+    prompt = agent.messages[0]["content"]
+    assert "ask_user(question, options)" in prompt
+    assert "hoechstens zweimal" in prompt
+
+    # Zweimal anmelden haengt den Absatz nicht zweimal an.
+    agent.set_ask_handler(lambda question, options: "ja")
+    assert agent.messages[0]["content"] == prompt
+
+    agent.set_ask_handler(None)
+    assert "ask_user" not in agent.messages[0]["content"]
+
+
+def test_setting_the_handler_keeps_the_notes_in_the_prompt(tmp_path) -> None:
+    """Der Merkzettel steht hinter dem Systemprompt -- er darf nicht verschwinden."""
+    from scoutr.cache import Cache
+    from scoutr.config import Settings as S
+
+    settings = S(model="openai/gpt-4o", data_dir=tmp_path / "d", subagents_auto=False)
+    cache = Cache(settings.db_path, settings.cache_ttl_hours)
+    cache.add_note("Ich wohne in Bremen.")
+    agent = Agent(settings, cache=cache)
+    agent.set_ask_handler(lambda question, options: "ja")
+    agent.set_ask_handler(None)
+    assert "Bremen" in agent.messages[0]["content"]

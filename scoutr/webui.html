@@ -71,6 +71,19 @@ main{flex:1;overflow-y:auto;scroll-behavior:smooth}
   vertical-align:-2px;animation:blink 1s steps(2) infinite}
 @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
 
+/* ---------- Rueckfrage ---------- */
+.askcard{border:1px solid var(--green-dim);border-radius:var(--radius);
+  background:var(--panel);padding:14px 16px;margin:4px 0 14px}
+.askcard .q{font-weight:600;margin-bottom:10px}
+.askcard .opts{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.askcard .opt{background:var(--panel-2);border:1px solid var(--line);border-radius:999px;
+  padding:7px 14px;font:inherit;font-size:13px;cursor:pointer;color:var(--text)}
+.askcard .opt:hover{border-color:var(--green);color:var(--green)}
+.askcard .free{display:flex;gap:8px}
+.askcard .free input{flex:1}
+.askcard.done{border-color:var(--line);opacity:.75}
+.askcard .given{color:var(--green);font-size:13px}
+
 /* ---------- Eingabe ---------- */
 footer{position:absolute;bottom:0;left:0;right:0;padding:0 20px 20px;
   background:linear-gradient(transparent,var(--bg) 28%)}
@@ -86,6 +99,23 @@ textarea{flex:1;background:transparent;border:0;color:var(--text);resize:none;
 .hint{max-width:820px;margin:7px auto 0;color:var(--dim);font-size:11px;
   display:flex;gap:14px;flex-wrap:wrap}
 .hint b{color:var(--green);font-weight:600}
+
+/* ---------- Anhaenge ---------- */
+.clip{background:transparent;border:1px solid var(--line);color:var(--dim);
+  border-radius:9px;width:36px;height:36px;cursor:pointer;font-size:16px;flex:0 0 auto}
+.clip:hover{color:var(--green);border-color:var(--green-dim)}
+.files{max-width:820px;margin:0 auto 8px;display:flex;gap:8px;flex-wrap:wrap}
+.file{display:flex;align-items:center;gap:8px;background:var(--panel);font-size:12px;
+  border:1px solid var(--line);border-radius:9px;padding:6px 10px;color:var(--text)}
+.file .kind{color:var(--green);font-weight:600}
+.file .x{cursor:pointer;color:var(--dim);border:0;background:none;font-size:14px;padding:0}
+.file .x:hover{color:var(--err)}
+.file.bad{border-color:var(--err)} .file.bad .kind{color:var(--err)}
+.attached{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.attached .file{background:var(--panel-2)}
+body.dragging::after{content:"Datei hier ablegen";position:fixed;inset:12px;z-index:30;
+  border:2px dashed var(--green);border-radius:18px;background:#0d0f0ecc;color:var(--green);
+  display:grid;place-items:center;font-size:18px;pointer-events:none}
 
 /* ---------- Leerzustand ---------- */
 .empty{text-align:center;padding:56px 20px 30px;color:var(--dim)}
@@ -150,14 +180,18 @@ input:focus,select:focus{border-color:var(--green-dim)}
 </main>
 
 <footer>
+  <div class="files" id="files"></div>
   <div class="composer">
+    <button class="clip" id="clip" title="Bild oder PDF anhängen">📎</button>
+    <input type="file" id="picker" multiple hidden
+           accept="image/*,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml">
     <textarea id="input" rows="1" placeholder="Frag etwas — oder /help für Befehle"></textarea>
     <button class="send" id="send" title="Senden (Enter)">↑</button>
   </div>
   <div class="hint">
     <span><b>Enter</b> senden</span><span><b>Shift+Enter</b> Zeilenumbruch</span>
     <span><b>/location</b> Ort</span><span><b>/notes</b> Merkzettel</span>
-    <span><b>/clear</b> Verlauf</span>
+    <span><b>/clear</b> Verlauf</span><span><b>📎</b> Bild oder PDF</span>
   </div>
 </footer>
 
@@ -302,12 +336,26 @@ function md(text){
 }
 
 /* ---------- Nachrichten ---------- */
-function addUser(text){
+function addUser(text, files = []){
   $("#empty")?.remove();
   const el = document.createElement("div");
   el.className = "msg user";
   el.innerHTML = `<div class="who">Du</div><div class="bubble"></div>`;
-  el.querySelector(".bubble").textContent = text;
+  const bubble = el.querySelector(".bubble");
+  bubble.textContent = text;
+  if (files.length){
+    const box = document.createElement("div");
+    box.className = "attached";
+    files.forEach(file => {
+      const chip = document.createElement("div");
+      chip.className = "file";
+      chip.innerHTML = `<span class="kind"></span><span class="nm"></span>`;
+      chip.querySelector(".kind").textContent = kindOf(file.name);
+      chip.querySelector(".nm").textContent = file.name;
+      box.appendChild(chip);
+    });
+    bubble.appendChild(box);
+  }
   thread.appendChild(el); scroll();
 }
 function addBot(){
@@ -329,21 +377,24 @@ const scroll = () => { main.scrollTop = main.scrollHeight; };
 
 /* ---------- Senden ---------- */
 async function ask(text){
-  if (busy || !text.trim()) return;
+  if (busy) return;
+  if (!text.trim() && !pending.length) return;
   // /image recherchiert und laeuft deshalb ueber den normalen Weg mit
   // Live-Anzeige; alle anderen Befehle antworten sofort.
   if (text.trim().startsWith("/") && !text.trim().startsWith("/image")){
     return runCommand(text.trim());
   }
   busy = true; send.disabled = true;
-  addUser(text); input.value = ""; input.style.height = "auto";
+  const attachments = pending;
+  pending = []; drawFiles();
+  addUser(text, attachments); input.value = ""; input.style.height = "auto";
   const { steps, bubble } = addBot();
   let answer = "", reading = null, readCount = 0, planning = null;
 
   try {
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ message: text })
+      body: JSON.stringify({ message: text, attachments })
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -389,6 +440,8 @@ async function ask(text){
         step(steps, "[Fertig]", ev.task + (ev.error ? "  (fehlgeschlagen)" : ""),
              ev.error ? "warn" : ""); break;
       case "waiting": step(steps, "[Warte]", ev.reason); break;
+      case "upload": step(steps, "[Datei]", `${ev.name} (${prettySize(ev.bytes)})`); break;
+      case "ask": askCard(bubble, ev.question, ev.options || []); break;
       case "image": step(steps, "[Bild]", ev.path); break;
       case "image_done": step(steps, "[Bild]", "beschrieben"); break;
       case "search": step(steps, "[Suche]", ev.query); break;
@@ -412,6 +465,133 @@ async function ask(text){
     }
   }
   busy = false; send.disabled = false; input.focus();
+}
+
+/* ---------- Anhaenge ---------- */
+const MAX_FILES = 5, MAX_BYTES = 25000000;
+const filesBox = $("#files"), picker = $("#picker");
+let pending = [];   // [{name, size, data}]
+
+const prettySize = (n) => n < 1000000
+  ? Math.max(1, Math.round(n / 1000)) + " KB"
+  : (n / 1000000).toFixed(1) + " MB";
+const kindOf = (name) => {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (["png","jpg","jpeg","webp","gif","bmp"].includes(ext)) return "Bild";
+  if (ext === "pdf") return "PDF";
+  return "Datei";
+};
+
+function drawFiles(){
+  filesBox.innerHTML = "";
+  pending.forEach((file, index) => {
+    const el = document.createElement("div");
+    el.className = "file";
+    el.innerHTML = `<span class="kind"></span><span class="nm"></span>
+      <span class="sz"></span><button class="x" title="Entfernen">✕</button>`;
+    el.querySelector(".kind").textContent = kindOf(file.name);
+    el.querySelector(".nm").textContent = file.name;
+    el.querySelector(".sz").textContent = prettySize(file.size);
+    el.querySelector(".x").addEventListener("click", () => {
+      pending.splice(index, 1); drawFiles();
+    });
+    filesBox.appendChild(el);
+  });
+}
+
+function readFile(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("nicht lesbar"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addFiles(list){
+  for (const file of Array.from(list)){
+    if (pending.length >= MAX_FILES){ alert(`Höchstens ${MAX_FILES} Dateien.`); break; }
+    if (file.size > MAX_BYTES){
+      alert(`${file.name} ist zu groß (${prettySize(file.size)}, erlaubt sind 25 MB).`);
+      continue;
+    }
+    try {
+      pending.push({ name: file.name, size: file.size, data: await readFile(file) });
+    } catch { alert(`${file.name} konnte nicht gelesen werden.`); }
+  }
+  drawFiles();
+  input.focus();
+}
+
+$("#clip").addEventListener("click", () => picker.click());
+picker.addEventListener("change", () => { addFiles(picker.files); picker.value = ""; });
+
+let dragDepth = 0;
+document.addEventListener("dragenter", (e) => {
+  if (!e.dataTransfer?.types?.includes("Files")) return;
+  dragDepth++; document.body.classList.add("dragging");
+});
+document.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0){ dragDepth = 0; document.body.classList.remove("dragging"); }
+});
+document.addEventListener("dragover", (e) => {
+  if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  dragDepth = 0; document.body.classList.remove("dragging");
+  addFiles(e.dataTransfer.files);
+});
+input.addEventListener("paste", (e) => {
+  const files = Array.from(e.clipboardData?.files || []);
+  if (files.length){ e.preventDefault(); addFiles(files); }
+});
+
+/* ---------- Rueckfragen des Agenten ---------- */
+function askCard(bubble, question, options){
+  const card = document.createElement("div");
+  card.className = "askcard";
+  card.innerHTML = `<div class="q"></div><div class="opts"></div>
+    <div class="free"><input type="text" placeholder="… oder selbst schreiben">
+    <button class="btn primary">Senden</button></div>`;
+  card.querySelector(".q").textContent = question;
+  const opts = card.querySelector(".opts");
+  const field = card.querySelector("input");
+
+  let sent = false;
+  async function reply(text){
+    if (sent) return;
+    sent = true;
+    card.classList.add("done");
+    card.querySelector(".opts").remove();
+    card.querySelector(".free").remove();
+    const given = document.createElement("div");
+    given.className = "given";
+    given.textContent = text ? "→ " + text : "→ (uebersprungen)";
+    card.appendChild(given);
+    await api("/api/answer", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ text })
+    });
+    input.focus();
+  }
+
+  options.forEach(option => {
+    const button = document.createElement("button");
+    button.className = "opt"; button.textContent = option;
+    button.addEventListener("click", () => reply(option));
+    opts.appendChild(button);
+  });
+  if (!options.length) opts.remove();
+  card.querySelector(".btn").addEventListener("click", () => reply(field.value.trim()));
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){ e.preventDefault(); reply(field.value.trim()); }
+  });
+
+  bubble.parentNode.insertBefore(card, bubble);
+  field.focus(); scroll();
+  return card;
 }
 
 /* ---------- Slash-Befehle ---------- */

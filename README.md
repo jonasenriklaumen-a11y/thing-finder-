@@ -290,6 +290,15 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Parallelität, Werkzeug-Budget, Kontextfenster, Planungs-Zeitlimit und der
   Playwright-Fallback. Gespeichert wird in dieselbe `.env`, danach lädt der Agent neu.
   Ein leeres API-Key-Feld bedeutet „unverändert" — der vorhandene Key bleibt stehen.
+* **Dateien anhängen** über die Büroklammer, per Drag-and-drop irgendwo aufs
+  Fenster oder mit <kbd>Strg</kbd>+<kbd>V</kbd> aus der Zwischenablage. Bilder gehen
+  ans Vision-Modell, PDFs werden ausgelesen, Text-, Markdown-, CSV- und JSON-Dateien
+  direkt übernommen. Bis zu 5 Dateien à 25 MB. Ein gescanntes PDF ohne Textebene sagt
+  das offen — geraten wird nichts.
+* **Rückfragen:** braucht scoutr etwas Entscheidendes (Budget, Ort, welches von
+  mehreren Dingen gemeint ist), fragt er nach — mit anklickbaren Antworten oder einem
+  Feld zum Selberschreiben. Er fragt höchstens zweimal je Anfrage und nur, wenn die
+  Antwort das Ergebnis wirklich ändert; sonst trifft er eine Annahme und sagt sie dazu.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
 * **Alle Slash-Befehle** aus dem Terminal funktionieren auch hier: `/location`,
   `/model`, `/image`, `/export`, `/history`, `/notes`, `/clear`, `/help`. `/image`
@@ -371,6 +380,13 @@ ohne eine solche Freigabe — genau dafür ist es da.
 
 Der Kontext bleibt über mehrere Turns erhalten, Nachfragen wie „nur die mit 4+ Sternen"
 funktionieren also.
+
+**Umgekehrt fragt scoutr auch selbst nach.** Ist etwas Entscheidendes offen — Budget,
+Ort, welches von mehreren Dingen gemeint ist —, stellt er *eine* Rückfrage und wartet
+auf die Antwort. Im Terminal tippst du sie ein (oder die Nummer einer angebotenen
+Möglichkeit), Enter allein überspringt. Er fragt höchstens zweimal je Anfrage und nur,
+wenn die Antwort das Ergebnis wirklich ändert — sonst trifft er lieber eine Annahme und
+schreibt sie in die Antwort.
 
 ### Flags
 
@@ -566,13 +582,19 @@ ab:
      2048–4096 Token — nach einer recherchierten Antwort ist der schon voll. scoutr
      schickt `num_ctx` mit (`SCOUTR_CONTEXT_TOKENS`, Default 16384). Bei Cloud-Anbietern
      entfällt das, die kennen den Parameter nicht.
-  2. **Selbst kürzen statt gekürzt werden**, in fünf Stufen: ältere Werkzeug-Ausgaben →
-     Platzhalter (`SCOUTR_KEEP_FULL_RESULTS`, Default 4); ältere Vorrecherche-Blöcke →
-     Platzhalter (sie wiederholten sich sonst jeden Turn); dann älteste Nachrichten
-     eindampfen, notfalls ganz verwerfen. Systemprompt und aktuelle Frage bleiben immer
-     stehen, und Werkzeugaufrufe werden nie von ihren Antworten getrennt.
-
-  Einzelne Ergebnisse sind zusätzlich auf `SCOUTR_MAX_TOOL_CHARS` (Default 8000) begrenzt.
+  2. **Selbst kürzen statt gekürzt werden — und zwar in der richtigen Reihenfolge.**
+     Geopfert wird von hinten nach vorn nach Wert: zuerst ältere Werkzeug-Ausgaben →
+     Platzhalter (`SCOUTR_KEEP_FULL_RESULTS`, Default 4), dann ältere Vorrecherche-Blöcke
+     (die wiederholten sich sonst jeden Turn), dann die verbliebenen Suchergebnisse, dann
+     ältere Antworten — und **erst ganz zuletzt die Fragen des Nutzers**. Ein Suchergebnis
+     von vorletzter Runde ist ersetzbar, deine Frage nicht: die steht nirgendwo sonst.
+     Systemprompt und aktuelle Frage bleiben immer stehen, und Werkzeugaufrufe werden nie
+     von ihren Antworten getrennt.
+  3. **Kein einzelner Brocken darf das Fenster auffressen.** Ein Suchergebnis oder eine
+     angehängte Datei bekommt höchstens gut ein Drittel des Budgets — sonst passt bei
+     einem kleinen Fenster schon ein einziges Ergebnis samt Systemprompt nicht mehr hinein,
+     und dem Kürzen bliebe nur noch das Gespräch selbst. Obergrenze ist zusätzlich
+     `SCOUTR_MAX_TOOL_CHARS` (Default 8000).
 
   Passt dein Modell mehr, dreh auf — `gemma4:12b` kann 128k, kostet aber VRAM:
 

@@ -10,12 +10,15 @@ Ereignisse, die im Terminal die "[Suche]"- und "[Lese]"-Zeilen erzeugen.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import json
 import queue
 import secrets
 import socket
 import threading
+import time
 import webbrowser
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -63,6 +66,33 @@ SETTING_KEYS: tuple[str, ...] = (
 #: Platzhalter im Formular -- ein leeres Key-Feld darf den Key nicht loeschen.
 API_KEY_FIELD = "__API_KEY__"
 
+#: Groesse einer einzelnen hochgeladenen Datei. Passt zu der Grenze, die
+#: scoutr auch fuer heruntergeladene PDFs zieht.
+MAX_UPLOAD_BYTES = 25_000_000
+
+#: So viele Dateien duerfen an einer Nachricht haengen.
+MAX_UPLOADS = 5
+
+#: Der ganze Anfragekoerper. Base64 blaeht um ein Drittel auf, dazu kommt der
+#: Rest der Nachricht -- ohne Grenze koennte ein einziger Aufruf den Arbeits-
+#: speicher fuellen.
+MAX_BODY_BYTES = MAX_UPLOAD_BYTES * MAX_UPLOADS * 4 // 3 + 1_000_000
+
+#: Endungen, die als Bild ans Vision-Modell gehen.
+IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
+#: Endungen, deren Inhalt direkt als Text taugt.
+TEXT_TYPES = {".txt", ".md", ".csv", ".json", ".log", ".yaml", ".yml"}
+
+#: So viele hochgeladene Dateien bleiben liegen. Bilder muessen als Datei auf
+#: der Platte stehen, damit das Vision-Modell sie ansehen kann -- ohne Grenze
+#: waere der Ordner nach einem Jahr Nutzung voller alter Fotos.
+KEEP_UPLOADS = 50
+
+#: So viel Text uebernimmt scoutr aus einer hochgeladenen Datei. Mehr wuerde
+#: das Kontextfenster sprengen, bevor die Recherche ueberhaupt anfaengt.
+MAX_FILE_CHARS = 20_000
+
 #: Zugangswort fuer den Netzbetrieb. Leer = kein Schutz (nur lokal sinnvoll).
 #: Wird von :func:`serve` gesetzt.
 TOKEN: str = ""
@@ -104,10 +134,18 @@ class ChatSession:
     wuerden sich nur den Gespraechsverlauf zerschiessen.
     """
 
+    #: So lange wartet eine Rueckfrage auf eine Antwort. Laenger nicht: der
+    #: Agent haelt derweil die Sitzung besetzt, und wer den Tab zumacht, soll
+    #: sie nicht dauerhaft blockieren.
+    ANSWER_TIMEOUT = 180.0
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._agent: Any = None
         self._settings: Settings | None = None
+        #: Antworten auf Rueckfragen. Nur eine Anfrage laeuft gleichzeitig,
+        #: deshalb genuegt eine Schlange fuer die ganze Sitzung.
+        self._answers: queue.Queue[str] = queue.Queue()
 
     def settings(self) -> Settings:
         if self._settings is None:
@@ -146,7 +184,7 @@ class ChatSession:
             return False
         return True
 
-    def ask(self, message: str, emit: Any) -> Any:
+    def ask(self, message: str, emit: Any, attachments: list[dict[str, Any]] | None = None) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
         Das abschliessende "done" kommt vom Agenten selbst -- hier noch eines
@@ -157,16 +195,128 @@ class ChatSession:
         if self.busy():
             emit("waiting", {"reason": "Ein anderes Geraet fragt gerade -- ich bin gleich da."})
         with self._lock:
+            self._drain_answers()
             agent = self.agent()
-            agent.on_event = lambda name, payload: emit(name, payload)
-            agent.toolbox.on_event = agent.on_event
             try:
+                agent.on_event = lambda name, payload: emit(name, payload)
+                agent.toolbox.on_event = agent.on_event
+                agent.set_ask_handler(self._ask_browser)
                 if message.startswith("/image"):
                     message = self._image_question(agent, message)
+                elif attachments:
+                    context = self.attachments_text(agent, attachments, emit)
+                    message = f"{context}\n\n{message}" if context else message
                 return agent.ask(message, stream=True)
             finally:
                 agent.on_event = None
                 agent.toolbox.on_event = None
+                # Der Handler bleibt bestehen -- das Werkzeug soll auch in der
+                # naechsten Runde angeboten werden.
+
+    def _ask_browser(self, question: str, options: list[str]) -> str:
+        """Wartet auf die Antwort aus dem Browser.
+
+        Das "ask"-Ereignis ist schon raus, wenn wir hier ankommen -- die
+        Oberflaeche zeigt die Frage also bereits an. Bleibt die Antwort aus,
+        geben wir auf: das Modell trifft dann eine Annahme und macht weiter.
+        Aufgeraeumt wird zu Beginn der Anfrage, nicht hier -- sonst koennte
+        eine sehr schnelle Antwort dem eigenen Aufraeumen zum Opfer fallen.
+        """
+        try:
+            return self._answers.get(timeout=self.ANSWER_TIMEOUT)
+        except queue.Empty:
+            return ""
+
+    def _drain_answers(self) -> None:
+        """Antworten aus einer frueheren Runde wegwerfen."""
+        while True:
+            try:
+                self._answers.get_nowait()
+            except queue.Empty:
+                return
+
+    def answer(self, text: str) -> bool:
+        """Nimmt die Antwort aus dem Browser entgegen. `False` = niemand wartet."""
+        if not self.busy():
+            return False
+        self._answers.put(text)
+        return True
+
+    def attachments_text(self, agent: Any, attachments: list[dict[str, Any]], emit: Any) -> str:
+        """Macht aus hochgeladenen Dateien Text, den das Modell lesen kann.
+
+        Bilder gehen ans Vision-Modell, PDFs durch pypdf, Textdateien direkt.
+        Eine Datei, die nicht lesbar ist, beendet nicht die ganze Anfrage --
+        sie wird benannt und uebersprungen, wie eine unlesbare Webseite auch.
+        """
+        blocks: list[str] = []
+        for item in attachments[:MAX_UPLOADS]:
+            name = safe_name(str(item.get("name") or "datei"))
+            try:
+                data = base64.b64decode(str(item.get("data") or ""), validate=True)
+            except (ValueError, binascii.Error):
+                blocks.append(f"[Anhang {name}: konnte nicht gelesen werden]")
+                continue
+            if not data:
+                blocks.append(f"[Anhang {name}: leer]")
+                continue
+            if len(data) > MAX_UPLOAD_BYTES:
+                blocks.append(
+                    f"[Anhang {name}: zu gross "
+                    f"({len(data) // 1_000_000} MB, erlaubt sind "
+                    f"{MAX_UPLOAD_BYTES // 1_000_000} MB)]"
+                )
+                continue
+            emit("upload", {"name": name, "bytes": len(data)})
+            blocks.append(self._one_attachment(agent, name, data))
+        return "\n\n".join(blocks)
+
+    def _one_attachment(self, agent: Any, name: str, data: bytes) -> str:
+        """Liest eine einzelne Datei aus -- je nach Art auf ihrem eigenen Weg."""
+        suffix = Path(name).suffix.lower()
+        # Eine angehaengte Datei haengt am Nachrichtentext und wird deshalb
+        # beim Kuerzen als letztes angetastet. Umso wichtiger, dass sie von
+        # vornherein nicht mehr Platz nimmt, als das Fenster hergibt.
+        limit = min(MAX_FILE_CHARS, agent.blob_limit()) if hasattr(agent, "blob_limit") else (
+            MAX_FILE_CHARS
+        )
+
+        if suffix in IMAGE_TYPES:
+            path = self._store(name, data)
+            try:
+                description = agent.describe_image(path)
+            except Exception as exc:
+                return f"[Bild {name}: konnte nicht angesehen werden -- {exc}]"
+            return f"[Bild {name}] Darauf ist zu sehen:\n{description}"
+
+        if suffix == ".pdf":
+            from scoutr.fetch import extract_pdf_text
+
+            text, title = extract_pdf_text(data)
+            if not text:
+                return (
+                    f"[PDF {name}: kein Text enthalten -- vermutlich ein Scan. "
+                    "Gescannte Seiten kann scoutr nicht lesen.]"
+                )
+            head = f"[PDF {name}" + (f", Titel: {title}" if title else "") + "]"
+            return f"{head}\n{text[:limit]}"
+
+        try:
+            text = data.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return f"[Anhang {name}: kein Text und kein bekanntes Bildformat]"
+        if not text:
+            return f"[Anhang {name}: leer]"
+        return f"[Datei {name}]\n{text[:limit]}"
+
+    def _store(self, name: str, data: bytes) -> Path:
+        """Legt eine hochgeladene Datei ab -- das Vision-Modell braucht einen Pfad."""
+        folder = self.settings().data_dir / "uploads"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{int(time.time() * 1000)}-{name}"
+        target.write_bytes(data)
+        _prune_uploads(folder)
+        return target
 
     def _image_question(self, agent: Any, line: str) -> str:
         """Macht aus `/image <pfad>` eine Frage, die das Bild beschreibt."""
@@ -341,6 +491,36 @@ def save_values(payload: dict[str, Any]) -> Path:
     return written
 
 
+def _prune_uploads(folder: Path) -> None:
+    """Laesst nur die juengsten Dateien liegen."""
+    with contextlib.suppress(OSError):
+        files = sorted(
+            (item for item in folder.iterdir() if item.is_file()),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        for old in files[KEEP_UPLOADS:]:
+            with contextlib.suppress(OSError):
+                old.unlink()
+
+
+class TooLarge(ValueError):
+    """Der Anfragekoerper sprengt die Grenze -- 413 statt 500."""
+
+
+def safe_name(name: str) -> str:
+    """Macht aus einem hochgeladenen Namen einen, der gefahrlos auf die Platte darf.
+
+    Der Name kommt vom Browser und damit von aussen: "../../.ssh/authorized_keys"
+    waere sonst ein gueltiger Ablageort.
+    """
+    name = Path(name.replace("\\", "/")).name  # Pfadanteile abschneiden
+    cleaned = "".join(
+        character if character.isalnum() or character in "-_. " else "_" for character in name
+    ).strip(". ")
+    return cleaned[:80] or "datei"
+
+
 def same_secret(candidate: str, secret: str) -> bool:
     """Zeitkonstanter Vergleich zweier Zugangswoerter.
 
@@ -380,6 +560,10 @@ class Handler(BaseHTTPRequestHandler):
             handler()
         except (BrokenPipeError, ConnectionResetError):
             pass  # Tab geschlossen -- kein Grund fuer eine Meldung
+        except TooLarge as exc:
+            if not self.responded:
+                with contextlib.suppress(OSError):
+                    self._json({"error": str(exc)}, 413)
         except Exception as exc:
             print(f"  [Fehler] {self.command} {self.path}: {type(exc).__name__}: {exc}")
             if not self.responded:
@@ -442,10 +626,17 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             return {}
+        if length > MAX_BODY_BYTES:
+            # Nicht lesen, nur verwerfen -- sonst zieht ein einziger Aufruf
+            # den Arbeitsspeicher leer.
+            raise TooLarge(
+                f"Anfrage zu gross ({length // 1_000_000} MB). Erlaubt sind "
+                f"{MAX_UPLOADS} Dateien à {MAX_UPLOAD_BYTES // 1_000_000} MB."
+            )
         try:
             return json.loads(self.rfile.read(length) or b"{}")
         except (json.JSONDecodeError, ValueError):
-            return {}
+            return {}  # kaputtes JSON ist eine leere Anfrage, kein Absturz
 
     # -- Routen -----------------------------------------------------------
     # Namen von BaseHTTPRequestHandler vorgegeben.
@@ -501,6 +692,9 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/clear":
             SESSION.reset()
             self._json({"ok": True})
+        elif route == "/api/answer":
+            text = str(self._read_json().get("text", "")).strip()
+            self._json({"ok": SESSION.answer(text)})
         elif route == "/api/command":
             line = str(self._read_json().get("line", "")).strip()
             if not line.startswith("/"):
@@ -541,10 +735,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _chat(self) -> None:
         """Fuehrt die Anfrage aus und streamt die Ereignisse als SSE."""
-        message = str(self._read_json().get("message", "")).strip()
-        if not message:
+        payload = self._read_json()
+        message = str(payload.get("message", "")).strip()
+        raw = payload.get("attachments")
+        attachments = (
+            [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+        )
+        if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return
+        if not message:
+            # Nur Dateien, kein Text: das ist eine vollstaendige Bitte.
+            message = "Sieh dir das Angehaengte an und sag mir, worum es geht."
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -566,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
 
         def run() -> None:
             try:
-                SESSION.ask(message, emit)
+                SESSION.ask(message, emit, attachments)
             except Exception as exc:
                 events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
             finally:
@@ -587,7 +789,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode())
                 self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
-                # Tab geschlossen -- die Recherche laeuft im Hintergrund aus.
+                # Tab geschlossen. Die Recherche laeuft im Hintergrund aus --
+                # aber eine offene Rueckfrage wuerde die Sitzung sonst bis zum
+                # Zeitlimit besetzt halten, obwohl niemand mehr antworten kann.
+                SESSION.answer("")
                 break
 
 

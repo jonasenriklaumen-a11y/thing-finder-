@@ -22,6 +22,12 @@ from scoutr.search import OPEN_BACKEND_NAMES, SearchError, search_news, search_w
 EventHook = Callable[[str, dict[str, Any]], None]
 #: LLM-Fallback fuer Specs: (seitentext, url) -> {"CPU": "...", ...}
 SpecExtractor = Callable[[str, str], dict[str, str]]
+#: Rueckfrage an den Nutzer: (frage, moeglichkeiten) -> antwort ("" = keine)
+AskHandler = Callable[[str, list[str]], str]
+
+#: So oft darf der Agent je Anfrage nachfragen. Wer dreimal fragt, hat die
+#: Anfrage nicht verstanden -- dann ist eine begruendete Annahme besser.
+MAX_QUESTIONS = 2
 
 #: Drittes Werkzeug, das nur der Hauptagent bekommt -- Subagenten duerfen
 #: keine weiteren Subagenten starten.
@@ -153,6 +159,45 @@ CALC_SCHEMA: dict[str, Any] = {
     },
 }
 
+#: Nur fuer den Hauptagenten: ein Subagent sitzt niemandem gegenueber, den er
+#: fragen koennte.
+ASK_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "ask_user",
+        "description": (
+            "Stellt dem Nutzer EINE Rueckfrage und wartet auf seine Antwort. Benutze "
+            "das nur, wenn die Anfrage ohne die Antwort in eine ganz andere Richtung "
+            "laufen koennte -- wenn also Budget, Ort, Zweck, Zeitraum oder das gemeinte "
+            "Produkt offen sind und die moeglichen Antworten zu voellig verschiedenen "
+            "Ergebnissen fuehren. Frag NICHT nach Kleinigkeiten, nicht um dich "
+            "abzusichern und nicht nach etwas, das du selbst herausfinden kannst: dann "
+            "triff lieber die naheliegende Annahme, sag sie dazu und arbeite weiter. "
+            "Frag am besten VOR der Recherche, nicht mittendrin, und hoechstens zweimal "
+            "je Anfrage."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "Die Rueckfrage, ein einzelner klarer Satz.",
+                },
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Zwei bis vier Antwortmoeglichkeiten zum Anklicken, jeweils "
+                        "wenige Woerter. Nur angeben, wenn es wirklich abgrenzbare "
+                        "Moeglichkeiten gibt -- sonst weglassen."
+                    ),
+                },
+            },
+            "required": ["question"],
+        },
+    },
+}
+
 #: Nur fuer den Hauptagenten -- Subagenten sollen keine Notizen anlegen.
 MEMORY_SCHEMA: dict[str, Any] = {
     "type": "function",
@@ -191,6 +236,9 @@ class ToolStats:
     sources: list[dict[str, str]] = field(default_factory=list)
     calculations: int = 0
     notes_saved: int = 0
+    #: Rueckfragen zaehlen NICHT als Werkzeugaufruf -- eine Nachfrage soll den
+    #: Rechercheetat nicht schmaelern.
+    questions: int = 0
 
     @property
     def tool_calls(self) -> int:
@@ -212,6 +260,7 @@ class ToolStats:
         self.sources.clear()
         self.calculations = 0
         self.notes_saved = 0
+        self.questions = 0
 
 
 class Toolbox:
@@ -233,6 +282,8 @@ class Toolbox:
         self.stats = ToolStats()
         #: Setzt der Agent, wenn Subagenten erlaubt sind.
         self.subagent_runner: Callable[[list[str]], list[dict[str, Any]]] | None = None
+        #: Setzt die Oberflaeche, wenn jemand da ist, der antworten kann.
+        self.ask_handler: AskHandler | None = None
         self._fetcher = fetcher or Fetcher(
             user_agent=settings.user_agent,
             timeout=settings.fetch_timeout,
@@ -416,6 +467,10 @@ class Toolbox:
             return self.calculate(expression=str(arguments.get("expression", "")))
         if name == "remember":
             return self.remember(text=str(arguments.get("text", "")))
+        if name == "ask_user":
+            return self.ask_user(
+                question=str(arguments.get("question", "")), options=arguments.get("options")
+            )
         if name == "research_subtasks":
             return self.research_subtasks(arguments.get("tasks") or [])
         return {"error": f"Unbekanntes Werkzeug '{name}'."}
@@ -492,7 +547,52 @@ class Toolbox:
         self._emit("remember", text=text)
         return {"saved": True, "note_id": note_id, "text": text}
 
-    # -- Werkzeug 6 (nur fuer den Hauptagenten) ---------------------------
+    # -- Werkzeug 6: Rueckfrage (nur fuer den Hauptagenten) ---------------
+    def ask_user(self, question: str, options: Any = None) -> dict[str, Any]:
+        """Fragt beim Nutzer nach und wartet auf die Antwort.
+
+        Bleibt die Antwort aus, ist das kein Fehler: das Modell soll dann eine
+        Annahme treffen und weiterarbeiten, statt stehenzubleiben.
+        """
+        question = (question or "").strip()
+        if not question:
+            return {"error": "Leere Rueckfrage."}
+        if self.ask_handler is None:
+            return {
+                "answered": False,
+                "note": (
+                    "Hier kann gerade niemand antworten. Triff die naheliegende "
+                    "Annahme, nenne sie in der Antwort und arbeite weiter."
+                ),
+            }
+        if self.stats.questions >= MAX_QUESTIONS:
+            return {
+                "answered": False,
+                "note": (
+                    f"Schon {self.stats.questions} Rueckfragen gestellt -- das reicht. "
+                    "Triff jetzt eine begruendete Annahme und arbeite weiter."
+                ),
+            }
+
+        choices = [str(item).strip() for item in (options or []) if str(item).strip()][:4]
+        self.stats.questions += 1
+        self._emit("ask", question=question, options=choices)
+        try:
+            answer = (self.ask_handler(question, choices) or "").strip()
+        except Exception as exc:
+            return {"answered": False, "note": f"Rueckfrage fehlgeschlagen: {exc}"}
+        self._emit("ask_done", question=question, answer=answer)
+        if not answer:
+            return {
+                "answered": False,
+                "note": (
+                    "Keine Antwort bekommen. Triff die naheliegende Annahme, nenne sie "
+                    "und arbeite weiter."
+                ),
+            }
+        return {"answered": True, "question": question, "answer": answer}
+
+    # -- Werkzeug 7 (nur fuer den Hauptagenten) ---------------------------
     def research_subtasks(self, tasks: Any) -> dict[str, Any]:
         """Gibt Teilfragen an parallele Subagenten ab."""
         if self.subagent_runner is None:

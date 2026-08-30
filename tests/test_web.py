@@ -19,6 +19,7 @@ from scoutr.config import Settings
 class FakeToolbox:
     def __init__(self) -> None:
         self.on_event: Any = None
+        self.ask_handler: Any = None
 
 
 class FakeAgent:
@@ -32,6 +33,11 @@ class FakeAgent:
         self.cleared = 0
         self.closed = 0
         self.raise_error: Exception | None = None
+        self.ask_handler: Any = None
+
+    def set_ask_handler(self, handler: Any) -> None:
+        self.ask_handler = handler
+        self.toolbox.ask_handler = handler
 
     def ask(self, question: str, *, stream: bool = True) -> AgentResult:
         self.asked.append(question)
@@ -655,3 +661,278 @@ def test_a_broken_route_answers_500_instead_of_dying(
     assert "Traceback" not in capfd.readouterr().err
     # Der Server lebt weiter.
     assert raw_request(port, "GET", "/")[0] == 200
+
+
+# -- Rueckfragen im Browser -----------------------------------------------
+class AskingAgent(FakeAgent):
+    """Stellt beim Recherchieren eine Rueckfrage und wartet auf die Antwort."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.got: str | None = None
+
+    def ask(self, question: str, *, stream: bool = True) -> AgentResult:
+        self.asked.append(question)
+        self.on_event("ask", {"question": "Welches Budget?", "options": ["bis 800", "egal"]})
+        self.got = self.ask_handler("Welches Budget?", ["bis 800", "egal"])
+        self.on_event("answer_chunk", {"text": f"Verstanden: {self.got}"})
+        self.on_event("done", {"tool_calls": 0})
+        return AgentResult(answer="fertig")
+
+
+def test_the_browser_can_answer_a_question(client, session: web.ChatSession) -> None:
+    agent = AskingAgent()
+    session._agent = agent
+
+    answered = threading.Event()
+
+    def reply() -> None:
+        # Warten, bis die Rueckfrage wirklich gestellt ist.
+        for _ in range(100):
+            if session.busy():
+                break
+            threading.Event().wait(0.02)
+        threading.Event().wait(0.05)
+        client("POST", "/api/answer", {"text": "bis 800"})
+        answered.set()
+
+    threading.Thread(target=reply, daemon=True).start()
+    status, body = client("POST", "/api/chat", {"message": "Laptop gesucht"})
+    assert status == 200
+    assert answered.wait(timeout=5)
+    assert agent.got == "bis 800"
+    events = sse_events(body)
+    assert events[0]["type"] == "ask"
+    assert events[0]["options"] == ["bis 800", "egal"]
+    assert "Verstanden: bis 800" in "".join(e.get("text", "") for e in events)
+
+
+def test_an_unanswered_question_gives_up(client, session: web.ChatSession,
+                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sonst haelt eine offene Frage die Sitzung ewig besetzt."""
+    monkeypatch.setattr(web.ChatSession, "ANSWER_TIMEOUT", 0.2)
+    agent = AskingAgent()
+    session._agent = agent
+    status, _ = client("POST", "/api/chat", {"message": "Laptop gesucht"})
+    assert status == 200
+    assert agent.got == ""  # keine Antwort, aber auch kein Haenger
+
+
+def test_stale_answers_never_leak_into_the_next_question(
+    client, session: web.ChatSession
+) -> None:
+    """Eine Antwort von vorhin darf die naechste Frage nicht beantworten."""
+    assert client("POST", "/api/answer", {"text": "uralt"})[0] == 200
+    session._answers.put("noch aelter")
+
+    agent = AskingAgent()
+    session._agent = agent
+
+    def reply() -> None:
+        for _ in range(100):
+            if session.busy():
+                break
+            threading.Event().wait(0.02)
+        threading.Event().wait(0.05)
+        client("POST", "/api/answer", {"text": "frisch"})
+
+    threading.Thread(target=reply, daemon=True).start()
+    client("POST", "/api/chat", {"message": "Laptop gesucht"})
+    assert agent.got == "frisch"
+
+
+def test_answering_when_nobody_asked(client) -> None:
+    status, body = client("POST", "/api/answer", {"text": "hallo"})
+    assert status == 200
+    assert json.loads(body)["ok"] is False
+
+
+def test_the_ui_can_show_a_question() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'case "ask"' in html
+    assert "/api/answer" in html
+    assert "askcard" in html
+
+
+# -- Hochgeladene Dateien -------------------------------------------------
+def encode(data: bytes) -> str:
+    import base64
+
+    return base64.b64encode(data).decode()
+
+
+def tiny_pdf(text: str) -> bytes:
+    from tests.test_fetch import _tiny_pdf
+
+    return _tiny_pdf(text)
+
+
+def tiny_png() -> bytes:
+    from scoutr.local_model import solid_png
+
+    return solid_png()
+
+
+@pytest.fixture
+def seeing(session: web.ChatSession) -> FakeAgent:
+    agent = FakeAgent()
+    agent.describe_image = lambda path: f"ein Bild namens {Path(path).name}"  # type: ignore
+    session._agent = agent
+    return agent
+
+
+def attach(session: web.ChatSession, name: str, data: bytes) -> str:
+    return session.attachments_text(
+        session._agent, [{"name": name, "data": encode(data)}], lambda n, p: None
+    )
+
+
+def test_an_image_goes_to_the_vision_model(session: web.ChatSession, seeing: FakeAgent) -> None:
+    text = attach(session, "stuhl.png", tiny_png())
+    assert "[Bild stuhl.png]" in text
+    assert "ein Bild namens" in text
+
+
+def test_a_pdf_is_read_as_text(session: web.ChatSession, seeing: FakeAgent) -> None:
+    text = attach(session, "preise.pdf", tiny_pdf("Kaffee kostet 3 Euro"))
+    assert "[PDF preise.pdf" in text
+    assert "Kaffee kostet 3 Euro" in text
+
+
+def test_a_scanned_pdf_says_so_instead_of_pretending(
+    session: web.ChatSession, seeing: FakeAgent
+) -> None:
+    text = attach(session, "scan.pdf", b"%PDF-1.4\nkein echtes PDF")
+    assert "kein Text enthalten" in text
+    assert "Scan" in text
+
+
+def test_a_text_file_is_taken_as_it_is(session: web.ChatSession, seeing: FakeAgent) -> None:
+    text = attach(session, "notizen.md", b"# Titel\nInhalt")
+    assert "[Datei notizen.md]" in text
+    assert "# Titel" in text
+
+
+def test_long_files_are_cut(session: web.ChatSession, seeing: FakeAgent) -> None:
+    text = attach(session, "lang.txt", ("x" * 60_000).encode())
+    assert len(text) < web.MAX_FILE_CHARS + 200
+
+
+def test_broken_base64_does_not_kill_the_turn(session: web.ChatSession, seeing: FakeAgent) -> None:
+    text = session.attachments_text(
+        session._agent, [{"name": "kaputt.png", "data": "!!!kein base64!!!"}], lambda n, p: None
+    )
+    assert "konnte nicht gelesen werden" in text
+
+
+def test_an_oversized_file_is_named_not_swallowed(
+    session: web.ChatSession, seeing: FakeAgent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(web, "MAX_UPLOAD_BYTES", 100)
+    text = attach(session, "gross.txt", b"x" * 500)
+    assert "zu gross" in text
+
+
+def test_a_blind_model_does_not_break_the_upload(session: web.ChatSession) -> None:
+    agent = FakeAgent()
+
+    def blind(path):
+        raise RuntimeError("Modell sieht nichts")
+
+    agent.describe_image = blind  # type: ignore[method-assign]
+    session._agent = agent
+    text = attach(session, "foto.png", tiny_png())
+    assert "konnte nicht angesehen werden" in text
+    assert "Modell sieht nichts" in text
+
+
+def test_only_five_files_are_taken(session: web.ChatSession, seeing: FakeAgent) -> None:
+    many = [{"name": f"f{i}.txt", "data": encode(f"Inhalt {i}".encode())} for i in range(9)]
+    text = session.attachments_text(session._agent, many, lambda n, p: None)
+    assert text.count("[Datei ") == web.MAX_UPLOADS
+    assert "Inhalt 5" not in text
+
+
+def test_uploads_never_escape_their_folder(session: web.ChatSession, seeing: FakeAgent) -> None:
+    """Der Dateiname kommt vom Browser -- also von aussen."""
+    attach(session, "../../../boese.png", tiny_png())
+    folder = session.settings().data_dir / "uploads"
+    written = list(folder.iterdir())
+    assert written and all(item.parent == folder for item in written)
+    assert not (session.settings().data_dir.parent / "boese.png").exists()
+
+
+def test_attachments_reach_the_agent_through_the_chat(client, session: web.ChatSession) -> None:
+    agent = FakeAgent([("done", {"tool_calls": 0})])
+    agent.describe_image = lambda path: "ein gruener Stuhl"  # type: ignore[method-assign]
+    session._agent = agent
+    status, body = client(
+        "POST",
+        "/api/chat",
+        {"message": "Was ist das?", "attachments": [{"name": "s.png", "data": encode(tiny_png())}]},
+    )
+    assert status == 200
+    assert "ein gruener Stuhl" in agent.asked[0]
+    assert agent.asked[0].endswith("Was ist das?")
+    assert "upload" in [event["type"] for event in sse_events(body)]
+
+
+def test_a_file_without_a_question_is_still_a_request(client, session: web.ChatSession) -> None:
+    agent = FakeAgent([("done", {"tool_calls": 0})])
+    session._agent = agent
+    status, _ = client(
+        "POST",
+        "/api/chat",
+        {"message": "", "attachments": [{"name": "n.txt", "data": encode(b"Hallo Welt")}]},
+    )
+    assert status == 200
+    assert "Hallo Welt" in agent.asked[0]
+
+
+def test_an_empty_request_is_still_rejected(client) -> None:
+    assert client("POST", "/api/chat", {"message": "  ", "attachments": []})[0] == 400
+
+
+def test_a_huge_body_is_refused_before_it_is_read(
+    port: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ohne Grenze koennte ein einziger Aufruf den Speicher fuellen."""
+    monkeypatch.setattr(web, "MAX_BODY_BYTES", 500)
+    conn = HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request("POST", "/api/chat", body=b"x" * 5000,
+                 headers={"Content-Type": "application/json"})
+    response = conn.getresponse()
+    body = response.read()
+    conn.close()
+    assert response.status == 413
+    assert "zu gross" in json.loads(body)["error"]
+
+
+def test_bad_attachment_shapes_are_ignored(client, session: web.ChatSession) -> None:
+    agent = FakeAgent([("done", {"tool_calls": 0})])
+    session._agent = agent
+    status, _ = client(
+        "POST", "/api/chat", {"message": "Hallo", "attachments": ["kein Objekt", 42]}
+    )
+    assert status == 200
+    assert agent.asked[0] == "Hallo"
+
+
+def test_the_ui_offers_the_upload() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="picker"' in html and 'type="file"' in html
+    assert "readAsDataURL" in html
+    assert "dragging" in html  # Ablegen per Drag-and-drop
+    assert "clipboardData" in html  # Einfuegen aus der Zwischenablage
+
+
+def test_old_uploads_are_cleaned_up(session: web.ChatSession, seeing: FakeAgent,
+                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sonst fuellt sich der Ordner ueber Monate mit alten Fotos."""
+    monkeypatch.setattr(web, "KEEP_UPLOADS", 3)
+    for index in range(6):
+        attach(session, f"bild{index}.png", tiny_png())
+    folder = session.settings().data_dir / "uploads"
+    assert len(list(folder.iterdir())) == 3
+    # Das zuletzt hochgeladene ist noch da.
+    assert any("bild5" in item.name for item in folder.iterdir())

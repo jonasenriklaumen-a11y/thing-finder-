@@ -368,3 +368,86 @@ def test_remember_tool_persists_notes(settings: Settings, tmp_path: Path) -> Non
 def test_remember_without_cache_reports_it(settings: Settings) -> None:
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     assert "error" in box.remember("etwas")
+
+
+# -- Rueckfragen an den Nutzer -------------------------------------------
+def test_ask_user_without_anyone_to_ask(settings: Settings) -> None:
+    """Ohne Gegenueber ist das kein Fehler -- das Modell soll weiterarbeiten."""
+    box = Toolbox(settings)
+    result = box.ask_user("Welches Budget?")
+    assert result["answered"] is False
+    assert "Annahme" in result["note"]
+    assert box.stats.questions == 0
+
+
+def test_ask_user_passes_question_and_options(settings: Settings) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    box = Toolbox(settings)
+    box.ask_handler = lambda question, options: (seen.append((question, options)), "bis 1200")[1]
+    result = box.ask_user("Welches Budget?", ["bis 800", "bis 1200", " ", "egal"])
+    assert result == {"answered": True, "question": "Welches Budget?", "answer": "bis 1200"}
+    assert seen == [("Welches Budget?", ["bis 800", "bis 1200", "egal"])]  # Leeres fliegt raus
+    assert box.stats.questions == 1
+
+
+def test_ask_user_emits_events(settings: Settings) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    box = Toolbox(settings, on_event=lambda name, payload: events.append((name, payload)))
+    box.ask_handler = lambda question, options: "ja"
+    box.ask_user("Passt das?", ["ja", "nein"])
+    assert [name for name, _ in events] == ["ask", "ask_done"]
+    assert events[0][1] == {"question": "Passt das?", "options": ["ja", "nein"]}
+    assert events[1][1]["answer"] == "ja"
+
+
+def test_ask_user_stops_after_two_questions(settings: Settings) -> None:
+    """Wer dreimal fragt, hat die Anfrage nicht verstanden."""
+    box = Toolbox(settings)
+    box.ask_handler = lambda question, options: "egal"
+    assert box.ask_user("Erste?")["answered"] is True
+    assert box.ask_user("Zweite?")["answered"] is True
+    third = box.ask_user("Dritte?")
+    assert third["answered"] is False
+    assert "Annahme" in third["note"]
+    assert box.stats.questions == 2
+
+
+def test_no_answer_is_not_an_error(settings: Settings) -> None:
+    box = Toolbox(settings)
+    box.ask_handler = lambda question, options: ""
+    result = box.ask_user("Welches Budget?")
+    assert result["answered"] is False
+    assert "Annahme" in result["note"]
+
+
+def test_a_broken_ask_handler_does_not_kill_the_turn(settings: Settings) -> None:
+    def boom(question: str, options: list[str]) -> str:
+        raise RuntimeError("Browser weg")
+
+    box = Toolbox(settings)
+    box.ask_handler = boom
+    assert box.ask_user("Und nun?") == {
+        "answered": False,
+        "note": "Rueckfrage fehlgeschlagen: Browser weg",
+    }
+
+
+def test_empty_question_is_rejected(settings: Settings) -> None:
+    box = Toolbox(settings)
+    box.ask_handler = lambda question, options: "nie gefragt"
+    assert "error" in box.ask_user("   ")
+
+
+def test_questions_do_not_eat_the_research_budget(settings: Settings) -> None:
+    box = Toolbox(settings)
+    box.ask_handler = lambda question, options: "ja"
+    box.ask_user("Passt das?")
+    assert box.stats.tool_calls == 0
+
+
+def test_ask_user_is_reachable_through_call(settings: Settings) -> None:
+    box = Toolbox(settings)
+    box.ask_handler = lambda question, options: f"{question}|{','.join(options)}"
+    result = box.call("ask_user", {"question": "Wo?", "options": ["hier", "dort"]})
+    assert result["answer"] == "Wo?|hier,dort"

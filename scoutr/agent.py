@@ -18,7 +18,14 @@ from typing import Any
 from scoutr.cache import Cache
 from scoutr.config import Settings
 from scoutr.models import Product
-from scoutr.tools import MEMORY_SCHEMA, SUBAGENT_SCHEMA, TOOL_SCHEMAS, EventHook, Toolbox
+from scoutr.tools import (
+    ASK_SCHEMA,
+    MEMORY_SCHEMA,
+    SUBAGENT_SCHEMA,
+    TOOL_SCHEMAS,
+    EventHook,
+    Toolbox,
+)
 
 SYSTEM_PROMPT = """\
 Du bist scoutr, ein Rechercheagent in der Kommandozeile. Du beantwortest Fragen \
@@ -153,6 +160,22 @@ TRIAGE_PROMPT = (
     "Antworte mit GENAU einem Wort: RECHERCHE oder CHAT.\n\nNachricht: %s"
 )
 
+#: Wird an den Systemprompt gehaengt, sobald eine Oberflaeche Rueckfragen
+#: annehmen kann. Ohne jemanden am anderen Ende waere die Erwaehnung schaedlich:
+#: das Modell wuerde ein Werkzeug aufrufen, das es gar nicht gibt.
+ASK_PROMPT = """\
+
+Du hast ausserdem `ask_user(question, options)` -- eine Rueckfrage an den Nutzer, auf \
+deren Antwort du wartest.
+- Frag nach, wenn die Anfrage ohne die Antwort in eine ganz andere Richtung laufen \
+koennte: offenes Budget, offener Ort, offener Zweck, offener Zeitraum, oder wenn unklar \
+ist, welches von mehreren Dingen gemeint ist.
+- Frag NICHT nach Kleinigkeiten, nicht zur Absicherung und nicht nach etwas, das du \
+selbst herausfinden kannst. Im Zweifel: naheliegende Annahme treffen, sie in der \
+Antwort nennen, weiterarbeiten.
+- Frag VOR der Recherche, nicht mittendrin, und hoechstens zweimal je Anfrage. Gib \
+zwei bis vier Antwortmoeglichkeiten mit, wenn es klar abgrenzbare gibt."""
+
 #: Beginn der internen Nachricht mit den Vorrecherche-Ergebnissen.
 PRE_RESEARCH_PREFIX = "Zu deiner Unterstuetzung wurde die Anfrage"
 
@@ -162,9 +185,11 @@ TRIMMED_NOTE = "[gekuerzt -- aeltere Werkzeug-Ausgabe, die Fakten stehen in der 
 #: Platzhalter fuer aeltere Vorrecherche-Bloecke.
 TRIMMED_RESEARCH = "[gekuerzt -- Vorrecherche eines frueheren Turns, das Ergebnis steht unten]"
 
-#: Grob: ein Token sind etwa vier Zeichen. Reicht, um den Verlauf unter dem
-#: Fenster zu halten -- genau zaehlen muessten wir je Modell anders.
-CHARS_PER_TOKEN = 4
+#: Grob: so viele Zeichen sind ein Token. Bewusst niedrig angesetzt --
+#: deutscher Text mit URLs und JSON liegt eher bei drei als bei vier, und
+#: verschaetzen wir uns nach oben, wirft der Anbieter still den Anfang weg.
+#: Genau zaehlen muessten wir je Modell anders.
+CHARS_PER_TOKEN = 3
 
 #: Wie viel des Fensters fuer die Antwort und die naechste Werkzeugrunde
 #: frei bleiben muss.
@@ -176,6 +201,12 @@ PROTECTED_TAIL = 6
 
 #: Auf so viel wird eine alte Nachricht eingedampft, wenn der Platz knapp wird.
 SHRUNK_LENGTH = 300
+
+#: Groesster Anteil des Fensters, den eine einzelne Werkzeug-Ausgabe belegen
+#: darf. Ohne diese Grenze passt bei einem kleinen Fenster ein einziges
+#: Suchergebnis samt Systemprompt schon nicht mehr hinein -- dann bleibt dem
+#: Kuerzen nur noch das Gespraech selbst, und genau das darf nie passieren.
+TOOL_SHARE = 0.35
 
 
 #: Fehler, die ein zweiter Versuch sicher NICHT behebt -- auch wenn LiteLLM
@@ -257,6 +288,10 @@ class Agent:
             extra.append(MEMORY_SCHEMA)
         if self.use_subagents:
             extra.append(SUBAGENT_SCHEMA)
+        # Nur anbieten, wenn wirklich jemand da ist, der antworten kann --
+        # sonst wartet der Agent auf eine Rueckmeldung, die nie kommt.
+        if self.toolbox.ask_handler is not None:
+            extra.append(ASK_SCHEMA)
         return [*TOOL_SCHEMAS, *extra]
 
     def _auto_subagents_wanted(self) -> bool:
@@ -444,6 +479,23 @@ class Agent:
 
     def set_model(self, model: str) -> None:
         self.settings.model = model.strip()
+
+    def set_ask_handler(self, handler: Any) -> None:
+        """Meldet an, dass jemand da ist, der Rueckfragen beantworten kann.
+
+        Das Werkzeug und der zugehoerige Absatz im Systemprompt erscheinen erst
+        dadurch -- ohne Gegenueber waere beides irrefuehrend.
+        """
+        had = self.toolbox.ask_handler is not None
+        self.toolbox.ask_handler = handler
+        has = handler is not None
+        if had == has or not self.messages or self.messages[0].get("role") != "system":
+            return
+        base = str(self.messages[0]["content"])
+        if has:
+            self.messages[0]["content"] = base + ASK_PROMPT
+        elif base.endswith(ASK_PROMPT):
+            self.messages[0]["content"] = base[: -len(ASK_PROMPT)]
 
     def _emit(self, event: str, **payload: Any) -> None:
         if self.on_event:
@@ -655,6 +707,16 @@ class Agent:
     def _history_chars(self) -> int:
         return sum(len(str(message.get("content") or "")) for message in self.messages)
 
+    def blob_limit(self) -> int:
+        """Wie viele Zeichen ein einzelner Brocken belegen darf.
+
+        Gilt fuer Werkzeug-Ausgaben genauso wie fuer angehaengte Dateien: die
+        Einstellung ist die Obergrenze, das Kontextfenster die harte Grenze.
+        Ein einzelner Brocken darf nie so gross werden, dass fuer die
+        Unterhaltung kein Platz mehr bleibt.
+        """
+        return max(1000, min(self.settings.max_tool_chars, int(self._budget_chars() * TOOL_SHARE)))
+
     def _budget_chars(self) -> int:
         """Wie viele Zeichen der Verlauf hoechstens belegen darf."""
         window = self.settings.context_tokens
@@ -668,14 +730,21 @@ class Agent:
         Laeuft das Fenster ueber, wirft der Anbieter still den ANFANG weg --
         Systemprompt und fruehere Fragen zuerst. Genau so fuehlt sich
         "er erinnert sich nicht mehr an die letzte Frage" an. Deshalb kuerzen
-        wir lieber selbst und kontrolliert, in drei Stufen:
+        wir lieber selbst und in einer klaren Reihenfolge: **zuerst das
+        Recherchematerial, das Gespraech zuletzt.** Ein Suchergebnis von
+        vorletzter Runde ist ersetzbar, die Frage des Nutzers nicht -- die
+        steht nirgendwo sonst.
 
         1. Aeltere Werkzeug-Ausgaben werden zu einem Platzhalter.
         2. Aeltere Vorrecherche-Bloecke ebenso -- sie wiederholen sich sonst
            jeden Turn und fressen das Fenster auf.
-        3. Reicht das nicht, werden aelteste Nachrichten eingedampft. Nie
-           geloescht: ein Werkzeugaufruf ohne Antwort macht den Verlauf
-           ungueltig. Systemprompt und laufender Turn bleiben unangetastet.
+        3. Die verbliebenen Werkzeug-Ausgaben eindampfen, aelteste zuerst;
+           nur die juengste bleibt ganz, mit ihr arbeitet das Modell gerade.
+        4. Aeltere Antworten des Assistenten eindampfen.
+        5. Erst jetzt aeltere Fragen des Nutzers.
+        6. Als letztes Mittel die aeltesten Nachrichten ganz verwerfen. Nie
+           einzeln: ein Werkzeugaufruf ohne Antwort macht den Verlauf
+           ungueltig. Der laufende Turn bleibt dabei unangetastet.
         """
         # -- Stufe 1: alte Werkzeug-Ausgaben ------------------------------
         keep = max(1, self.settings.keep_full_results)
@@ -698,27 +767,46 @@ class Agent:
         for index in research_indexes[:-1]:
             self.messages[index]["content"] = TRIMMED_RESEARCH
 
-        # -- Stufe 3: notfalls die aeltesten Nachrichten eindampfen -------
         budget = self._budget_chars()
         if self._history_chars() <= budget:
             return
-        last_protected = max(1, len(self.messages) - PROTECTED_TAIL)
-        if self._shrink_range(1, last_protected, budget):
-            return
 
-        # -- Stufe 4: aelteste Nachrichten ganz verwerfen ------------------
+        # -- Stufen 3 bis 5: eindampfen, vom Entbehrlichsten aufwaerts ----
+        # Die juengste Nachricht bleibt immer ganz -- meist die Werkzeug-
+        # Ausgabe, mit der das Modell gerade arbeitet.
+        last = max(1, len(self.messages) - 1)
+        for role in ("tool", "assistant", "user"):
+            if self._shrink_role(role, last, budget):
+                return
+
+        # -- Stufe 6: aelteste Nachrichten ganz verwerfen ------------------
         self._drop_oldest(budget)
 
-        # -- Stufe 5: bei sehr kleinem Fenster auch den Schwanz ------------
-        # Sechs volle Nachrichten koennen ein 2k-Fenster allein sprengen.
-        # Dann muss auch der laufende Turn dran -- nur die letzten beiden
-        # (aktuelle Frage und eine laufende Werkzeugantwort) bleiben ganz,
-        # sonst wuesste das Modell nicht mehr, worum es gerade geht.
+        # Bei einem sehr kleinen Fenster kann selbst der laufende Turn zu
+        # gross sein. Dann muss auch er dran -- nur die letzten beiden
+        # (aktuelle Frage und laufende Werkzeugantwort) bleiben ganz, sonst
+        # wuesste das Modell nicht mehr, worum es gerade geht.
         self._shrink_range(
             max(1, len(self.messages) - PROTECTED_TAIL),
             max(1, len(self.messages) - 2),
             budget,
         )
+
+    def _shrink_role(self, role: str, stop: int, budget: int) -> bool:
+        """Dampft Nachrichten einer Rolle ein, aelteste zuerst.
+
+        `True`, wenn der Verlauf danach passt.
+        """
+        for index in range(1, stop):
+            if self._history_chars() <= budget:
+                return True
+            message = self.messages[index]
+            if message.get("role") != role:
+                continue
+            content = str(message.get("content") or "")
+            if len(content) > SHRUNK_LENGTH:
+                message["content"] = content[:SHRUNK_LENGTH].rstrip() + " […]"
+        return self._history_chars() <= budget
 
     def _drop_oldest(self, budget: int) -> None:
         """Verwirft die aeltesten Nachrichten, bis der Verlauf passt.
@@ -772,9 +860,7 @@ class Agent:
                 "role": "tool",
                 "tool_call_id": call["id"],
                 "name": name,
-                "content": json.dumps(payload, ensure_ascii=False)[
-                    : max(1000, self.settings.max_tool_chars)
-                ],
+                "content": json.dumps(payload, ensure_ascii=False)[: self.blob_limit()],
             }
         )
 
