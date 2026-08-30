@@ -13,11 +13,15 @@ from __future__ import annotations
 import contextlib
 import json
 import queue
+import secrets
+import socket
 import threading
 import webbrowser
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from scoutr import __version__
 from scoutr.cache import Cache
@@ -58,6 +62,25 @@ SETTING_KEYS: tuple[str, ...] = (
 
 #: Platzhalter im Formular -- ein leeres Key-Feld darf den Key nicht loeschen.
 API_KEY_FIELD = "__API_KEY__"
+
+#: Zugangswort fuer den Netzbetrieb. Leer = kein Schutz (nur lokal sinnvoll).
+#: Wird von :func:`serve` gesetzt.
+TOKEN: str = ""
+
+#: Name des Cookies, in dem der Browser das Zugangswort behaelt.
+TOKEN_COOKIE = "scoutr_token"
+
+#: Wird gezeigt, wenn jemand ohne gueltiges Zugangswort anklopft.
+DENIED_PAGE = """<!doctype html><html lang="de"><meta charset="utf-8">
+<title>scoutr</title>
+<body style="background:#0d0f0e;color:#e8ece9;font:15px/1.6 system-ui;
+             display:grid;place-items:center;height:100vh;margin:0">
+<div style="text-align:center;max-width:34em;padding:20px">
+<h1 style="color:#31c46b;font-size:20px">scoutr</h1>
+<p>Diese Oberflaeche ist mit einem Zugangswort geschuetzt.</p>
+<p style="color:#8b9590;font-size:13px">Nimm die vollstaendige Adresse, die beim
+Start im Terminal steht &mdash; die mit <code>?token=</code> am Ende.</p>
+</div></body></html>"""
 
 #: Dieselbe Uebersicht wie `/help` im Terminal, nur als Markdown.
 HELP_MARKDOWN = """### Befehle
@@ -116,12 +139,23 @@ class ChatSession:
             self._settings = None
             reset_settings_cache()
 
+    def busy(self) -> bool:
+        """Laeuft gerade eine Anfrage?"""
+        if self._lock.acquire(blocking=False):
+            self._lock.release()
+            return False
+        return True
+
     def ask(self, message: str, emit: Any) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
         Das abschliessende "done" kommt vom Agenten selbst -- hier noch eines
         zu senden wuerde die Oberflaeche zweimal abschliessen lassen.
         """
+        # Im Netzbetrieb sitzen mehrere Geraete an derselben Sitzung. Wer
+        # wartet, soll das sehen und nicht vor einem stummen Fenster sitzen.
+        if self.busy():
+            emit("waiting", {"reason": "Ein anderes Geraet fragt gerade -- ich bin gleich da."})
         with self._lock:
             agent = self.agent()
             agent.on_event = lambda name, payload: emit(name, payload)
@@ -327,6 +361,46 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, payload: dict[str, Any], status: int = 200) -> None:
         self._send(status, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
 
+    def _route(self) -> str:
+        """Pfad ohne Query -- `/?token=...` ist immer noch die Startseite."""
+        return urlsplit(self.path).path
+
+    def _query_token(self) -> str:
+        return (parse_qs(urlsplit(self.path).query).get("token") or [""])[0]
+
+    def _cookie_token(self) -> str:
+        raw = self.headers.get("Cookie") or ""
+        with contextlib.suppress(Exception):
+            cookie = SimpleCookie(raw)
+            if TOKEN_COOKIE in cookie:
+                return cookie[TOKEN_COOKIE].value
+        return ""
+
+    def _authorized(self) -> bool:
+        """Prueft das Zugangswort -- aus Adresse, Cookie oder Kopfzeile.
+
+        Ohne gesetztes TOKEN ist alles erlaubt; so bleibt der rein lokale
+        Betrieb genauso einfach wie vorher.
+        """
+        if not TOKEN:
+            return True
+        for candidate in (
+            self._query_token(),
+            self._cookie_token(),
+            self.headers.get("X-Scoutr-Token") or "",
+        ):
+            if candidate and secrets.compare_digest(candidate, TOKEN):
+                return True
+        return False
+
+    def _deny(self) -> None:
+        body = DENIED_PAGE.encode()
+        self.send_response(401)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
@@ -339,9 +413,13 @@ class Handler(BaseHTTPRequestHandler):
     # -- Routen -----------------------------------------------------------
     # Namen von BaseHTTPRequestHandler vorgegeben.
     def do_GET(self) -> None:
-        if self.path in ("/", "/index.html"):
-            self._send(200, UI_FILE.read_bytes(), "text/html; charset=utf-8")
-        elif self.path == "/api/config":
+        if not self._authorized():
+            self._deny()
+            return
+        route = self._route()
+        if route in ("/", "/index.html"):
+            self._send_ui()
+        elif route == "/api/config":
             settings = SESSION.settings()
             self._json(
                 {
@@ -352,11 +430,11 @@ class Handler(BaseHTTPRequestHandler):
                     "problems": settings.missing_requirements(),
                 }
             )
-        elif self.path == "/api/notes":
+        elif route == "/api/notes":
             settings = SESSION.settings()
             cache = Cache(settings.db_path, settings.cache_ttl_hours)
             self._json({"notes": [{"id": n.id, "text": n.text} for n in cache.list_notes()]})
-        elif self.path == "/api/history":
+        elif route == "/api/history":
             settings = SESSION.settings()
             cache = Cache(settings.db_path, settings.cache_ttl_hours)
             self._json(
@@ -371,12 +449,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "unbekannter Pfad"}, 404)
 
     def do_POST(self) -> None:
-        if self.path == "/api/chat":
+        if not self._authorized():
+            self._deny()
+            return
+        route = self._route()
+        if route == "/api/chat":
             self._chat()
-        elif self.path == "/api/clear":
+        elif route == "/api/clear":
             SESSION.reset()
             self._json({"ok": True})
-        elif self.path == "/api/command":
+        elif route == "/api/command":
             line = str(self._read_json().get("line", "")).strip()
             if not line.startswith("/"):
                 self._json({"ok": False, "error": "kein Befehl"}, 400)
@@ -385,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, **SESSION.command(line)})
             except Exception as exc:
                 self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 500)
-        elif self.path == "/api/config":
+        elif route == "/api/config":
             try:
                 written = save_values(self._read_json())
             except Exception as exc:
@@ -394,6 +476,25 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "path": str(written)})
         else:
             self._json({"error": "unbekannter Pfad"}, 404)
+
+    def _send_ui(self) -> None:
+        """Liefert die Oberflaeche und legt das Zugangswort als Cookie ab.
+
+        So braucht nur der erste Aufruf die lange Adresse; danach kennt der
+        Browser das Wort von selbst.
+        """
+        body = UI_FILE.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        if TOKEN:
+            self.send_header(
+                "Set-Cookie",
+                f"{TOKEN_COOKIE}={TOKEN}; Path=/; Max-Age=2592000; SameSite=Strict",
+            )
+        self.end_headers()
+        self.wfile.write(body)
 
     def _chat(self) -> None:
         """Fuehrt die Anfrage aus und streamt die Ereignisse als SSE."""
@@ -447,15 +548,84 @@ class Handler(BaseHTTPRequestHandler):
                 break
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
-    """Startet die Oberflaeche und blockiert, bis Strg+C kommt."""
+def lan_address() -> str:
+    """Die eigene Adresse im lokalen Netz.
+
+    Der UDP-"Verbindungsaufbau" schickt kein einziges Paket -- er laesst nur
+    das Betriebssystem die Route waehlen und verraet damit, welche der
+    Netzwerkkarten nach draussen zeigt. Das ist zuverlaessiger als
+    ``gethostbyname(gethostname())``, das auf vielen Linux-Systemen
+    127.0.1.1 liefert.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Kein Paket geht raus -- connect() waehlt bei UDP nur die Route.
+        probe.connect(("8.8.8.8", 9))
+        address = probe.getsockname()[0]
+    except OSError:
+        address = ""
+    finally:
+        probe.close()
+    if address and not address.startswith("127."):
+        return address
+    with contextlib.suppress(OSError):
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            candidate = info[4][0]
+            if not candidate.startswith("127."):
+                return candidate
+    return ""
+
+
+def is_public_host(host: str) -> bool:
+    """Bindet *host* an mehr als nur den eigenen Rechner?"""
+    return host not in ("127.0.0.1", "localhost", "::1", "")
+
+
+def new_token() -> str:
+    """Kurzes Zugangswort -- muss auf einem Handy tippbar bleiben."""
+    return secrets.token_urlsafe(9)
+
+
+def urls_for(host: str, port: int, token: str = "") -> list[str]:
+    """Alle Adressen, unter denen die Oberflaeche erreichbar ist."""
+    suffix = f"?token={token}" if token else ""
+    if not is_public_host(host):
+        return [f"http://127.0.0.1:{port}/{suffix}"]
+    hosts = [f"127.0.0.1:{port}"]
+    if host == "0.0.0.0":  # alle Netzwerkkarten -- ausdruecklich per --lan gewaehlt
+        address = lan_address()
+        if address:
+            hosts.insert(0, f"{address}:{port}")
+    else:
+        hosts.insert(0, f"{host}:{port}")
+    return [f"http://{item}/{suffix}" for item in hosts]
+
+
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    open_browser: bool = True,
+    token: str = "",
+) -> None:
+    """Startet die Oberflaeche und blockiert, bis Strg+C kommt.
+
+    *token* schuetzt den Zugang; ohne ist die Oberflaeche fuer jeden offen,
+    der die Adresse erreicht. Fuer den Netzbetrieb setzt die Kommandozeile
+    deshalb von sich aus eines.
+    """
+    global TOKEN
+
+    TOKEN = token
     server = ThreadingHTTPServer((host, port), Handler)
-    url = f"http://{host}:{port}/"
     if open_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        # Auf dem eigenen Rechner ist 127.0.0.1 die zuverlaessigste Adresse --
+        # die steht immer an letzter Stelle.
+        local = urls_for(host, port, token)[-1]
+        threading.Timer(0.6, lambda: webbrowser.open(local)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        TOKEN = ""

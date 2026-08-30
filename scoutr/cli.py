@@ -531,25 +531,55 @@ def history_command(
 @app.command("web")
 def web_command(
     port: int = typer.Option(8765, "--port", "-p", help="Port fuer die Oberflaeche."),
-    host: str = typer.Option("127.0.0.1", "--host", help="Adresse (Default: nur lokal)."),
+    host: str = typer.Option("", "--host", help="Adresse. Default: nur der eigene Rechner."),
+    lan: bool = typer.Option(
+        False, "--lan", help="Auch fuer andere Geraete im heimischen Netz erreichbar."
+    ),
     open_browser: bool = typer.Option(
         True, "--open/--no-open", help="Browser automatisch oeffnen."
     ),
+    token: str = typer.Option(
+        "", "--token", help="Eigenes Zugangswort statt eines zufaelligen."
+    ),
+    no_token: bool = typer.Option(
+        False, "--no-token", help="Kein Zugangswort verlangen (nur in vertrauten Netzen)."
+    ),
 ) -> None:
-    """Startet die Weboberflaeche -- derselbe Agent, nur im Browser."""
-    from scoutr.web import serve
+    """Startet die Weboberflaeche -- derselbe Agent, nur im Browser.
+
+    Ohne Argumente hoert scoutr nur auf dem eigenen Rechner. `--lan` macht ihn
+    im heimischen Netz erreichbar, etwa vom Handy aus.
+    """
+    from scoutr.web import is_public_host, new_token, serve, urls_for
+
+    bind = host or ("0.0.0.0" if lan else "127.0.0.1")
+    public = is_public_host(bind)
+    access = token or ("" if no_token or not public else new_token())
 
     settings = get_settings()
-    console.print(
-        Panel.fit(
-            f"[bold]scoutr {__version__}[/bold] laeuft auf "
-            f"[green]http://{host}:{port}/[/green]\n"
-            f"[dim]Modell {settings.model} · Suche {settings.search_backend}[/dim]\n"
-            "[dim]Einstellungen aendert man direkt in der Oberflaeche. "
-            "Beenden mit Strg+C.[/dim]",
-            border_style="green",
+    addresses = urls_for(bind, port, access)
+    lines = [f"[bold]scoutr {__version__}[/bold]"]
+    lines.append("[dim]Diese Adresse im Browser oeffnen:[/dim]" if public else "")
+    lines += [f"  [green]{url}[/green]" for url in addresses]
+    lines.append(f"[dim]Modell {settings.model} · Suche {settings.search_backend}[/dim]")
+    if public:
+        lines.append(
+            "[dim]Erreichbar fuer alle Geraete in deinem Netz"
+            + (
+                ". Das Zugangswort steht in der Adresse -- ohne kommt niemand rein."
+                if access
+                else ", [yellow]ohne Zugangswort[/yellow]."
+            )
+            + "[/dim]"
         )
-    )
+    lines.append("[dim]Einstellungen aendert man in der Oberflaeche. Beenden mit Strg+C.[/dim]")
+    console.print(Panel.fit("\n".join(line for line in lines if line), border_style="green"))
+
+    if public and not access:
+        console.print(
+            "[yellow]Ohne Zugangswort kann jeder in deinem Netz scoutr benutzen[/yellow] "
+            "[dim]-- und damit auf deine Kosten recherchieren. Lass --no-token besser weg.[/dim]"
+        )
     problems = settings.missing_requirements()
     if problems:
         console.print(
@@ -558,7 +588,7 @@ def web_command(
             + "\n[dim]Laesst sich in der Oberflaeche unter Einstellungen beheben.[/dim]"
         )
     try:
-        serve(host=host, port=port, open_browser=open_browser)
+        serve(host=bind, port=port, open_browser=open_browser, token=access)
     except OSError as exc:
         console.print(f"[red]Start fehlgeschlagen:[/red] {exc}")
         console.print(

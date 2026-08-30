@@ -910,3 +910,51 @@ def test_slash_image_respects_no_stream(
     )
     assert result.exit_code == 0, result.output
     assert seen_stream == [False]
+
+
+def test_web_command_stays_local_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
+    result = runner.invoke(cli.app, ["web", "--no-open"])
+    assert result.exit_code == 0
+    assert seen["host"] == "127.0.0.1"
+    assert seen["token"] == ""  # lokal soll nichts im Weg stehen
+    assert "127.0.0.1:8765" in result.output
+
+
+def test_web_lan_binds_everywhere_and_protects_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr("scoutr.web.lan_address", lambda: "192.168.1.44")
+    result = runner.invoke(cli.app, ["web", "--lan", "--no-open"])
+    assert result.exit_code == 0
+    assert seen["host"] == "0.0.0.0"
+    assert seen["token"], "im Netz muss ein Zugangswort gesetzt sein"
+    # Die Adresse im Terminal muss samt Zugangswort abtippbar sein.
+    assert f"192.168.1.44:8765/?token={seen['token']}" in result.output.replace("\n", "")
+
+
+def test_web_lan_without_token_warns(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr("scoutr.web.lan_address", lambda: "192.168.1.44")
+    result = runner.invoke(cli.app, ["web", "--lan", "--no-token", "--no-open"])
+    assert seen["token"] == ""
+    assert "jeder in deinem Netz" in result.output
+
+
+def test_web_accepts_an_own_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
+    runner.invoke(cli.app, ["web", "--lan", "--token", "familie", "--no-open"])
+    assert seen["token"] == "familie"
+
+
+def test_web_reports_a_taken_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    def busy(**kwargs):
+        raise OSError("Address already in use")
+
+    monkeypatch.setattr("scoutr.web.serve", busy)
+    result = runner.invoke(cli.app, ["web", "--no-open"])
+    assert result.exit_code == 1
+    assert "--port 8766" in result.output

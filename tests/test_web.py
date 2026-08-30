@@ -416,3 +416,153 @@ def test_saved_settings_take_effect_without_a_restart(
     web.save_values({"SCOUTR_MODEL": "openai/gpt-4o", "SCOUTR_LOCATION": "Hamburg"})
     assert fresh.settings().location == "Hamburg"
     reset_settings_cache()
+
+
+# -- Netzbetrieb ----------------------------------------------------------
+@pytest.fixture
+def guarded(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Setzt ein Zugangswort, wie es `scoutr web --lan` tut."""
+    monkeypatch.setattr(web, "TOKEN", "geheim123")
+    return "geheim123"
+
+
+def raw_request(port: int, method: str, path: str, headers: dict[str, str] | None = None):
+    conn = HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request(method, path, headers=headers or {})
+    response = conn.getresponse()
+    data = response.read()
+    result = (response.status, dict(response.getheaders()), data)
+    conn.close()
+    return result
+
+
+@pytest.fixture
+def port(session: web.ChatSession):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_without_a_token_everything_stays_open(port: int) -> None:
+    # Der rein lokale Betrieb soll so einfach bleiben wie vorher.
+    assert raw_request(port, "GET", "/")[0] == 200
+
+
+def test_guarded_server_refuses_strangers(port: int, guarded: str) -> None:
+    status, _, body = raw_request(port, "GET", "/")
+    assert status == 401
+    assert "Zugangswort" in body.decode()
+    assert raw_request(port, "GET", "/api/config")[0] == 401
+
+
+def test_token_in_the_address_opens_the_door(port: int, guarded: str) -> None:
+    status, headers, _ = raw_request(port, "GET", f"/?token={guarded}")
+    assert status == 200
+    # ... und wird als Cookie hinterlegt, damit nur der erste Aufruf ihn braucht.
+    assert f"{web.TOKEN_COOKIE}={guarded}" in headers.get("Set-Cookie", "")
+
+
+def test_token_as_cookie_or_header_works(port: int, guarded: str) -> None:
+    assert raw_request(port, "GET", "/api/config",
+                       {"Cookie": f"{web.TOKEN_COOKIE}={guarded}"})[0] == 200
+    assert raw_request(port, "GET", "/api/config", {"X-Scoutr-Token": guarded})[0] == 200
+
+
+def test_a_wrong_token_is_refused(port: int, guarded: str) -> None:
+    assert raw_request(port, "GET", f"/?token={guarded}x")[0] == 401
+    assert raw_request(port, "GET", "/api/config", {"X-Scoutr-Token": "falsch"})[0] == 401
+    assert raw_request(port, "POST", "/api/chat", {"X-Scoutr-Token": ""})[0] == 401
+
+
+def test_query_string_does_not_break_routing(port: int) -> None:
+    # /?token=... ist immer noch die Startseite, nicht ein unbekannter Pfad.
+    assert raw_request(port, "GET", "/?token=egal")[0] == 200
+    assert raw_request(port, "GET", "/api/config?x=1")[0] == 200
+
+
+def test_lan_urls_name_the_reachable_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web, "lan_address", lambda: "192.168.1.44")
+    urls = web.urls_for("0.0.0.0", 8765, "abc")
+    assert urls[0] == "http://192.168.1.44:8765/?token=abc"
+    assert "http://127.0.0.1:8765/?token=abc" in urls
+
+
+def test_local_urls_stay_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web, "lan_address", lambda: "192.168.1.44")
+    assert web.urls_for("127.0.0.1", 8765) == ["http://127.0.0.1:8765/"]
+
+
+def test_an_explicit_host_is_used_as_given() -> None:
+    assert web.urls_for("192.168.1.9", 80, "k")[0] == "http://192.168.1.9:80/?token=k"
+
+
+def test_public_host_detection() -> None:
+    assert web.is_public_host("0.0.0.0")
+    assert web.is_public_host("192.168.1.9")
+    assert not web.is_public_host("127.0.0.1")
+    assert not web.is_public_host("localhost")
+
+
+def test_token_is_short_enough_to_type_on_a_phone() -> None:
+    token = web.new_token()
+    assert 8 <= len(token) <= 24
+    assert token.isascii() and " " not in token
+    assert web.new_token() != token
+
+
+def test_lan_address_is_never_loopback() -> None:
+    address = web.lan_address()
+    assert not address.startswith("127.")  # "" ist erlaubt, 127.x nie
+
+
+def test_a_waiting_device_is_told_so(session: web.ChatSession) -> None:
+    """Zwei Geraete teilen sich eine Sitzung -- das darf nicht stumm haengen."""
+    started, release = threading.Event(), threading.Event()
+
+    class Slow(FakeAgent):
+        def ask(self, question: str, *, stream: bool = True):
+            started.set()
+            release.wait(timeout=5)
+            return AgentResult(answer="fertig")
+
+    session._agent = Slow()
+    first = threading.Thread(target=lambda: session.ask("eins", lambda n, p: None))
+    first.start()
+    assert started.wait(timeout=5)
+
+    events: list[str] = []
+    second = threading.Thread(
+        target=lambda: session.ask("zwei", lambda name, payload: events.append(name))
+    )
+    second.start()
+    release.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+    assert "waiting" in events
+
+
+# -- Aufbau der Oberflaeche ----------------------------------------------
+def test_style_and_script_blocks_stay_separate() -> None:
+    """Ein Skriptblock im <style> faellt sonst nur im Browser auf."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for tag in ("<style>", "</style>", "<script>", "</script>"):
+        assert html.count(tag) == 1, f"{tag} kommt nicht genau einmal vor"
+    style = html[html.index("<style>") : html.index("</style>")]
+    for js in ("function ", "=>", "await ", "addEventListener"):
+        assert js not in style, f"JavaScript im <style>-Block: {js!r}"
+    assert style.count("{") == style.count("}"), "unausgeglichene Klammern im CSS"
+    script = html[html.index("<script>") : html.index("</script>")]
+    assert "{color:" not in script and "px;" not in script
+
+
+def test_every_request_carries_the_token() -> None:
+    """Keine rohen fetch-Aufrufe -- die kaemen im Netzbetrieb ohne Zugangswort."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'fetch("/api' not in html
+    assert 'X-Scoutr-Token' in html

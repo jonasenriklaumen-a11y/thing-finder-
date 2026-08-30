@@ -71,28 +71,6 @@ main{flex:1;overflow-y:auto;scroll-behavior:smooth}
   vertical-align:-2px;animation:blink 1s steps(2) infinite}
 @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
 
-/* ---------- Slash-Befehle ---------- */
-async function runCommand(line){
-  busy = true; send.disabled = true;
-  addUser(line); input.value = ""; input.style.height = "auto";
-  const { steps, bubble } = addBot();
-  steps.remove();
-  try {
-    const res = await fetch("/api/command", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ line })
-    });
-    const data = await res.json();
-    bubble.innerHTML = md(data.ok ? (data.text || "") : ("**Fehler:** " + data.error));
-    if (data.clear){ thread.innerHTML = ""; }
-    if (data.reload){ await refreshHeader(); }
-  } catch (err){
-    bubble.innerHTML = md("**Fehler:** " + String(err));
-  }
-  scroll();
-  busy = false; send.disabled = false; input.focus();
-}
-
 /* ---------- Eingabe ---------- */
 footer{position:absolute;bottom:0;left:0;right:0;padding:0 20px 20px;
   background:linear-gradient(transparent,var(--bg) 28%)}
@@ -275,6 +253,24 @@ const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
 
+/* ---------- Zugangswort (nur im Netzbetrieb) ----------
+   Der Server setzt es auch als Cookie. Wir merken es zusaetzlich selbst und
+   schicken es als Kopfzeile mit -- dann geht es auch dort, wo der Browser
+   Cookies zurueckhaelt. Aus der Adresszeile nehmen wir es danach heraus,
+   damit es nicht in jedem Screenshot mitfaehrt. */
+let token = new URLSearchParams(location.search).get("token") || "";
+try {
+  if (token) localStorage.setItem("scoutr-token", token);
+  else token = localStorage.getItem("scoutr-token") || "";
+} catch {}
+if (location.search) history.replaceState(null, "", location.pathname);
+
+function api(path, options = {}){
+  const headers = Object.assign({}, options.headers);
+  if (token) headers["X-Scoutr-Token"] = token;
+  return fetch(path, Object.assign({}, options, { headers }));
+}
+
 /* ---------- Markdown (klein gehalten, kein Fremdcode) ---------- */
 const esc = (t) => t.replace(/[&<>"']/g, (c) =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -345,7 +341,7 @@ async function ask(text){
   let answer = "", reading = null, readCount = 0, planning = null;
 
   try {
-    const res = await fetch("/api/chat", {
+    const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ message: text })
     });
@@ -392,6 +388,7 @@ async function ask(text){
       case "subagent_done":
         step(steps, "[Fertig]", ev.task + (ev.error ? "  (fehlgeschlagen)" : ""),
              ev.error ? "warn" : ""); break;
+      case "waiting": step(steps, "[Warte]", ev.reason); break;
       case "image": step(steps, "[Bild]", ev.path); break;
       case "image_done": step(steps, "[Bild]", "beschrieben"); break;
       case "search": step(steps, "[Suche]", ev.query); break;
@@ -424,7 +421,7 @@ async function runCommand(line){
   const { steps, bubble } = addBot();
   steps.remove();
   try {
-    const res = await fetch("/api/command", {
+    const res = await api("/api/command", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ line })
     });
@@ -455,11 +452,11 @@ document.querySelectorAll(".chip").forEach(c =>
 
 /* ---------- Kopfzeile ---------- */
 $("#btn-new").addEventListener("click", async () => {
-  await fetch("/api/clear", { method:"POST" });
+  await api("/api/clear", { method:"POST" });
   thread.innerHTML = ""; location.reload();
 });
 $("#btn-notes").addEventListener("click", async () => {
-  const notes = await (await fetch("/api/notes")).json();
+  const notes = await (await api("/api/notes")).json();
   const { steps, bubble } = addBot();
   $("#empty")?.remove();
   bubble.innerHTML = notes.notes.length
@@ -481,7 +478,7 @@ try {
 const overlay = $("#overlay"), form = $("#settings");
 $("#btn-settings").addEventListener("click", async () => {
   let cfg;
-  try { cfg = await (await fetch("/api/config")).json(); }
+  try { cfg = await (await api("/api/config")).json(); }
   catch { alert("Der scoutr-Server antwortet nicht mehr."); return; }
   for (const [k, v] of Object.entries(cfg.values)){
     const field = form.elements[k];
@@ -504,7 +501,7 @@ form.addEventListener("submit", async (e) => {
   }
   const note = $("#savenote");
   note.textContent = "Speichere …"; note.className = "note";
-  const res = await fetch("/api/config", {
+  const res = await api("/api/config", {
     method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(values)
   });
   const data = await res.json();
@@ -521,7 +518,7 @@ form.addEventListener("submit", async (e) => {
 /* ---------- Start ---------- */
 async function refreshHeader(){
   try {
-    const cfg = await (await fetch("/api/config")).json();
+    const cfg = await (await api("/api/config")).json();
     $("#version").textContent = "v" + cfg.version;
     document.title = `scoutr ${cfg.version}`;
     $("#status").textContent =

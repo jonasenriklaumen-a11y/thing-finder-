@@ -2,8 +2,8 @@
 
 Ein KI-Agent, mit dem man chatten kann und der eigenständig das Internet durchsucht,
 die gefundenen Seiten liest und die Ergebnisse ausgewertet zurückgibt — mit Quelle zu
-jeder Angabe. Im Terminal (`scoutr`) und im Browser (`scoutr web`) — derselbe Agent,
-dieselben Einstellungen.
+jeder Angabe. Im Terminal (`scoutr`), im Browser (`scoutr web`) und vom Handy aus
+(`scoutr web --lan`) — derselbe Agent, dieselben Einstellungen.
 
 ```
 $ scoutr
@@ -299,12 +299,61 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
 ```bash
 scoutr web --port 9000     # anderer Port, falls 8765 belegt ist
 scoutr web --no-open       # ohne Browser zu öffnen
-scoutr web --host 0.0.0.0  # im lokalen Netz erreichbar (nur in vertrauten Netzen!)
 ```
 
-Der Server hört standardmäßig nur auf `127.0.0.1`, hat keine Anmeldung und keine
-zusätzliche Abhängigkeit — er läuft auf der Standardbibliothek. Beenden mit
-<kbd>Strg</kbd>+<kbd>C</kbd>.
+Der Server läuft auf der Standardbibliothek, braucht also keine zusätzliche
+Abhängigkeit. Beenden mit <kbd>Strg</kbd>+<kbd>C</kbd>.
+
+### Vom Handy oder Tablet: `scoutr web --lan`
+
+```bash
+scoutr web --lan
+```
+
+Damit hört scoutr auf allen Netzwerkkarten und nennt dir die Adresse, die du auf
+dem anderen Gerät eintippst:
+
+```
+╭──────────────────────────────────────────────────────────────╮
+│ scoutr 5.1                                                   │
+│ Diese Adresse im Browser oeffnen:                            │
+│   http://192.168.1.44:8765/?token=n43wlGkjIByr               │
+│   http://127.0.0.1:8765/?token=n43wlGkjIByr                  │
+│ Modell ollama_chat/gemma4:12b · Suche duckduckgo             │
+│ Erreichbar fuer alle Geraete in deinem Netz. Das Zugangswort │
+│ steht in der Adresse -- ohne kommt niemand rein.             │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+**Das Zugangswort** wird bei jedem Start neu gewürfelt und steht hinten in der
+Adresse. Nur der erste Aufruf braucht es — danach merkt es sich der Browser, und
+scoutr nimmt es wieder aus der Adresszeile heraus. Ohne das Wort bekommt man nur
+einen Hinweis zu sehen, egal welche Seite man aufruft.
+
+```bash
+scoutr web --lan --token familie   # eigenes Wort, bleibt über Neustarts gleich
+scoutr web --lan --no-token        # ohne Schutz (nur in einem Netz, dem du traust)
+scoutr web --host 192.168.1.44     # gezielt eine Netzwerkkarte
+```
+
+Warum überhaupt ein Schutz? Wer die Oberfläche erreicht, kann auf deine Kosten
+recherchieren, deine Einstellungen ändern und über `/image` Bilder von deinem
+Rechner ansehen lassen. Im eigenen WLAN ist das meist unkritisch — in einem
+Gäste-, Büro- oder Studentenwohnheim-Netz nicht. Deshalb ist der Schutz an,
+solange du ihn nicht ausdrücklich abschaltest.
+
+**Wenn das andere Gerät die Seite nicht lädt:** meist blockt die Firewall des
+Rechners den Port. Unter Windows fragt die Firewall beim ersten Start nach —
+dort „privates Netzwerk" erlauben. Unter Linux mit ufw:
+`sudo ufw allow 8765/tcp`. Beide Geräte müssen im selben Netz sein (nicht eines
+im WLAN-Gastzugang).
+
+Alle Geräte teilen sich **eine** Sitzung — der Gesprächsverlauf ist also
+derselbe, egal von wo du weiterfragst. Fragt ein zweites Gerät, während noch
+eine Recherche läuft, sieht es „[Warte] Ein anderes Gerät fragt gerade" und
+kommt danach dran. Nach außen ins Internet stellt `--lan` nichts: dafür müsste
+im Router zusätzlich eine Portfreigabe eingerichtet werden — tu das nicht, der
+Server hat bewusst keine Anmeldung mit Nutzerkonten.
 
 ## Chat-Interface
 
@@ -346,6 +395,7 @@ scoutr config                            # aktive Konfiguration prüfen
 scoutr install-model                     # lokales Modell einrichten (ohne Key)
 scoutr install-browser                   # Playwright-Fallback aktivieren
 scoutr web                               # Oberflaeche im Browser starten
+scoutr web --lan                         # auch vom Handy im heimischen Netz
 ```
 
 ## Ortsfilter
