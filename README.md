@@ -1,8 +1,9 @@
 # scoutr
 
-Ein KI-Agent für die Kommandozeile, mit dem man chatten kann und der eigenständig das
-Internet durchsucht, die gefundenen Seiten liest und die Ergebnisse ausgewertet
-zurückgibt — mit Quelle zu jeder Angabe.
+Ein KI-Agent, mit dem man chatten kann und der eigenständig das Internet durchsucht,
+die gefundenen Seiten liest und die Ergebnisse ausgewertet zurückgibt — mit Quelle zu
+jeder Angabe. Im Terminal (`scoutr`) und im Browser (`scoutr web`) — derselbe Agent,
+dieselben Einstellungen.
 
 ```
 $ scoutr
@@ -37,8 +38,11 @@ uv tool install .
 # 2. Einrichten -- fragt nach Modell und API-Key, testet beide
 scoutr setup
 
-# 3. Loslegen
+# 3. Loslegen -- im Terminal
 scoutr
+
+# ... oder im Browser (oeffnet sich von selbst)
+scoutr web
 ```
 
 **Aktualisieren** — beide Befehle müssen *im Repo-Verzeichnis* laufen, nicht im
@@ -267,6 +271,41 @@ darf das Hauptmodell, das die Ergebnisse am Ende zusammenführt.
 **Grenzen:** maximal 20 Tool-Calls pro Anfrage, dann wird der Zwischenstand ausgegeben.
 Was nicht gefunden wurde, wird als „nicht gefunden" gekennzeichnet — niemals geraten.
 
+## Weboberfläche
+
+```bash
+scoutr web
+```
+
+Startet eine Oberfläche im Stil eines Chat-Fensters und öffnet den Browser. Es ist
+derselbe Agent wie im Terminal: dieselben zwei Werkzeuge, dieselben Subagenten,
+derselbe Verlauf, dieselbe `.env`. Die Zwischenschritte („Suche", „Lese", „Teile")
+laufen live mit, die Antwort wird Wort für Wort gestreamt.
+
+* **Grün auf Schwarz**, per Knopf umschaltbar auf Weiß. Die Versionsnummer steht klein
+  in der Kopfzeile.
+* **Einstellungen** öffnet ein Formular mit *allem*, was auch `scoutr setup` fragt:
+  Haupt-, Vision- und Subagenten-Modell, API-Key, API-Basis, Suchmaschine samt Engine-
+  Liste und SearXNG-URL, Ort/Sprache/Land, Subagenten an/aus samt Budget und
+  Parallelität, Werkzeug-Budget, Kontextfenster, Planungs-Zeitlimit und der
+  Playwright-Fallback. Gespeichert wird in dieselbe `.env`, danach lädt der Agent neu.
+  Ein leeres API-Key-Feld bedeutet „unverändert" — der vorhandene Key bleibt stehen.
+* **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
+* **Alle Slash-Befehle** aus dem Terminal funktionieren auch hier: `/location`,
+  `/model`, `/image`, `/export`, `/history`, `/notes`, `/clear`, `/help`. `/image`
+  nimmt einen Dateipfad oder einen Ordner vom selben Rechner — bei mehreren Bildern
+  im Ordner nimmt er das neueste.
+
+```bash
+scoutr web --port 9000     # anderer Port, falls 8765 belegt ist
+scoutr web --no-open       # ohne Browser zu öffnen
+scoutr web --host 0.0.0.0  # im lokalen Netz erreichbar (nur in vertrauten Netzen!)
+```
+
+Der Server hört standardmäßig nur auf `127.0.0.1`, hat keine Anmeldung und keine
+zusätzliche Abhängigkeit — er läuft auf der Standardbibliothek. Beenden mit
+<kbd>Strg</kbd>+<kbd>C</kbd>.
+
 ## Chat-Interface
 
 | Befehl | Wirkung |
@@ -306,6 +345,7 @@ scoutr export html -n 3                  # letzte 3 Recherchen exportieren
 scoutr config                            # aktive Konfiguration prüfen
 scoutr install-model                     # lokales Modell einrichten (ohne Key)
 scoutr install-browser                   # Playwright-Fallback aktivieren
+scoutr web                               # Oberflaeche im Browser starten
 ```
 
 ## Ortsfilter
@@ -823,6 +863,8 @@ scoutr/
   browser.py     # Playwright-Fallback (Stufe 3)
   extract.py     # Produktdaten aus JSON-LD, OG, Microdata, Tabellen
   render.py      # Live-Anzeige, Produktkarten, Bilder
+  web.py         # Weboberflaeche (nur Standardbibliothek)
+  webui.html     # die Oberflaeche selbst, eine einzige Datei
   export.py      # HTML / Markdown / CSV
   subagents.py   # parallele Rechercheaufträge
   local_model.py # lokale Modelle per Ollama einrichten

@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scoutr</title>
+<style>
+:root{
+  --bg:#0d0f0e; --panel:#141816; --panel-2:#1b201d; --line:#252b28;
+  --text:#e8ece9; --dim:#8b9590; --green:#31c46b; --green-dim:#1f8a4a;
+  --user:#1b201d; --warn:#d9a441; --err:#e05c5c;
+  --radius:14px;
+}
+:root[data-theme="light"]{
+  --bg:#fbfcfb; --panel:#ffffff; --panel-2:#f2f5f3; --line:#e2e8e4;
+  --text:#12160f; --dim:#5d6b63; --green:#12864a; --green-dim:#0e6b3b;
+  --user:#eef4f0;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  display:flex;flex-direction:column;overflow:hidden}
+
+/* ---------- Kopf ---------- */
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;
+  border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+.logo{display:flex;align-items:baseline;gap:8px;font-weight:700;letter-spacing:-.02em;
+  font-size:18px}
+.logo .dot{width:9px;height:9px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 10px var(--green);align-self:center}
+.version{color:var(--dim);font-size:11px;font-variant-numeric:tabular-nums;
+  border:1px solid var(--line);padding:2px 7px;border-radius:999px}
+header .spacer{flex:1}
+.status{color:var(--dim);font-size:12px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;max-width:38ch}
+button.icon{background:transparent;border:1px solid var(--line);color:var(--dim);
+  border-radius:9px;padding:6px 11px;cursor:pointer;font-size:13px}
+button.icon:hover{color:var(--text);border-color:var(--green-dim)}
+
+/* ---------- Chat ---------- */
+main{flex:1;overflow-y:auto;scroll-behavior:smooth}
+.thread{max-width:820px;margin:0 auto;padding:28px 20px 140px}
+.msg{margin-bottom:26px;animation:in .18s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.msg .who{font-size:11px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--dim);margin-bottom:7px}
+.msg.user .bubble{background:var(--user);border:1px solid var(--line);
+  border-radius:var(--radius);padding:12px 16px;white-space:pre-wrap}
+.msg.bot .bubble{padding:0}
+.bubble h1,.bubble h2,.bubble h3{font-size:1.05em;margin:1.1em 0 .4em}
+.bubble p{margin:.55em 0}
+.bubble ul,.bubble ol{margin:.5em 0;padding-left:1.3em}
+.bubble li{margin:.3em 0}
+.bubble code{background:var(--panel-2);padding:.1em .35em;border-radius:5px;font-size:.9em}
+.bubble pre{background:var(--panel-2);padding:12px;border-radius:10px;overflow-x:auto}
+.bubble a{color:var(--green)}
+.bubble strong{color:var(--text)}
+.bubble table{border-collapse:collapse;width:100%;margin:.7em 0;display:block;overflow-x:auto}
+.bubble th,.bubble td{border:1px solid var(--line);padding:6px 9px;text-align:left}
+
+/* ---------- Zwischenschritte ---------- */
+.steps{border-left:2px solid var(--green-dim);padding:2px 0 2px 13px;margin:0 0 12px;
+  display:flex;flex-direction:column;gap:5px}
+.step{font-size:13px;color:var(--dim);display:flex;gap:9px;align-items:flex-start}
+.step .tag{color:var(--green);font-weight:600;flex:0 0 auto;font-size:12px;
+  min-width:66px;font-family:ui-monospace,monospace}
+.step.warn .tag{color:var(--warn)} .step.err .tag{color:var(--err)}
+.step .sub{padding-left:75px;color:var(--dim);opacity:.75;font-size:12px}
+.cursor{display:inline-block;width:7px;height:15px;background:var(--green);
+  vertical-align:-2px;animation:blink 1s steps(2) infinite}
+@keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+
+/* ---------- Slash-Befehle ---------- */
+async function runCommand(line){
+  busy = true; send.disabled = true;
+  addUser(line); input.value = ""; input.style.height = "auto";
+  const { steps, bubble } = addBot();
+  steps.remove();
+  try {
+    const res = await fetch("/api/command", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ line })
+    });
+    const data = await res.json();
+    bubble.innerHTML = md(data.ok ? (data.text || "") : ("**Fehler:** " + data.error));
+    if (data.clear){ thread.innerHTML = ""; }
+    if (data.reload){ await refreshHeader(); }
+  } catch (err){
+    bubble.innerHTML = md("**Fehler:** " + String(err));
+  }
+  scroll();
+  busy = false; send.disabled = false; input.focus();
+}
+
+/* ---------- Eingabe ---------- */
+footer{position:absolute;bottom:0;left:0;right:0;padding:0 20px 20px;
+  background:linear-gradient(transparent,var(--bg) 28%)}
+.composer{max-width:820px;margin:0 auto;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;
+  display:flex;gap:10px;align-items:flex-end}
+.composer:focus-within{border-color:var(--green-dim)}
+textarea{flex:1;background:transparent;border:0;color:var(--text);resize:none;
+  font:inherit;outline:none;max-height:180px;min-height:24px;padding:4px 0}
+.send{background:var(--green);color:#06120b;border:0;border-radius:10px;
+  width:36px;height:36px;cursor:pointer;font-size:17px;font-weight:700;flex:0 0 auto}
+.send:disabled{background:var(--panel-2);color:var(--dim);cursor:default}
+.hint{max-width:820px;margin:7px auto 0;color:var(--dim);font-size:11px;
+  display:flex;gap:14px;flex-wrap:wrap}
+.hint b{color:var(--green);font-weight:600}
+
+/* ---------- Leerzustand ---------- */
+.empty{text-align:center;padding:56px 20px 30px;color:var(--dim)}
+.empty h2{color:var(--text);font-size:22px;margin:0 0 8px;font-weight:650}
+.chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:20px}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;
+  padding:7px 14px;font-size:13px;cursor:pointer;color:var(--text)}
+.chip:hover{border-color:var(--green-dim);color:var(--green)}
+
+/* ---------- Einstellungen ---------- */
+.overlay{position:fixed;inset:0;background:#000a;display:none;z-index:20;
+  align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}
+.overlay.open{display:flex}
+.sheet{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  width:100%;max-width:620px;padding:22px 24px 26px}
+.sheet h2{margin:0 0 4px;font-size:18px}
+.sheet .lead{color:var(--dim);font-size:13px;margin:0 0 18px}
+fieldset{border:0;border-top:1px solid var(--line);margin:18px 0 0;padding:14px 0 0}
+legend{color:var(--green);font-size:11px;text-transform:uppercase;
+  letter-spacing:.09em;padding:0 8px 0 0}
+label{display:block;margin:11px 0}
+label .lbl{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
+input[type=text],input[type=password],select{width:100%;background:var(--panel-2);
+  border:1px solid var(--line);color:var(--text);border-radius:9px;padding:9px 11px;
+  font:inherit;outline:none}
+input:focus,select:focus{border-color:var(--green-dim)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.check{display:flex;align-items:center;gap:9px;margin:12px 0;font-size:14px}
+.check input{accent-color:var(--green);width:16px;height:16px}
+.actions{display:flex;gap:10px;justify-content:flex-end;margin-top:22px}
+.btn{border-radius:10px;padding:9px 17px;font:inherit;cursor:pointer;border:1px solid var(--line);
+  background:transparent;color:var(--text)}
+.btn.primary{background:var(--green);color:#06120b;border-color:var(--green);font-weight:600}
+.note{font-size:12px;color:var(--dim);margin-top:10px}
+.note.ok{color:var(--green)} .note.bad{color:var(--err)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span class="dot"></span>scoutr</div>
+  <span class="version" id="version">…</span>
+  <span class="status" id="status"></span>
+  <div class="spacer"></div>
+  <button class="icon" id="btn-notes">Merkzettel</button>
+  <button class="icon" id="btn-new">Neuer Chat</button>
+  <button class="icon" id="btn-settings">Einstellungen</button>
+  <button class="icon" id="btn-theme">◐</button>
+</header>
+
+<main id="main">
+  <div class="thread" id="thread">
+    <div class="empty" id="empty">
+      <h2>Was soll ich für dich herausfinden?</h2>
+      <div>scoutr sucht selbst im Web, liest die Seiten und nennt zu jeder Angabe die Quelle.</div>
+      <div class="chips">
+        <span class="chip">Gute Cafés mit WLAN in meiner Stadt</span>
+        <span class="chip">Laptop bis 1200 € für Bildbearbeitung</span>
+        <span class="chip">Was ist diese Woche in der Technik passiert?</span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="composer">
+    <textarea id="input" rows="1" placeholder="Frag etwas — oder /help für Befehle"></textarea>
+    <button class="send" id="send" title="Senden (Enter)">↑</button>
+  </div>
+  <div class="hint">
+    <span><b>Enter</b> senden</span><span><b>Shift+Enter</b> Zeilenumbruch</span>
+    <span><b>/location</b> Ort</span><span><b>/notes</b> Merkzettel</span>
+    <span><b>/clear</b> Verlauf</span>
+  </div>
+</footer>
+
+<div class="overlay" id="overlay">
+  <div class="sheet">
+    <h2>Einstellungen</h2>
+    <p class="lead">Dieselben Angaben wie bei <code>scoutr setup</code>. Wird in deine
+      <code>.env</code> geschrieben.</p>
+    <form id="settings">
+      <fieldset><legend>Modell</legend>
+        <label><span class="lbl">Hauptmodell (LiteLLM-ID)</span>
+          <input type="text" name="SCOUTR_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
+        <div class="row">
+          <label><span class="lbl">Vision-Modell (leer = Hauptmodell)</span>
+            <input type="text" name="SCOUTR_VISION_MODEL"></label>
+          <label><span class="lbl">Subagenten-Modell (leer = Hauptmodell)</span>
+            <input type="text" name="SCOUTR_SUBAGENT_MODEL"></label>
+        </div>
+        <label><span class="lbl">API-Basis-URL (Ollama, Proxy)</span>
+          <input type="text" name="SCOUTR_API_BASE" placeholder="http://localhost:11434"></label>
+        <label><span class="lbl">API-Key <span id="keyname"></span></span>
+          <input type="password" name="__API_KEY__" placeholder="leer lassen = unverändert"></label>
+      </fieldset>
+
+      <fieldset><legend>Suche</legend>
+        <div class="row">
+          <label><span class="lbl">Suchmaschine</span>
+            <select name="SCOUTR_SEARCH_BACKEND">
+              <option value="duckduckgo">Offene Metasuche (kein Key)</option>
+              <option value="searxng">SearXNG (eigene Instanz)</option>
+              <option value="brave">Brave Search (Key)</option>
+              <option value="tavily">Tavily (Key)</option>
+            </select></label>
+          <label><span class="lbl">Engines (leer = alle)</span>
+            <input type="text" name="SCOUTR_SEARCH_ENGINES" placeholder="duckduckgo,mojeek"></label>
+        </div>
+        <label><span class="lbl">SearXNG-Adresse</span>
+          <input type="text" name="SCOUTR_SEARXNG_URL" placeholder="http://localhost:8080"></label>
+      </fieldset>
+
+      <fieldset><legend>Ort &amp; Sprache</legend>
+        <div class="row">
+          <label><span class="lbl">Standard-Ort</span>
+            <input type="text" name="SCOUTR_LOCATION" placeholder="Mönchengladbach"></label>
+          <label><span class="lbl">Sprache / Land</span>
+            <div class="row">
+              <input type="text" name="SCOUTR_LANG" placeholder="de">
+              <input type="text" name="SCOUTR_COUNTRY" placeholder="de">
+            </div></label>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Subagenten &amp; Limits</legend>
+        <div class="check">
+          <input type="checkbox" id="auto" name="SCOUTR_SUBAGENTS_AUTO">
+          <label for="auto" style="margin:0">Jede Anfrage automatisch in Teilfragen zerlegen</label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Subagenten je Anfrage (0 = aus)</span>
+            <input type="text" name="SCOUTR_MAX_SUBAGENTS"></label>
+          <label><span class="lbl">Budget je Subagent</span>
+            <input type="text" name="SCOUTR_SUBAGENT_BUDGET"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Werkzeug-Budget je Anfrage</span>
+            <input type="text" name="SCOUTR_MAX_TOOL_CALLS"></label>
+          <label><span class="lbl">Kontextfenster (Token, lokal)</span>
+            <input type="text" name="SCOUTR_CONTEXT_TOKENS"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Zeitlimit Planung (s)</span>
+            <input type="text" name="SCOUTR_PLANNER_TIMEOUT"></label>
+          <label><span class="lbl">Gleichzeitige Subagenten (0 = automatisch)</span>
+            <input type="text" name="SCOUTR_SUBAGENT_PARALLEL"></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" id="pw" name="SCOUTR_ENABLE_PLAYWRIGHT">
+          <label for="pw" style="margin:0">Browser-Fallback für JavaScript-Seiten</label>
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <button type="button" class="btn" id="cancel">Abbrechen</button>
+        <button type="submit" class="btn primary">Speichern</button>
+      </div>
+      <div class="note" id="savenote"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
+let busy = false;
+
+/* ---------- Markdown (klein gehalten, kein Fremdcode) ---------- */
+const esc = (t) => t.replace(/[&<>"']/g, (c) =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+function md(text){
+  let h = esc(text);
+  h = h.replace(/```([\s\S]*?)```/g, (m,c)=>`<pre><code>${c.trim()}</code></pre>`);
+  h = h.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  h = h.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  h = h.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  h = h.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+    '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  const lines = h.split("\n"); const out = []; let list = null;
+  for (let line of lines){
+    const head = line.match(/^(#{1,4})\s+(.*)$/);
+    const ol = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+    const ul = line.match(/^\s*[-*•]\s+(.*)$/);
+    if (head){ if(list){out.push(`</${list}>`);list=null;} out.push(`<h3>${head[2]}</h3>`); continue; }
+    if (ol){ if(list!=="ol"){ if(list)out.push(`</${list}>`); out.push("<ol>"); list="ol";}
+      out.push(`<li>${ol[2]}</li>`); continue; }
+    if (ul){ if(list!=="ul"){ if(list)out.push(`</${list}>`); out.push("<ul>"); list="ul";}
+      out.push(`<li>${ul[1]}</li>`); continue; }
+    if (list){ out.push(`</${list}>`); list=null; }
+    out.push(line.trim() ? `<p>${line}</p>` : "");
+  }
+  if (list) out.push(`</${list}>`);
+  return out.join("");
+}
+
+/* ---------- Nachrichten ---------- */
+function addUser(text){
+  $("#empty")?.remove();
+  const el = document.createElement("div");
+  el.className = "msg user";
+  el.innerHTML = `<div class="who">Du</div><div class="bubble"></div>`;
+  el.querySelector(".bubble").textContent = text;
+  thread.appendChild(el); scroll();
+}
+function addBot(){
+  const el = document.createElement("div");
+  el.className = "msg bot";
+  el.innerHTML = `<div class="who">scoutr</div><div class="steps"></div><div class="bubble"></div>`;
+  thread.appendChild(el); scroll();
+  return { steps: el.querySelector(".steps"), bubble: el.querySelector(".bubble") };
+}
+function step(box, tag, text, kind){
+  const el = document.createElement("div");
+  el.className = "step" + (kind ? " " + kind : "");
+  el.innerHTML = `<span class="tag"></span><span class="txt"></span>`;
+  el.querySelector(".tag").textContent = tag;
+  el.querySelector(".txt").textContent = text || "";
+  box.appendChild(el); scroll(); return el;
+}
+const scroll = () => { main.scrollTop = main.scrollHeight; };
+
+/* ---------- Senden ---------- */
+async function ask(text){
+  if (busy || !text.trim()) return;
+  // /image recherchiert und laeuft deshalb ueber den normalen Weg mit
+  // Live-Anzeige; alle anderen Befehle antworten sofort.
+  if (text.trim().startsWith("/") && !text.trim().startsWith("/image")){
+    return runCommand(text.trim());
+  }
+  busy = true; send.disabled = true;
+  addUser(text); input.value = ""; input.style.height = "auto";
+  const { steps, bubble } = addBot();
+  let answer = "", reading = null, readCount = 0, planning = null;
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ message: text })
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    while (true){
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const parts = buf.split("\n\n"); buf = parts.pop();
+      for (const part of parts){
+        const line = part.replace(/^data: ?/, "").trim();
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        handle(ev);
+      }
+    }
+  } catch (err){
+    step(steps, "[Fehler]", String(err), "err");
+  }
+
+  function handle(ev){
+    switch (ev.type){
+      case "planning":
+        planning = step(steps, "[Plane]", "sichte die Anfrage …"); break;
+      case "triage":
+        // Ohne Recherche bleibt sonst ein "[Plane] …" ohne Ausgang stehen.
+        if (ev.decision === "chat"){
+          if (planning) planning.remove();
+          planning = null;
+        } else if (planning){
+          planning.querySelector(".txt").textContent =
+            "Recherche" + (ev.seconds ? ` (${ev.seconds}s)` : "");
+        }
+        break;
+      case "subagents":
+        step(steps, "[Teile]", `${ev.tasks.length} Teilfragen`);
+        ev.tasks.forEach(t => {
+          const s = document.createElement("div");
+          s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
+          s.querySelector(".sub").textContent = t; steps.appendChild(s);
+        }); break;
+      case "subagent_done":
+        step(steps, "[Fertig]", ev.task + (ev.error ? "  (fehlgeschlagen)" : ""),
+             ev.error ? "warn" : ""); break;
+      case "image": step(steps, "[Bild]", ev.path); break;
+      case "image_done": step(steps, "[Bild]", "beschrieben"); break;
+      case "search": step(steps, "[Suche]", ev.query); break;
+      case "fetch":
+        readCount++;
+        if (!reading) reading = step(steps, "[Lese]", "");
+        reading.querySelector(".txt").textContent = `${readCount} Seiten …`; break;
+      case "skip":
+        if (reading) reading.className = "step warn";
+        step(steps, "[Skip]", `${ev.url} — ${ev.reason}`, "warn"); break;
+      case "calculate": step(steps, "[Rechne]", ev.expression); break;
+      case "remember": step(steps, "[Merke]", ev.text); break;
+      case "fallback": step(steps, "[Ausweich]", `${ev.source} → ${ev.target}`, "warn"); break;
+      case "retry": step(steps, "[Neu]", `Versuch ${ev.attempt}: ${ev.reason}`, "warn"); break;
+      case "error": step(steps, "[Fehler]", ev.message, "err"); break;
+      case "chunk":
+        answer += ev.text;
+        bubble.innerHTML = md(answer) + '<span class="cursor"></span>'; scroll(); break;
+      case "done":
+        bubble.innerHTML = md(answer || "(keine Antwort)"); scroll(); break;
+    }
+  }
+  busy = false; send.disabled = false; input.focus();
+}
+
+/* ---------- Slash-Befehle ---------- */
+async function runCommand(line){
+  busy = true; send.disabled = true;
+  addUser(line); input.value = ""; input.style.height = "auto";
+  const { steps, bubble } = addBot();
+  steps.remove();
+  try {
+    const res = await fetch("/api/command", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ line })
+    });
+    const data = await res.json();
+    bubble.innerHTML = md(data.ok ? (data.text || "") : ("**Fehler:** " + data.error));
+    if (data.clear){ thread.innerHTML = ""; }
+    if (data.reload){ await refreshHeader(); }
+  } catch (err){
+    bubble.innerHTML = md("**Fehler:** " + String(err));
+  }
+  scroll();
+  busy = false; send.disabled = false; input.focus();
+}
+
+/* ---------- Eingabe ---------- */
+input.addEventListener("input", () => {
+  input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight,180) + "px";
+});
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); ask(input.value); }
+});
+send.addEventListener("click", () => ask(input.value));
+document.querySelectorAll(".chip").forEach(c =>
+  c.addEventListener("click", () => {
+    input.value = c.textContent; input.focus();
+    input.dispatchEvent(new Event("input"));
+  }));
+
+/* ---------- Kopfzeile ---------- */
+$("#btn-new").addEventListener("click", async () => {
+  await fetch("/api/clear", { method:"POST" });
+  thread.innerHTML = ""; location.reload();
+});
+$("#btn-notes").addEventListener("click", async () => {
+  const notes = await (await fetch("/api/notes")).json();
+  const { steps, bubble } = addBot();
+  $("#empty")?.remove();
+  bubble.innerHTML = notes.notes.length
+    ? md("### Merkzettel\n" + notes.notes.map(n => `- ${n.text}`).join("\n"))
+    : md("Der Merkzettel ist leer. Sag im Chat einfach *merk dir …*");
+  steps.remove();
+});
+$("#btn-theme").addEventListener("click", () => {
+  const light = document.documentElement.getAttribute("data-theme") === "light";
+  document.documentElement.setAttribute("data-theme", light ? "dark" : "light");
+  try { localStorage.setItem("scoutr-theme", light ? "dark" : "light"); } catch {}
+});
+try {
+  const saved = localStorage.getItem("scoutr-theme");
+  if (saved) document.documentElement.setAttribute("data-theme", saved);
+} catch {}
+
+/* ---------- Einstellungen ---------- */
+const overlay = $("#overlay"), form = $("#settings");
+$("#btn-settings").addEventListener("click", async () => {
+  let cfg;
+  try { cfg = await (await fetch("/api/config")).json(); }
+  catch { alert("Der scoutr-Server antwortet nicht mehr."); return; }
+  for (const [k, v] of Object.entries(cfg.values)){
+    const field = form.elements[k];
+    if (!field) continue;
+    if (field.type === "checkbox") field.checked = (v === "true" || v === true);
+    else field.value = v ?? "";
+  }
+  $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
+  $("#savenote").textContent = ""; $("#savenote").className = "note";
+  overlay.classList.add("open");
+});
+$("#cancel").addEventListener("click", () => overlay.classList.remove("open"));
+overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.classList.remove("open"); });
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const values = {};
+  for (const el of form.elements){
+    if (!el.name) continue;
+    values[el.name] = el.type === "checkbox" ? String(el.checked) : el.value;
+  }
+  const note = $("#savenote");
+  note.textContent = "Speichere …"; note.className = "note";
+  const res = await fetch("/api/config", {
+    method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(values)
+  });
+  const data = await res.json();
+  if (data.ok){
+    note.textContent = "Gespeichert in " + data.path + " — sofort aktiv.";
+    note.className = "note ok";
+    refreshHeader();
+    setTimeout(() => overlay.classList.remove("open"), 1100);
+  } else {
+    note.textContent = data.error || "Fehlgeschlagen."; note.className = "note bad";
+  }
+});
+
+/* ---------- Start ---------- */
+async function refreshHeader(){
+  try {
+    const cfg = await (await fetch("/api/config")).json();
+    $("#version").textContent = "v" + cfg.version;
+    document.title = `scoutr ${cfg.version}`;
+    $("#status").textContent =
+      [cfg.values.SCOUTR_MODEL, cfg.values.SCOUTR_LOCATION || "kein Ortsfilter"].join(" · ");
+    $("#status").title = cfg.problems.length ? cfg.problems.join("; ") : "";
+  } catch { /* Server weg -- die Oberflaeche bleibt trotzdem bedienbar */ }
+}
+refreshHeader();
+input.focus();
+</script>
+</body>
+</html>

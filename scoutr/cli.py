@@ -297,6 +297,7 @@ def setup_command(
             f"Gespeichert in [cyan]{written}[/cyan]\n\n"
             "Jetzt loslegen:\n"
             '  [bold]scoutr[/bold]                     Chat starten\n'
+            '  [bold]scoutr web[/bold]                 Oberflaeche im Browser\n'
             '  [bold]scoutr "deine Frage"[/bold]       einmalige Recherche',
             title="fertig",
             border_style="green",
@@ -525,6 +526,46 @@ def history_command(
         console.print(f"[dim]{when}[/dim]  [bold]{entry.question}[/bold]")
         first_line = entry.answer.strip().splitlines()[0] if entry.answer.strip() else ""
         console.print(f"    [dim]{first_line[:110]}[/dim]")
+
+
+@app.command("web")
+def web_command(
+    port: int = typer.Option(8765, "--port", "-p", help="Port fuer die Oberflaeche."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Adresse (Default: nur lokal)."),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Browser automatisch oeffnen."
+    ),
+) -> None:
+    """Startet die Weboberflaeche -- derselbe Agent, nur im Browser."""
+    from scoutr.web import serve
+
+    settings = get_settings()
+    console.print(
+        Panel.fit(
+            f"[bold]scoutr {__version__}[/bold] laeuft auf "
+            f"[green]http://{host}:{port}/[/green]\n"
+            f"[dim]Modell {settings.model} · Suche {settings.search_backend}[/dim]\n"
+            "[dim]Einstellungen aendert man direkt in der Oberflaeche. "
+            "Beenden mit Strg+C.[/dim]",
+            border_style="green",
+        )
+    )
+    problems = settings.missing_requirements()
+    if problems:
+        console.print(
+            "[yellow]Hinweis:[/yellow] "
+            + "; ".join(problems)
+            + "\n[dim]Laesst sich in der Oberflaeche unter Einstellungen beheben.[/dim]"
+        )
+    try:
+        serve(host=host, port=port, open_browser=open_browser)
+    except OSError as exc:
+        console.print(f"[red]Start fehlgeschlagen:[/red] {exc}")
+        console.print(
+            f"[dim]Laeuft scoutr schon? Sonst anderen Port: --port {port + 1}[/dim]"
+        )
+        raise typer.Exit(code=1) from exc
+    console.print("[dim]Beendet.[/dim]")
 
 
 @app.command("install-browser")
@@ -965,6 +1006,7 @@ def install_model_command(
             + f"\nEingetragen in [cyan]{written}[/cyan]\n\n"
             "Loslegen:\n"
             "  [bold]scoutr[/bold]                     Chat\n"
+            "  [bold]scoutr web[/bold]                 Oberflaeche im Browser\n"
             '  [bold]scoutr "deine Frage"[/bold]       einmalige Recherche\n'
             + (
                 "  [bold]scoutr --image foto.jpg[/bold]  Bild als Ausgangspunkt"
@@ -1356,6 +1398,7 @@ COMMANDS = {
     "export",
     "install-browser",
     "install-model",
+    "web",
     "chat",
     "version",
 }

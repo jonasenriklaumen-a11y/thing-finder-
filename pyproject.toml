@@ -1,12 +1,12 @@
 [project]
 name = "scoutr"
-version = "4.9.1"
-description = "Ein KI-Agent fuer die Kommandozeile, der eigenstaendig das Web durchsucht, Seiten liest und die Ergebnisse ausgewertet zurueckgibt."
+version = "5.0"
+description = "Ein KI-Agent fuer Kommandozeile und Browser, der eigenstaendig das Web durchsucht, Seiten liest und die Ergebnisse ausgewertet zurueckgibt."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "scoutr contributors" }]
-keywords = ["cli", "agent", "llm", "research", "web-search"]
+keywords = ["cli", "agent", "llm", "research", "web-search", "web-ui"]
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
