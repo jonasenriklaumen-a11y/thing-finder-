@@ -922,25 +922,27 @@ def test_web_command_stays_local_by_default(monkeypatch: pytest.MonkeyPatch) -> 
     assert "127.0.0.1:8765" in result.output
 
 
-def test_web_lan_binds_everywhere_and_protects_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_web_lan_needs_nothing_but_the_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Adresse und Port genuegen -- kein Zugangswort, keine Anmeldung."""
     seen: dict[str, Any] = {}
     monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
     monkeypatch.setattr("scoutr.web.lan_address", lambda: "192.168.1.44")
+    monkeypatch.setattr("scoutr.web.tailscale_address", lambda: "")
     result = runner.invoke(cli.app, ["web", "--lan", "--no-open"])
     assert result.exit_code == 0
     assert seen["host"] == "0.0.0.0"
-    assert seen["token"], "im Netz muss ein Zugangswort gesetzt sein"
-    # Die Adresse im Terminal muss samt Zugangswort abtippbar sein.
-    assert f"192.168.1.44:8765/?token={seen['token']}" in result.output.replace("\n", "")
-
-
-def test_web_lan_without_token_warns(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, Any] = {}
-    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
-    monkeypatch.setattr("scoutr.web.lan_address", lambda: "192.168.1.44")
-    result = runner.invoke(cli.app, ["web", "--lan", "--no-token", "--no-open"])
     assert seen["token"] == ""
-    assert "jeder in deinem Netz" in result.output
+    assert "http://192.168.1.44:8765/" in result.output
+    assert "token=" not in result.output
+
+
+def test_web_lan_lists_the_tailscale_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: None)
+    monkeypatch.setattr("scoutr.web.lan_address", lambda: "192.168.1.44")
+    monkeypatch.setattr("scoutr.web.tailscale_address", lambda: "100.81.120.100")
+    output = runner.invoke(cli.app, ["web", "--lan", "--no-open"]).output
+    assert "http://100.81.120.100:8765/" in output
+    assert "Tailscale" in output
 
 
 def test_web_accepts_an_own_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -958,3 +960,11 @@ def test_web_reports_a_taken_port(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(cli.app, ["web", "--no-open"])
     assert result.exit_code == 1
     assert "--port 8766" in result.output
+
+
+def test_web_rejects_a_token_with_umlauts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Der Browser schickt es als Kopfzeile -- die darf nur ASCII enthalten."""
+    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: None)
+    result = runner.invoke(cli.app, ["web", "--lan", "--token", "grün", "--no-open"])
+    assert result.exit_code == 2
+    assert "gruen" in result.output

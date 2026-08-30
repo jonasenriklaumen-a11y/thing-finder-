@@ -539,47 +539,42 @@ def web_command(
         True, "--open/--no-open", help="Browser automatisch oeffnen."
     ),
     token: str = typer.Option(
-        "", "--token", help="Eigenes Zugangswort statt eines zufaelligen."
-    ),
-    no_token: bool = typer.Option(
-        False, "--no-token", help="Kein Zugangswort verlangen (nur in vertrauten Netzen)."
+        "",
+        "--token",
+        help="Freiwilliges Zugangswort. Ohne kommt jeder rein, der die Adresse erreicht.",
     ),
 ) -> None:
     """Startet die Weboberflaeche -- derselbe Agent, nur im Browser.
 
     Ohne Argumente hoert scoutr nur auf dem eigenen Rechner. `--lan` macht ihn
-    im heimischen Netz erreichbar, etwa vom Handy aus.
+    fuer andere Geraete erreichbar -- im heimischen Netz und ueber Tailscale.
+    Es genuegt dann Adresse und Port, mehr wird nicht abgefragt.
     """
-    from scoutr.web import is_public_host, new_token, serve, urls_for
+    from scoutr.web import addresses_for, is_public_host, serve, token_problem
 
     bind = host or ("0.0.0.0" if lan else "127.0.0.1")
     public = is_public_host(bind)
-    access = token or ("" if no_token or not public else new_token())
+    access = token.strip()
+    problem = token_problem(access)
+    if problem:
+        console.print(f"[red]{problem}[/red]")
+        raise typer.Exit(code=2)
 
     settings = get_settings()
-    addresses = urls_for(bind, port, access)
+    found = addresses_for(bind, port, access)
+    width = max(len(url) for url, _ in found)
     lines = [f"[bold]scoutr {__version__}[/bold]"]
-    lines.append("[dim]Diese Adresse im Browser oeffnen:[/dim]" if public else "")
-    lines += [f"  [green]{url}[/green]" for url in addresses]
-    lines.append(f"[dim]Modell {settings.model} · Suche {settings.search_backend}[/dim]")
     if public:
-        lines.append(
-            "[dim]Erreichbar fuer alle Geraete in deinem Netz"
-            + (
-                ". Das Zugangswort steht in der Adresse -- ohne kommt niemand rein."
-                if access
-                else ", [yellow]ohne Zugangswort[/yellow]."
-            )
-            + "[/dim]"
-        )
+        lines.append("[dim]Diese Adresse im Browser oeffnen:[/dim]")
+    lines += [f"  [green]{url:<{width}}[/green]  [dim]{note}[/dim]" for url, note in found]
+    lines.append(f"[dim]Modell {settings.model} · Suche {settings.search_backend}[/dim]")
+    if public and access:
+        lines.append("[dim]Das Zugangswort steht in der Adresse -- ohne kommt niemand rein.[/dim]")
+    elif public:
+        lines.append("[dim]Kein Zugangswort: Adresse und Port genuegen.[/dim]")
     lines.append("[dim]Einstellungen aendert man in der Oberflaeche. Beenden mit Strg+C.[/dim]")
     console.print(Panel.fit("\n".join(line for line in lines if line), border_style="green"))
 
-    if public and not access:
-        console.print(
-            "[yellow]Ohne Zugangswort kann jeder in deinem Netz scoutr benutzen[/yellow] "
-            "[dim]-- und damit auf deine Kosten recherchieren. Lass --no-token besser weg.[/dim]"
-        )
     problems = settings.missing_requirements()
     if problems:
         console.print(

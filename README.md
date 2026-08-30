@@ -310,50 +310,50 @@ Abhängigkeit. Beenden mit <kbd>Strg</kbd>+<kbd>C</kbd>.
 scoutr web --lan
 ```
 
-Damit hört scoutr auf allen Netzwerkkarten und nennt dir die Adresse, die du auf
-dem anderen Gerät eintippst:
+Damit hört scoutr auf allen Netzwerkkarten und nennt dir jede Adresse, unter der
+er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
-╭──────────────────────────────────────────────────────────────╮
-│ scoutr 5.1                                                   │
-│ Diese Adresse im Browser oeffnen:                            │
-│   http://192.168.1.44:8765/?token=n43wlGkjIByr               │
-│   http://127.0.0.1:8765/?token=n43wlGkjIByr                  │
-│ Modell ollama_chat/gemma4:12b · Suche duckduckgo             │
-│ Erreichbar fuer alle Geraete in deinem Netz. Das Zugangswort │
-│ steht in der Adresse -- ohne kommt niemand rein.             │
-╰──────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────────╮
+│ scoutr 5.2                                                        │
+│ Diese Adresse im Browser oeffnen:                                 │
+│   http://192.168.1.44:8765/    im heimischen Netz                 │
+│   http://100.81.120.100:8765/  ueber Tailscale                    │
+│   http://127.0.0.1:8765/       auf diesem Rechner                 │
+│ Modell ollama_chat/gemma4:12b · Suche duckduckgo                  │
+│ Kein Zugangswort: Adresse und Port genuegen.                      │
+╰───────────────────────────────────────────────────────────────────╯
 ```
 
-**Das Zugangswort** wird bei jedem Start neu gewürfelt und steht hinten in der
-Adresse. Nur der erste Aufruf braucht es — danach merkt es sich der Browser, und
-scoutr nimmt es wieder aus der Adresszeile heraus. Ohne das Wort bekommt man nur
-einen Hinweis zu sehen, egal welche Seite man aufruft.
+**Mehr als Adresse und Port braucht es nicht** — keine Anmeldung, kein Zugangswort,
+nichts einzutippen. Die Adressen ermittelt scoutr selbst, du musst nichts
+nachschlagen. Die Tailscale-Adresse erscheint nur, wenn Tailscale auch läuft.
+
+Wer den Zugang trotzdem einschränken will, vergibt ein Wort:
 
 ```bash
-scoutr web --lan --token familie   # eigenes Wort, bleibt über Neustarts gleich
-scoutr web --lan --no-token        # ohne Schutz (nur in einem Netz, dem du traust)
+scoutr web --lan --token familie   # dann nur mit ?token=familie in der Adresse
 scoutr web --host 192.168.1.44     # gezielt eine Netzwerkkarte
 ```
 
-Warum überhaupt ein Schutz? Wer die Oberfläche erreicht, kann auf deine Kosten
-recherchieren, deine Einstellungen ändern und über `/image` Bilder von deinem
-Rechner ansehen lassen. Im eigenen WLAN ist das meist unkritisch — in einem
-Gäste-, Büro- oder Studentenwohnheim-Netz nicht. Deshalb ist der Schutz an,
-solange du ihn nicht ausdrücklich abschaltest.
+Das Wort hängt hinten an der Adresse. Nur der erste Aufruf braucht es — danach
+merkt es sich der Browser, und scoutr nimmt es aus der Adresszeile heraus. Es darf
+nur ASCII enthalten (also `gruen`, nicht `grün`): der Browser schickt es als
+HTTP-Kopfzeile mit, und die verträgt keine Umlaute. scoutr sagt es dir beim Start,
+falls das Wort nicht taugt.
 
 **Wenn das andere Gerät die Seite nicht lädt:** meist blockt die Firewall des
 Rechners den Port. Unter Windows fragt die Firewall beim ersten Start nach —
-dort „privates Netzwerk" erlauben. Unter Linux mit ufw:
-`sudo ufw allow 8765/tcp`. Beide Geräte müssen im selben Netz sein (nicht eines
-im WLAN-Gastzugang).
+dort „privates Netzwerk" erlauben. Unter Linux mit ufw: `sudo ufw allow 8765/tcp`.
+Ohne Tailscale müssen beide Geräte im selben Netz sein (nicht eines im
+WLAN-Gastzugang).
 
-Alle Geräte teilen sich **eine** Sitzung — der Gesprächsverlauf ist also
-derselbe, egal von wo du weiterfragst. Fragt ein zweites Gerät, während noch
-eine Recherche läuft, sieht es „[Warte] Ein anderes Gerät fragt gerade" und
-kommt danach dran. Nach außen ins Internet stellt `--lan` nichts: dafür müsste
-im Router zusätzlich eine Portfreigabe eingerichtet werden — tu das nicht, der
-Server hat bewusst keine Anmeldung mit Nutzerkonten.
+Alle Geräte teilen sich **eine** Sitzung — der Gesprächsverlauf ist also derselbe,
+egal von wo du weiterfragst. Fragt ein zweites Gerät, während noch eine Recherche
+läuft, sieht es „[Warte] Ein anderes Gerät fragt gerade" und kommt danach dran.
+Ins offene Internet stellt `--lan` nichts: dafür bräuchte es zusätzlich eine
+Portfreigabe im Router. Über Tailscale erreichst du scoutr auch von unterwegs,
+ohne eine solche Freigabe — genau dafür ist es da.
 
 ## Chat-Interface
 

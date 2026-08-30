@@ -488,17 +488,51 @@ def test_query_string_does_not_break_routing(port: int) -> None:
 
 def test_lan_urls_name_the_reachable_address(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(web, "lan_address", lambda: "192.168.1.44")
-    urls = web.urls_for("0.0.0.0", 8765, "abc")
-    assert urls[0] == "http://192.168.1.44:8765/?token=abc"
-    assert "http://127.0.0.1:8765/?token=abc" in urls
+    monkeypatch.setattr(web, "tailscale_address", lambda: "")
+    urls = web.urls_for("0.0.0.0", 8765)
+    assert urls[0] == "http://192.168.1.44:8765/"
+    # Die eigene Maschine steht zuletzt -- die macht der Browser beim Start auf.
+    assert urls[-1] == "http://127.0.0.1:8765/"
+
+
+def test_tailscale_address_is_listed_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web, "lan_address", lambda: "192.168.1.44")
+    monkeypatch.setattr(web, "tailscale_address", lambda: "100.81.120.100")
+    found = web.addresses_for("0.0.0.0", 8765)
+    assert [url for url, _ in found] == [
+        "http://192.168.1.44:8765/",
+        "http://100.81.120.100:8765/",
+        "http://127.0.0.1:8765/",
+    ]
+    assert "Tailscale" in dict(found)["http://100.81.120.100:8765/"]
+
+
+def test_tailscale_range_is_recognised() -> None:
+    assert web.is_tailscale("100.81.120.100")
+    assert web.is_tailscale("100.64.0.1")
+    assert web.is_tailscale("100.127.255.254")
+    assert not web.is_tailscale("100.128.0.1")  # ausserhalb von /10
+    assert not web.is_tailscale("100.63.255.255")
+    assert not web.is_tailscale("192.168.1.4")
+    assert not web.is_tailscale("")
+
+
+def test_lan_address_never_returns_the_tailscale_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sonst stuende die Tailscale-Adresse zweimal da und die echte gar nicht."""
+    monkeypatch.setattr(web, "_route_to", lambda target: "100.81.120.100")
+    monkeypatch.setattr(web.socket, "getaddrinfo", lambda *a, **k: [])
+    assert web.lan_address() == ""
 
 
 def test_local_urls_stay_local(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(web, "lan_address", lambda: "192.168.1.44")
+    monkeypatch.setattr(web, "tailscale_address", lambda: "100.81.120.100")
     assert web.urls_for("127.0.0.1", 8765) == ["http://127.0.0.1:8765/"]
 
 
 def test_an_explicit_host_is_used_as_given() -> None:
+    assert web.urls_for("192.168.1.9", 80)[0] == "http://192.168.1.9:80/"
+    # Ein freiwilliges Zugangswort haengt weiterhin an der Adresse.
     assert web.urls_for("192.168.1.9", 80, "k")[0] == "http://192.168.1.9:80/?token=k"
 
 
@@ -566,3 +600,58 @@ def test_every_request_carries_the_token() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'fetch("/api' not in html
     assert 'X-Scoutr-Token' in html
+
+
+# -- Zugangswort mit Sonderzeichen ---------------------------------------
+def test_comparison_survives_non_ascii(monkeypatch: pytest.MonkeyPatch) -> None:
+    """compare_digest lehnt Nicht-ASCII als str ab -- ueber Bytes geht es.
+
+    Sonst scheitert JEDER Vergleich mit einem Wort wie "grün", auch der mit
+    dem richtigen: der Server wirft dann bei jedem Aufruf eine Ablaufverfolgung
+    und niemand kommt mehr rein.
+    """
+    assert web.same_secret("grün", "grün")
+    assert not web.same_secret("gruen", "grün")
+    assert not web.same_secret("grün", "gruen")
+    assert web.same_secret("abc", "abc")
+
+
+def test_a_non_ascii_token_never_crashes_the_server(port: int,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web, "TOKEN", "grün")
+    assert raw_request(port, "GET", "/")[0] == 401
+    assert raw_request(port, "GET", "/", {"X-Scoutr-Token": "falsch"})[0] == 401
+    assert raw_request(port, "GET", "/", {"X-Scoutr-Token": "grün"})[0] == 200
+
+
+def test_token_problem_names_the_bad_character() -> None:
+    assert "ü" in web.token_problem("grün")
+    assert "Leerzeichen" in web.token_problem("mein wort")
+    assert web.token_problem("familie2024") == ""
+    assert web.token_problem("") == ""
+    for character in "?&#/%":
+        assert web.token_problem(f"a{character}b"), f"{character} muesste auffallen"
+
+
+def test_generated_tokens_are_always_acceptable() -> None:
+    for _ in range(50):
+        assert web.token_problem(web.new_token()) == ""
+
+
+# -- Fehler in einer Route ------------------------------------------------
+def test_a_broken_route_answers_500_instead_of_dying(
+    port: int, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """Ohne Auffangnetz druckt die Standardbibliothek eine Ablaufverfolgung
+    und der Browser bekommt gar nichts -- er versucht es dann endlos."""
+
+    def boom() -> dict[str, str]:
+        raise RuntimeError("kaputt")
+
+    monkeypatch.setattr(web, "current_values", boom)
+    status, _, body = raw_request(port, "GET", "/api/config")
+    assert status == 500
+    assert "kaputt" in json.loads(body)["error"]
+    assert "Traceback" not in capfd.readouterr().err
+    # Der Server lebt weiter.
+    assert raw_request(port, "GET", "/")[0] == 200

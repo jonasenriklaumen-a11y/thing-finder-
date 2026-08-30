@@ -341,6 +341,19 @@ def save_values(payload: dict[str, Any]) -> Path:
     return written
 
 
+def same_secret(candidate: str, secret: str) -> bool:
+    """Zeitkonstanter Vergleich zweier Zugangswoerter.
+
+    Ueber Bytes, nicht ueber str: `compare_digest` lehnt Zeichenketten mit
+    Nicht-ASCII rundheraus ab. Ein Zugangswort wie "grün" haette damit jeden
+    Vergleich zum Fehler gemacht -- auch den mit dem richtigen Wort.
+    """
+    return secrets.compare_digest(
+        candidate.encode("utf-8", "surrogateescape"),
+        secret.encode("utf-8", "surrogateescape"),
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
     """Sehr kleiner Router -- eine Handvoll Endpunkte."""
 
@@ -348,6 +361,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return  # keine Zugriffsprotokolle in der Konsole
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        # Merken, dass die Antwort laeuft -- danach kann kein Fehlerblatt mehr
+        # hinterhergeschickt werden (siehe _guarded).
+        self.responded = True
+        super().send_response(code, message)
+
+    def _guarded(self, handler: Any) -> None:
+        """Faengt alles ab, was in einer Route schiefgeht.
+
+        Ohne das druckt die Standardbibliothek eine seitenlange Ablaufverfolgung
+        in die Konsole, und der Browser bekommt gar nichts -- er versucht es
+        dann immer wieder. Eine Zeile im Terminal und ein 500 sind brauchbarer.
+        """
+        self.responded = False
+        try:
+            handler()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Tab geschlossen -- kein Grund fuer eine Meldung
+        except Exception as exc:
+            print(f"  [Fehler] {self.command} {self.path}: {type(exc).__name__}: {exc}")
+            if not self.responded:
+                with contextlib.suppress(OSError):
+                    self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
     # -- Hilfen -----------------------------------------------------------
     def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -384,14 +421,14 @@ class Handler(BaseHTTPRequestHandler):
         """
         if not TOKEN:
             return True
-        for candidate in (
-            self._query_token(),
-            self._cookie_token(),
-            self.headers.get("X-Scoutr-Token") or "",
-        ):
-            if candidate and secrets.compare_digest(candidate, TOKEN):
-                return True
-        return False
+        return any(
+            candidate and same_secret(candidate, TOKEN)
+            for candidate in (
+                self._query_token(),
+                self._cookie_token(),
+                self.headers.get("X-Scoutr-Token") or "",
+            )
+        )
 
     def _deny(self) -> None:
         body = DENIED_PAGE.encode()
@@ -413,6 +450,12 @@ class Handler(BaseHTTPRequestHandler):
     # -- Routen -----------------------------------------------------------
     # Namen von BaseHTTPRequestHandler vorgegeben.
     def do_GET(self) -> None:
+        self._guarded(self._get)
+
+    def do_POST(self) -> None:
+        self._guarded(self._post)
+
+    def _get(self) -> None:
         if not self._authorized():
             self._deny()
             return
@@ -448,7 +491,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json({"error": "unbekannter Pfad"}, 404)
 
-    def do_POST(self) -> None:
+    def _post(self) -> None:
         if not self._authorized():
             self._deny()
             return
@@ -548,32 +591,56 @@ class Handler(BaseHTTPRequestHandler):
                 break
 
 
-def lan_address() -> str:
-    """Die eigene Adresse im lokalen Netz.
+def _route_to(target: str) -> str:
+    """Welche eigene Adresse benutzt das System, um *target* zu erreichen?
 
     Der UDP-"Verbindungsaufbau" schickt kein einziges Paket -- er laesst nur
-    das Betriebssystem die Route waehlen und verraet damit, welche der
-    Netzwerkkarten nach draussen zeigt. Das ist zuverlaessiger als
+    das Betriebssystem die Route waehlen und verraet damit die Adresse der
+    passenden Netzwerkkarte. Das ist zuverlaessiger als
     ``gethostbyname(gethostname())``, das auf vielen Linux-Systemen
     127.0.1.1 liefert.
     """
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # Kein Paket geht raus -- connect() waehlt bei UDP nur die Route.
-        probe.connect(("8.8.8.8", 9))
+        probe.connect((target, 9))
         address = probe.getsockname()[0]
     except OSError:
-        address = ""
+        return ""
     finally:
         probe.close()
-    if address and not address.startswith("127."):
+    return "" if address.startswith("127.") else address
+
+
+def lan_address() -> str:
+    """Die eigene Adresse im heimischen Netz."""
+    address = _route_to("8.8.8.8")
+    if address and not is_tailscale(address):
         return address
     with contextlib.suppress(OSError):
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             candidate = info[4][0]
-            if not candidate.startswith("127."):
+            if not candidate.startswith("127.") and not is_tailscale(candidate):
                 return candidate
-    return ""
+    return "" if is_tailscale(address) else address
+
+
+def is_tailscale(address: str) -> bool:
+    """Liegt *address* im Tailscale-Bereich 100.64.0.0/10?"""
+    parts = address.split(".")
+    if len(parts) != 4 or parts[0] != "100" or not parts[1].isdigit():
+        return False
+    return 64 <= int(parts[1]) <= 127
+
+
+def tailscale_address() -> str:
+    """Die eigene Tailscale-Adresse, falls es eine gibt.
+
+    100.100.100.100 ist der DNS-Dienst im Tailnet -- die Route dorthin fuehrt
+    zwangslaeufig ueber die Tailscale-Karte. Ohne Tailscale gibt es keine
+    solche Route und wir bekommen nichts Brauchbares zurueck.
+    """
+    address = _route_to("100.100.100.100")
+    return address if is_tailscale(address) else ""
 
 
 def is_public_host(host: str) -> bool:
@@ -581,24 +648,59 @@ def is_public_host(host: str) -> bool:
     return host not in ("127.0.0.1", "localhost", "::1", "")
 
 
+def token_problem(token: str) -> str:
+    """Prueft ein selbst gewaehltes Zugangswort. Leer = in Ordnung.
+
+    Der Browser schickt das Wort als HTTP-Kopfzeile mit, und die darf nur
+    ASCII enthalten -- ein "grün" kaeme dort nie an. Lieber gleich beim Start
+    sagen als spaeter bei jedem Aufruf scheitern.
+    """
+    if not token:
+        return ""
+    if any(character.isspace() for character in token):
+        return "Das Zugangswort darf keine Leerzeichen enthalten."
+    if not token.isascii():
+        umlauts = "".join(sorted({c for c in token if not c.isascii()}))
+        return (
+            f"Das Zugangswort darf keine Sonderzeichen enthalten ({umlauts}). "
+            "Nimm ein Wort ohne Umlaute -- also 'gruen' statt 'grün'."
+        )
+    if any(character in token for character in "?&#/%"):
+        return "Das Zugangswort darf kein ?, &, #, / oder % enthalten -- das zerlegt die Adresse."
+    return ""
+
+
 def new_token() -> str:
     """Kurzes Zugangswort -- muss auf einem Handy tippbar bleiben."""
     return secrets.token_urlsafe(9)
 
 
-def urls_for(host: str, port: int, token: str = "") -> list[str]:
-    """Alle Adressen, unter denen die Oberflaeche erreichbar ist."""
+def addresses_for(host: str, port: int, token: str = "") -> list[tuple[str, str]]:
+    """Alle Adressen, unter denen die Oberflaeche erreichbar ist.
+
+    Gibt Paare aus Adresse und Erklaerung zurueck. Die eigene Maschine steht
+    immer zuletzt -- die funktioniert garantiert und taugt deshalb als
+    Adresse, die der Browser beim Start selbst aufmacht.
+    """
     suffix = f"?token={token}" if token else ""
-    if not is_public_host(host):
-        return [f"http://127.0.0.1:{port}/{suffix}"]
-    hosts = [f"127.0.0.1:{port}"]
-    if host == "0.0.0.0":  # alle Netzwerkkarten -- ausdruecklich per --lan gewaehlt
-        address = lan_address()
-        if address:
-            hosts.insert(0, f"{address}:{port}")
-    else:
-        hosts.insert(0, f"{host}:{port}")
-    return [f"http://{item}/{suffix}" for item in hosts]
+    found: list[tuple[str, str]] = []
+    if is_public_host(host):
+        if host == "0.0.0.0":  # alle Netzwerkkarten -- per --lan gewaehlt
+            lan = lan_address()
+            if lan:
+                found.append((lan, "im heimischen Netz"))
+            tailscale = tailscale_address()
+            if tailscale:
+                found.append((tailscale, "ueber Tailscale"))
+        else:
+            found.append((host, "wie angegeben"))
+    found.append(("127.0.0.1", "auf diesem Rechner"))
+    return [(f"http://{address}:{port}/{suffix}", note) for address, note in found]
+
+
+def urls_for(host: str, port: int, token: str = "") -> list[str]:
+    """Nur die Adressen aus :func:`addresses_for`, ohne Erklaerungen."""
+    return [url for url, _ in addresses_for(host, port, token)]
 
 
 def serve(
