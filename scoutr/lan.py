@@ -20,6 +20,7 @@ import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 
 #: Ports, die scoutr kennt, mit dem, was dort ueblicherweise laeuft.
 KNOWN_PORTS: dict[int, str] = {
@@ -113,6 +114,43 @@ def is_private_net(network: ipaddress.IPv4Network) -> bool:
         return True
     tailnet = ipaddress.ip_network("100.64.0.0/10")
     return network.subnet_of(tailnet)
+
+
+def in_container() -> bool:
+    """Laeuft scoutr in einem Container?"""
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text()
+    except OSError:
+        return False
+    return any(marker in cgroup for marker in ("docker", "containerd", "kubepods", "lxc"))
+
+
+def container_hint(subnet: str = "") -> str:
+    """Sagt es, wenn scoutr im Container am eigenen Netz vorbeisieht.
+
+    Ein Container haengt normalerweise in Dockers eigenem Bruecken-Netz. Von
+    dort ist das Heimnetz nicht zu sehen -- die Suche findet dann schlicht
+    nichts, und niemand weiss warum. Also sagen wir es.
+    """
+    if not in_container():
+        return ""
+    address = (subnet or own_subnet()).split("/")[0]
+    docker_ranges = ipaddress.ip_network("172.16.0.0/12")
+    try:
+        inside = ipaddress.ip_address(address) in docker_ranges
+    except ValueError:
+        inside = False
+    if not inside:
+        return ""
+    return (
+        "scoutr laeuft in einem Container und sieht nur dessen eigenes Netz "
+        f"({subnet or address}), nicht dein Heimnetz. Abhilfe: den Container mit "
+        "SCOUTR_NETWORK=host starten "
+        "(docker compose) bzw. `--network host` (docker run) -- oder scoutr direkt auf "
+        "dem Rechner laufen lassen."
+    )
 
 
 def own_subnet() -> str:

@@ -36,6 +36,13 @@ services:
     init: true
     # Volles Netz nach draussen -- ohne das kann scoutr nicht recherchieren.
     # Isoliert wird das Dateisystem, nicht die Verbindung.
+    #
+    # Fuer Heimnetz und Home Assistant braucht scoutr die Netzwerkkarte des
+    # Rechners: aus Dockers eigenem Bruecken-Netz ist das Heimnetz nicht zu
+    # sehen, `scoutr lan` und `connect-ha` faenden dort schlicht nichts.
+    #   SCOUTR_NETWORK=host docker compose run --rm scoutr
+    # Ohne die Variable bleibt es beim abgeschotteten Bruecken-Netz.
+    network_mode: ${SCOUTR_NETWORK:-bridge}
     security_opt:
       - no-new-privileges:true
     # Chromium legt seine Shared-Memory-Segmente hier ab.

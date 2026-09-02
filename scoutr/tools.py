@@ -720,16 +720,20 @@ class Toolbox:
         except OSError as exc:
             return {"error": f"Netzdurchlauf fehlgeschlagen: {exc}"}
 
+        from scoutr.lan import container_hint
+
         self.stats.lan_scans += 1
         self._emit("lan_done", found=len(devices))
+        note = (
+            "Nur erreichbare Geraete. Ein fehlendes Geraet kann auch schlafen "
+            "oder eine Firewall haben -- das ist kein Beweis fuer 'nicht vorhanden'."
+        )
+        hint = container_hint(target)
         return {
             "subnet": target or "automatisch erkannt",
             "count": len(devices),
             "devices": [device.as_dict() for device in devices],
-            "note": (
-                "Nur erreichbare Geraete. Ein fehlendes Geraet kann auch schlafen "
-                "oder eine Firewall haben -- das ist kein Beweis fuer 'nicht vorhanden'."
-            ),
+            "note": f"{hint} {note}".strip() if hint else note,
         }
 
     def lan_check(self, host: str) -> dict[str, Any]:
@@ -783,10 +787,14 @@ class Toolbox:
 
         client = from_settings(self.settings)
         if not client.configured:
+            from scoutr.lan import container_hint
+
+            hint = container_hint()
             return {
                 "error": (
                     "Home Assistant ist nicht verbunden. Der Nutzer richtet das mit "
                     "`scoutr connect-ha` ein -- das dauert eine Minute."
+                    + (f" Hinweis: {hint}" if hint else "")
                 )
             }
         self._emit("ha_read", search=search or domain or "Uebersicht")

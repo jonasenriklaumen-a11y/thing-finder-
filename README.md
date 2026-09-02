@@ -456,13 +456,19 @@ Abschalten: `SCOUTR_LAN_ENABLED=false` oder der Haken in den Einstellungen.
 
 ### Home Assistant
 
+**scoutr bringt kein Home Assistant mit und startet keins.** Er sucht das, das bei dir
+schon läuft, und meldet sich dort mit einem langlebigen Zugriffstoken an — genau wie
+jede andere App, der du Zugriff gibst. Deine Installation bleibt unangetastet; scoutr
+ist nur ein weiterer Client.
+
 ```bash
 scoutr connect-ha
 ```
 
-Das sucht die Instanz selbst im Netz, zeigt dir, wo du das Zugriffstoken herbekommst,
-testet die Verbindung und schreibt beides in die `.env`. Eine Minute, dann kannst du
-fragen:
+Das sucht die Instanz selbst im Netz (erst die üblichen Namen wie `homeassistant.local`,
+dann das Netz nach Port 8123), zeigt dir, wo du das Token herbekommst — *Profil →
+Sicherheit → Langlebige Zugriffstokens* —, testet die Verbindung und schreibt Adresse
+und Token in die `.env`. Eine Minute, dann kannst du fragen:
 
 ```
 > wie warm ist es im Wohnzimmer
@@ -486,7 +492,23 @@ aufschließen. Bereiche außerhalb der Liste (etwa `shell_command`) schaltet er
 grundsätzlich nicht.
 
 Das Token steht in deiner `.env` und wird nie an den Browser geschickt — die Oberfläche
-erfährt nur, *ob* eines gesetzt ist.
+erfährt nur, *ob* eines gesetzt ist. Zurücknehmen kannst du es jederzeit in Home
+Assistant selbst: dasselbe Menü, Token löschen, fertig.
+
+### Im Container: die Netzwerkkarte des Rechners
+
+Läuft scoutr im Container, hängt er in Dockers eigenem Brücken-Netz — von dort ist dein
+Heimnetz **nicht** zu sehen, `scoutr lan` und `connect-ha` fänden schlicht nichts.
+Deshalb:
+
+```bash
+./scoutr-box --lan                              # Wrapper, setzt es selbst
+SCOUTR_NETWORK=host docker compose run --rm scoutr
+docker run --network host ...                   # ohne Compose
+```
+
+Merkt scoutr, dass er im Container nur das Container-Netz sieht, sagt er es von sich aus,
+statt dich rätseln zu lassen.
 
 ## Ortsfilter
 

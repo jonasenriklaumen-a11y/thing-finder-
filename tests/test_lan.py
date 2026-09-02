@@ -139,3 +139,36 @@ def test_scan_refuses_public_space() -> None:
 def test_own_subnet_is_private_or_empty() -> None:
     subnet = lan.own_subnet()
     assert subnet == "" or lan.is_private_net(ipaddress.ip_network(subnet))
+
+
+# -- Im Container -----------------------------------------------------------
+def test_no_hint_outside_a_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lan, "in_container", lambda: False)
+    assert lan.container_hint("172.17.0.0/24") == ""
+
+
+def test_the_hint_names_the_way_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sonst sucht scoutr im Docker-Netz und niemand versteht, warum nichts kommt."""
+    monkeypatch.setattr(lan, "in_container", lambda: True)
+    hint = lan.container_hint("172.17.0.0/24")
+    assert "Container" in hint
+    assert "SCOUTR_NETWORK=host" in hint
+
+
+def test_a_real_home_network_in_a_container_gets_no_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wer den Container mit --network host startet, sieht sein echtes Netz."""
+    monkeypatch.setattr(lan, "in_container", lambda: True)
+    assert lan.container_hint("192.168.1.0/24") == ""
+    assert lan.container_hint("10.0.0.0/24") == ""
+
+
+def test_container_detection_survives_a_missing_cgroup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lan.Path, "exists", lambda self: False)
+
+    def boom(self, *args, **kwargs):
+        raise OSError("kein /proc")
+
+    monkeypatch.setattr(lan.Path, "read_text", boom)
+    assert lan.in_container() is False

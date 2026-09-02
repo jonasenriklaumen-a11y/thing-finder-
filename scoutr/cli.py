@@ -629,11 +629,16 @@ def connect_ha_command(
             else:
                 url = choice
         else:
+            from scoutr.lan import container_hint
+
             console.print(
                 "\n[yellow]Nichts gefunden.[/yellow] "
                 "[dim]Die Adresse steht in der Browserzeile, wenn du Home Assistant "
                 "offen hast.[/dim]"
             )
+            hint = container_hint()
+            if hint:
+                console.print(f"  [yellow]{hint}[/yellow]")
             url = typer.prompt("Adresse", default="homeassistant.local:8123").strip()
     url = normalize_url(url)
     console.print(f"  Adresse: [bold cyan]{url}[/bold cyan]")
@@ -720,7 +725,12 @@ def lan_command(
         raise typer.Exit(code=1) from exc
 
     if not devices:
+        from scoutr.lan import container_hint
+
         console.print("[yellow]Nichts gefunden.[/yellow]")
+        hint = container_hint(target)
+        if hint:
+            console.print(f"[yellow]{hint}[/yellow]")
         console.print("[dim]Mit --thorough werden alle bekannten Ports geprueft.[/dim]")
         return
 

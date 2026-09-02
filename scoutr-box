@@ -6,6 +6,8 @@
 #   ./scoutr-box "deine Frage"     einmalige Recherche
 #   ./scoutr-box search "test"     nur die Suche, ohne LLM
 #   ./scoutr-box --build           Image neu bauen, dann starten
+#   ./scoutr-box --lan ...         mit der Netzwerkkarte des Rechners, damit
+#                                  scoutr Heimnetz und Home Assistant sieht
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -17,6 +19,14 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     SCOUTR_UID="$(id -u)"
     SCOUTR_GID="$(id -g)"
     export SCOUTR_UID SCOUTR_GID
+fi
+
+# Ohne die Netzwerkkarte des Rechners haengt der Container in Dockers
+# eigenem Bruecken-Netz -- von dort ist das Heimnetz nicht zu sehen, und
+# `scoutr lan` wie `connect-ha` faenden nichts.
+if [[ "${1:-}" == "--lan" ]]; then
+    shift
+    export SCOUTR_NETWORK=host
 fi
 
 case "${1:-}" in
