@@ -593,6 +593,150 @@ def web_command(
     console.print("[dim]Beendet.[/dim]")
 
 
+@app.command("connect-ha")
+def connect_ha_command(
+    url: str = typer.Option("", "--url", help="Adresse der Instanz, z.B. 192.168.1.5:8123."),
+    token: str = typer.Option("", "--token", help="Langlebiges Zugriffstoken."),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
+) -> None:
+    """Verbindet scoutr mit Home Assistant -- sucht die Instanz selbst.
+
+    Danach kann scoutr Fragen ueber das eigene Haus beantworten: Temperaturen,
+    Lichter, Fenster, Anwesenheit.
+    """
+    from scoutr.homeassistant import HomeAssistant, HomeAssistantError, discover, normalize_url
+
+    load_env()
+    console.print(
+        Panel.fit(
+            "[bold]Home Assistant verbinden[/bold]\n"
+            "[dim]Zwei Angaben: die Adresse und ein Zugriffstoken.[/dim]",
+            border_style="green",
+        )
+    )
+
+    # -- 1. Adresse --------------------------------------------------------
+    if not url:
+        with console.status("  Suche Home Assistant im Netz ..."):
+            found = discover()
+        if found:
+            console.print("\n[bold]Gefunden:[/bold]")
+            for index, candidate in enumerate(found, start=1):
+                console.print(f"  [cyan]{index}[/cyan]  {candidate}")
+            choice = typer.prompt("Auswahl (oder eigene Adresse)", default="1").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(found):
+                url = found[int(choice) - 1]
+            else:
+                url = choice
+        else:
+            console.print(
+                "\n[yellow]Nichts gefunden.[/yellow] "
+                "[dim]Die Adresse steht in der Browserzeile, wenn du Home Assistant "
+                "offen hast.[/dim]"
+            )
+            url = typer.prompt("Adresse", default="homeassistant.local:8123").strip()
+    url = normalize_url(url)
+    console.print(f"  Adresse: [bold cyan]{url}[/bold cyan]")
+
+    # -- 2. Token ----------------------------------------------------------
+    if not token:
+        console.print(
+            "\n[bold]Zugriffstoken[/bold]\n"
+            "  [dim]In Home Assistant: unten links auf deinen Namen klicken →\n"
+            "  Reiter [bold]Sicherheit[/bold] → ganz unten [bold]Langlebige "
+            "Zugriffstokens[/bold]\n"
+            "  → [bold]Token erstellen[/bold], Namen vergeben (z.B. scoutr), kopieren.[/dim]"
+        )
+        console.print(f"  [dim]Direkt dorthin: {url}/profile/security[/dim]")
+        token = typer.prompt("Token einfuegen", hide_input=True).strip()
+    if not token:
+        console.print("[red]Ohne Token geht es nicht.[/red]")
+        raise typer.Exit(code=1)
+
+    # -- 3. Probe ----------------------------------------------------------
+    client = HomeAssistant(url, token)
+    try:
+        with console.status("  Teste die Verbindung ..."):
+            hello = client.ping()
+            entities = client.states()
+    except HomeAssistantError as exc:
+        console.print(f"\n[red]Fehlgeschlagen:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    counts = client.domains()
+    console.print(f"\n[green]Verbunden mit {hello}[/green]")
+    console.print(f"  [dim]{len(entities)} Entitaeten in {len(counts)} Bereichen:[/dim]")
+    top = ", ".join(f"{name} ({number})" for name, number in list(counts.items())[:6])
+    console.print(f"  [dim]{top}[/dim]")
+
+    # -- 4. Schalten? ------------------------------------------------------
+    console.print(
+        "\n[bold]Darf scoutr auch schalten?[/bold]\n"
+        "  [dim]Nein = er sieht nur nach (Temperaturen, Zustaende, ob etwas an ist).\n"
+        "  Ja = er darf Licht, Steckdosen und Szenen bedienen. Schloesser, Alarm,\n"
+        "  Tore und Heizung fragen auch dann jedes Mal nach.[/dim]"
+    )
+    control = typer.confirm("  Schalten erlauben?", default=False)
+
+    values = {"SCOUTR_HA_URL": url, "HA_TOKEN": token, "SCOUTR_HA_CONTROL": str(control).lower()}
+    target = env_file or find_env_file() or DEFAULT_ENV_PATH
+    written = write_env_file(values, target)
+    load_env(written, override=True)
+    reset_settings_cache()
+    console.print(
+        Panel.fit(
+            f"Gespeichert in [cyan]{written}[/cyan]\n\n"
+            "Probier es aus:\n"
+            '  [bold]scoutr "wie warm ist es im Wohnzimmer"[/bold]\n'
+            '  [bold]scoutr "welche Lichter sind gerade an"[/bold]'
+            + ("\n  [bold]scoutr \"mach das Licht im Flur aus\"[/bold]" if control else ""),
+            title="fertig",
+            border_style="green",
+        )
+    )
+
+
+@app.command("lan")
+def lan_command(
+    subnet: str = typer.Option("", "--subnet", help="Netz, z.B. 192.168.1.0/24. Leer = eigenes."),
+    thorough: bool = typer.Option(False, "--thorough", help="Alle bekannten Ports pruefen."),
+) -> None:
+    """Zeigt, welche Geraete im eigenen Netz erreichbar sind."""
+    from scoutr.lan import NotPrivate, own_subnet, scan
+
+    settings = get_settings()
+    target = subnet or settings.lan_subnet or own_subnet()
+    if not target:
+        console.print("[red]Kein eigenes Netz erkennbar.[/red]")
+        console.print("[dim]Gib es an: scoutr lan --subnet 192.168.1.0/24[/dim]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[dim]Durchsuche {target} ...[/dim]")
+    try:
+        with console.status("  klopfe an ..."):
+            devices = scan(target, quick=not thorough)
+    except (NotPrivate, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    if not devices:
+        console.print("[yellow]Nichts gefunden.[/yellow]")
+        console.print("[dim]Mit --thorough werden alle bekannten Ports geprueft.[/dim]")
+        return
+
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Adresse", style="cyan", no_wrap=True)
+    table.add_column("Name")
+    table.add_column("Laeuft dort", style="dim")
+    for device in devices:
+        services = ", ".join(dict.fromkeys(device.services)) or ", ".join(
+            str(port) for port in device.ports
+        )
+        table.add_row(device.address, device.title or device.name or "-", services)
+    console.print(table)
+    console.print(f"\n[dim]{len(devices)} Geraete erreichbar.[/dim]")
+
+
 @app.command("install-browser")
 def install_browser_command() -> None:
     """Installiert Playwright samt Chromium fuer den JavaScript-Fallback (Stufe 3)."""
@@ -1443,6 +1587,8 @@ COMMANDS = {
     "export",
     "install-browser",
     "install-model",
+    "connect-ha",
+    "lan",
     "web",
     "chat",
     "version",

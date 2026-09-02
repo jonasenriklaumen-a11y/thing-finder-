@@ -159,6 +159,129 @@ CALC_SCHEMA: dict[str, Any] = {
     },
 }
 
+#: Das eigene Netz ansehen. Kein Ersatz fuer die Websuche, sondern die Antwort
+#: auf Fragen, die im Web gar nicht stehen koennen.
+LAN_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "lan_scan",
+        "description": (
+            "Sieht nach, welche Geraete im eigenen Heimnetz erreichbar sind, und was auf "
+            "ihnen laeuft (Weboberflaeche, Drucker, SSH, Home Assistant ...). Benutze es "
+            "fuer Fragen wie 'welche Geraete haengen bei mir im Netz', 'laeuft mein "
+            "Drucker', 'auf welcher Adresse ist X'. Der Durchlauf dauert einige Sekunden "
+            "-- rufe ihn hoechstens einmal je Anfrage auf und arbeite dann mit dem "
+            "Ergebnis weiter."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subnet": {
+                    "type": "string",
+                    "description": (
+                        "Netz wie '192.168.1.0/24'. Leer lassen -- dann nimmt scoutr das "
+                        "eigene. Nur private Netze sind erlaubt."
+                    ),
+                },
+                "thorough": {
+                    "type": "boolean",
+                    "description": (
+                        "Alle bekannten Ports statt der zwoelf haeufigsten. Deutlich "
+                        "langsamer, nur wenn der schnelle Durchlauf nichts gefunden hat."
+                    ),
+                },
+            },
+        },
+    },
+}
+
+#: Ein einzelnes Geraet gezielt pruefen -- schneller als das ganze Netz.
+LAN_HOST_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "lan_check",
+        "description": (
+            "Prueft EIN Geraet im Heimnetz: antwortet es, und welche Dienste laufen "
+            "darauf? Schneller als lan_scan. Nimm es, wenn die Adresse oder der Name "
+            "schon bekannt ist ('ist 192.168.1.50 noch da', 'laeuft der Drucker')."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string",
+                    "description": "Adresse oder Name im Netz, z.B. 192.168.1.50 oder nas.local",
+                }
+            },
+            "required": ["host"],
+        },
+    },
+}
+
+#: Home Assistant lesen.
+HA_STATES_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "ha_states",
+        "description": (
+            "Liest Zustaende aus Home Assistant: Temperaturen, Lichter, Schalter, "
+            "Sensoren, Anwesenheit. Fuer alle Fragen ueber das eigene Haus ('wie warm "
+            "ist es im Wohnzimmer', 'ist das Licht an', 'steht die Waschmaschine'). "
+            "Ohne Angaben kommt eine Uebersicht der Bereiche -- damit findest du "
+            "zuerst heraus, was es ueberhaupt gibt."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "search": {
+                    "type": "string",
+                    "description": "Suchwort im Namen oder in der Kennung, z.B. 'wohnzimmer'.",
+                },
+                "domain": {
+                    "type": "string",
+                    "description": (
+                        "Bereich wie light, switch, sensor, binary_sensor, climate, "
+                        "cover, lock, media_player, person."
+                    ),
+                },
+            },
+        },
+    },
+}
+
+#: Home Assistant schalten -- nur wenn ausdruecklich erlaubt.
+HA_CALL_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "ha_call",
+        "description": (
+            "Schaltet etwas in Home Assistant, z.B. domain='light', service='turn_on', "
+            "entity_id='light.wohnzimmer'. Nimm vorher ha_states, um die genaue Kennung "
+            "zu erfahren -- rate sie nie. Bei Schloessern, Alarmanlagen, Toren und "
+            "Heizungen wird der Nutzer zusaetzlich gefragt."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Bereich, z.B. light oder switch."},
+                "service": {
+                    "type": "string",
+                    "description": "Dienst, z.B. turn_on, turn_off, toggle.",
+                },
+                "entity_id": {
+                    "type": "string",
+                    "description": "Genaue Kennung aus ha_states, z.B. light.kueche.",
+                },
+                "data": {
+                    "type": "object",
+                    "description": "Weitere Angaben, z.B. {\"brightness_pct\": 40}.",
+                },
+            },
+            "required": ["domain", "service"],
+        },
+    },
+}
+
 #: Nur fuer den Hauptagenten: ein Subagent sitzt niemandem gegenueber, den er
 #: fragen koennte.
 ASK_SCHEMA: dict[str, Any] = {
@@ -239,6 +362,9 @@ class ToolStats:
     #: Rueckfragen zaehlen NICHT als Werkzeugaufruf -- eine Nachfrage soll den
     #: Rechercheetat nicht schmaelern.
     questions: int = 0
+    lan_scans: int = 0
+    ha_reads: int = 0
+    ha_calls: int = 0
 
     @property
     def tool_calls(self) -> int:
@@ -249,6 +375,9 @@ class ToolStats:
             + len(self.skipped)
             + self.calculations
             + self.notes_saved
+            + self.lan_scans
+            + self.ha_reads
+            + self.ha_calls
         )
 
     def reset(self) -> None:
@@ -261,6 +390,9 @@ class ToolStats:
         self.calculations = 0
         self.notes_saved = 0
         self.questions = 0
+        self.lan_scans = 0
+        self.ha_reads = 0
+        self.ha_calls = 0
 
 
 class Toolbox:
@@ -467,6 +599,25 @@ class Toolbox:
             return self.calculate(expression=str(arguments.get("expression", "")))
         if name == "remember":
             return self.remember(text=str(arguments.get("text", "")))
+        if name == "lan_scan":
+            return self.lan_scan(
+                subnet=str(arguments.get("subnet") or ""),
+                thorough=bool(arguments.get("thorough")),
+            )
+        if name == "lan_check":
+            return self.lan_check(host=str(arguments.get("host", "")))
+        if name == "ha_states":
+            return self.ha_states(
+                search=str(arguments.get("search") or ""),
+                domain=str(arguments.get("domain") or ""),
+            )
+        if name == "ha_call":
+            return self.ha_call(
+                domain=str(arguments.get("domain", "")),
+                service=str(arguments.get("service", "")),
+                entity_id=str(arguments.get("entity_id") or ""),
+                data=arguments.get("data"),
+            )
         if name == "ask_user":
             return self.ask_user(
                 question=str(arguments.get("question", "")), options=arguments.get("options")
@@ -546,6 +697,194 @@ class Toolbox:
         self.stats.notes_saved += 1
         self._emit("remember", text=text)
         return {"saved": True, "note_id": note_id, "text": text}
+
+    # -- Werkzeug: das eigene Netz ----------------------------------------
+    def lan_scan(self, subnet: str = "", thorough: bool = False) -> dict[str, Any]:
+        """Sieht nach, welche Geraete im Heimnetz erreichbar sind."""
+        from scoutr.lan import NotPrivate, scan
+
+        if not self.settings.lan_enabled:
+            return {"error": "Der Netzzugriff ist abgeschaltet (SCOUTR_LAN_ENABLED=false)."}
+        target = (subnet or self.settings.lan_subnet or "").strip()
+        self._emit("lan_scan", subnet=target or "eigenes Netz")
+        try:
+            devices = scan(target, quick=not thorough)
+        except NotPrivate as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {
+                "error": (
+                    f"{exc} Trag dein Netz unter SCOUTR_LAN_SUBNET ein, z.B. 192.168.1.0/24."
+                )
+            }
+        except OSError as exc:
+            return {"error": f"Netzdurchlauf fehlgeschlagen: {exc}"}
+
+        self.stats.lan_scans += 1
+        self._emit("lan_done", found=len(devices))
+        return {
+            "subnet": target or "automatisch erkannt",
+            "count": len(devices),
+            "devices": [device.as_dict() for device in devices],
+            "note": (
+                "Nur erreichbare Geraete. Ein fehlendes Geraet kann auch schlafen "
+                "oder eine Firewall haben -- das ist kein Beweis fuer 'nicht vorhanden'."
+            ),
+        }
+
+    def lan_check(self, host: str) -> dict[str, Any]:
+        """Prueft ein einzelnes Geraet im Netz."""
+        import socket
+
+        from scoutr.lan import FULL_PORTS, check_host
+
+        if not self.settings.lan_enabled:
+            return {"error": "Der Netzzugriff ist abgeschaltet (SCOUTR_LAN_ENABLED=false)."}
+        host = (host or "").strip()
+        if not host:
+            return {"error": "Keine Adresse angegeben."}
+        try:
+            address = socket.gethostbyname(host)
+        except OSError:
+            return {"host": host, "reachable": False, "error": f"{host} ist nicht aufloesbar."}
+
+        import ipaddress
+
+        from scoutr.lan import is_private_net
+
+        try:
+            network = ipaddress.ip_network(f"{address}/32")
+        except ValueError:
+            return {"host": host, "reachable": False, "error": "Keine gueltige IPv4-Adresse."}
+        if not is_private_net(network):
+            return {
+                "host": host,
+                "reachable": False,
+                "error": f"{address} liegt ausserhalb des privaten Netzes -- scoutr prueft "
+                "nur das eigene Heimnetz.",
+            }
+
+        self._emit("lan_check", host=host)
+        device = check_host(address, FULL_PORTS)
+        self.stats.lan_scans += 1
+        if device is None:
+            return {
+                "host": host,
+                "address": address,
+                "reachable": False,
+                "note": "Kein Port antwortet. Geraet aus, im Ruhezustand oder abgeschottet.",
+            }
+        return {"host": host, "reachable": True, **device.as_dict()}
+
+    # -- Werkzeug: Home Assistant -----------------------------------------
+    def ha_states(self, search: str = "", domain: str = "") -> dict[str, Any]:
+        """Liest Zustaende aus Home Assistant."""
+        from scoutr.homeassistant import MAX_ENTITIES, HomeAssistantError, from_settings
+
+        client = from_settings(self.settings)
+        if not client.configured:
+            return {
+                "error": (
+                    "Home Assistant ist nicht verbunden. Der Nutzer richtet das mit "
+                    "`scoutr connect-ha` ein -- das dauert eine Minute."
+                )
+            }
+        self._emit("ha_read", search=search or domain or "Uebersicht")
+        try:
+            if not search and not domain:
+                counts = client.domains()
+                self.stats.ha_reads += 1
+                return {
+                    "overview": counts,
+                    "note": (
+                        "Uebersicht der Bereiche. Ruf ha_states erneut mit `domain` oder "
+                        "`search` auf, um die einzelnen Geraete zu sehen."
+                    ),
+                }
+            found = client.find(search=search, domain=domain)
+        except HomeAssistantError as exc:
+            return {"error": str(exc)}
+
+        self.stats.ha_reads += 1
+        return {
+            "count": len(found),
+            "entities": [entity.as_dict() for entity in found],
+            "note": (
+                f"Hoechstens {MAX_ENTITIES} Eintraege. Bei mehr: genauer suchen."
+                if len(found) >= MAX_ENTITIES
+                else ""
+            ),
+        }
+
+    def ha_call(
+        self, domain: str, service: str, entity_id: str = "", data: Any = None
+    ) -> dict[str, Any]:
+        """Schaltet etwas in Home Assistant -- mit mehreren Sicherungen."""
+        from scoutr.homeassistant import (
+            ALLOWED_DOMAINS,
+            PROTECTED_DOMAINS,
+            HomeAssistantError,
+            from_settings,
+        )
+
+        client = from_settings(self.settings)
+        if not client.configured:
+            return {"error": "Home Assistant ist nicht verbunden (`scoutr connect-ha`)."}
+        if not self.settings.ha_control:
+            return {
+                "error": (
+                    "scoutr darf nur nachsehen, nicht schalten. Der Nutzer schaltet das "
+                    "in den Einstellungen frei (SCOUTR_HA_CONTROL=true). Sag ihm das, "
+                    "statt es zu umgehen."
+                )
+            }
+        domain = (domain or "").strip().lower()
+        service = (service or "").strip().lower()
+        entity_id = (entity_id or "").strip()
+        if not domain or not service:
+            return {"error": "Bereich und Dienst muessen angegeben sein."}
+        if domain not in ALLOWED_DOMAINS:
+            return {
+                "error": (
+                    f"scoutr schaltet im Bereich '{domain}' nicht. Erlaubt sind: "
+                    f"{', '.join(sorted(ALLOWED_DOMAINS))}."
+                )
+            }
+
+        # Schloesser, Alarmanlagen, Tore, Heizungen: hier wird nachgefragt,
+        # auch wenn Schalten erlaubt ist. Ein missverstandener Satz soll nicht
+        # die Haustuer aufschliessen.
+        if domain in PROTECTED_DOMAINS:
+            target = entity_id or domain
+            if self.ask_handler is None:
+                return {
+                    "error": (
+                        f"'{domain}' ist bestaetigungspflichtig, aber hier kann niemand "
+                        "bestaetigen. Bitte den Nutzer, es selbst zu tun."
+                    )
+                }
+            question = f"Soll ich wirklich {service} fuer {target} ausfuehren?"
+            self._emit("ask", question=question, options=["ja", "nein"])
+            answer = (self.ask_handler(question, ["ja", "nein"]) or "").strip().lower()
+            self._emit("ask_done", question=question, answer=answer)
+            if answer not in ("ja", "j", "yes", "ok", "mach", "los"):
+                return {
+                    "done": False,
+                    "note": f"Vom Nutzer nicht bestaetigt (Antwort: {answer!r}).",
+                }
+
+        self._emit("ha_call", domain=domain, service=service, entity_id=entity_id)
+        try:
+            changed = client.call(domain, service, entity_id, data)
+        except HomeAssistantError as exc:
+            return {"error": str(exc)}
+        self.stats.ha_calls += 1
+        return {
+            "done": True,
+            "service": f"{domain}.{service}",
+            "entity_id": entity_id,
+            "changed": len(changed),
+        }
 
     # -- Werkzeug 6: Rueckfrage (nur fuer den Hauptagenten) ---------------
     def ask_user(self, question: str, options: Any = None) -> dict[str, Any]:

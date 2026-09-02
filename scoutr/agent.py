@@ -20,6 +20,10 @@ from scoutr.config import Settings
 from scoutr.models import Product
 from scoutr.tools import (
     ASK_SCHEMA,
+    HA_CALL_SCHEMA,
+    HA_STATES_SCHEMA,
+    LAN_HOST_SCHEMA,
+    LAN_SCHEMA,
     MEMORY_SCHEMA,
     SUBAGENT_SCHEMA,
     TOOL_SCHEMAS,
@@ -160,6 +164,33 @@ TRIAGE_PROMPT = (
     "Antworte mit GENAU einem Wort: RECHERCHE oder CHAT.\n\nNachricht: %s"
 )
 
+#: Wird angehaengt, wenn scoutr ins eigene Netz sehen darf.
+LAN_PROMPT = """\
+
+Du kannst ausserdem in das Heimnetz des Nutzers sehen:
+- `lan_scan(subnet, thorough)` -- welche Geraete sind erreichbar, was laeuft darauf.
+- `lan_check(host)` -- ein einzelnes Geraet gezielt pruefen.
+Nimm sie fuer Fragen, deren Antwort nicht im Web stehen kann ("welche Geraete haengen \
+bei mir im Netz", "laeuft mein Drucker noch", "auf welcher Adresse ist mein NAS"). Ein \
+Durchlauf dauert Sekunden -- hoechstens einer je Anfrage. Ein Geraet, das nicht \
+antwortet, kann auch schlafen: schreib "nicht erreichbar", nicht "existiert nicht"."""
+
+#: Wird angehaengt, wenn Home Assistant verbunden ist.
+HA_PROMPT = """\
+
+Der Nutzer hat Home Assistant angebunden -- du kannst sein Zuhause lesen:
+- `ha_states(search, domain)` -- Zustaende von Lampen, Sensoren, Schaltern, Fenstern.
+Ohne Angaben bekommst du eine Uebersicht der Bereiche; damit findest du erst heraus, \
+was es gibt, und fragst dann gezielt nach. Rate NIE eine Entitaets-Kennung -- hol sie \
+dir mit ha_states. Fuer Fragen ueber das Haus ist das die Quelle, nicht das Web."""
+
+#: Wird zusaetzlich angehaengt, wenn Schalten erlaubt ist.
+HA_CONTROL_PROMPT = """\
+- `ha_call(domain, service, entity_id, data)` -- etwas schalten, z.B. light.turn_on.
+Schalte nur, worum der Nutzer wirklich gebeten hat, und nur eine Sache auf einmal. Bei \
+Schloessern, Alarmanlagen, Toren und Heizung wird er ohnehin noch einmal gefragt. Sag \
+hinterher in einem Satz, was du getan hast."""
+
 #: Wird an den Systemprompt gehaengt, sobald eine Oberflaeche Rueckfragen
 #: annehmen kann. Ohne jemanden am anderen Ende waere die Erwaehnung schaedlich:
 #: das Modell wuerde ein Werkzeug aufrufen, das es gar nicht gibt.
@@ -259,7 +290,7 @@ class Agent:
         self.cache = cache
         self.on_event = on_event
         self.messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt(cache)}
+            {"role": "system", "content": self._system_prompt(cache, self._home_prompt())}
         ]
         self.toolbox = toolbox or Toolbox(
             settings,
@@ -286,6 +317,14 @@ class Agent:
         extra: list[dict[str, Any]] = []
         if self.cache is not None:
             extra.append(MEMORY_SCHEMA)
+        # Das Heimnetz gehoert dem Nutzer, nicht dem Web -- die Werkzeuge
+        # erscheinen nur, wenn er sie zugelassen hat.
+        if self.settings.lan_enabled:
+            extra.extend((LAN_SCHEMA, LAN_HOST_SCHEMA))
+        if self.settings.ha_url and self.settings.ha_token:
+            extra.append(HA_STATES_SCHEMA)
+            if self.settings.ha_control:
+                extra.append(HA_CALL_SCHEMA)
         if self.use_subagents:
             extra.append(SUBAGENT_SCHEMA)
         # Nur anbieten, wenn wirklich jemand da ist, der antworten kann --
@@ -433,11 +472,26 @@ class Agent:
 
     def clear(self) -> None:
         """Verwirft den Gespraechsverlauf, behaelt aber die Konfiguration."""
-        self.messages = [{"role": "system", "content": self._system_prompt(self.cache)}]
+        self.messages = [
+            {"role": "system", "content": self._system_prompt(self.cache, self._home_prompt())}
+        ]
+        if self.toolbox.ask_handler is not None:
+            self.messages[0]["content"] += ASK_PROMPT
         self.last_result = None
 
+    def _home_prompt(self) -> str:
+        """Die Absaetze zu Heimnetz und Zuhause -- nur, was freigegeben ist."""
+        parts = []
+        if self.settings.lan_enabled:
+            parts.append(LAN_PROMPT)
+        if self.settings.ha_url and self.settings.ha_token:
+            parts.append(HA_PROMPT)
+            if self.settings.ha_control:
+                parts.append(HA_CONTROL_PROMPT)
+        return "".join(parts)
+
     @staticmethod
-    def _system_prompt(cache: Cache | None) -> str:
+    def _system_prompt(cache: Cache | None, extras: str = "") -> str:
         """Systemprompt plus Tagesdatum und Merkzettel.
 
         Lokale Modelle mit altem Wissensstand suchen sonst nach "Test 2024",
@@ -451,7 +505,7 @@ class Agent:
         )
         today = date.today()
         prompt = (
-            f"{SYSTEM_PROMPT}\n"
+            f"{SYSTEM_PROMPT}{extras}\n"
             f"Heute ist {weekdays[today.weekday()]}, der {today.strftime('%d.%m.%Y')}. "
             f"Richte Suchanfragen nach Aktualitaet daran aus, nicht an deinem "
             f"Wissensstand."

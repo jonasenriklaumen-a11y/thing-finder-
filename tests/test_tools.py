@@ -451,3 +451,194 @@ def test_ask_user_is_reachable_through_call(settings: Settings) -> None:
     box.ask_handler = lambda question, options: f"{question}|{','.join(options)}"
     result = box.call("ask_user", {"question": "Wo?", "options": ["hier", "dort"]})
     assert result["answer"] == "Wo?|hier,dort"
+
+
+# -- Heimnetz -------------------------------------------------------------
+def test_lan_scan_can_be_switched_off(settings: Settings) -> None:
+    settings.lan_enabled = False
+    assert "abgeschaltet" in Toolbox(settings).lan_scan()["error"]
+    assert "abgeschaltet" in Toolbox(settings).lan_check("192.168.1.5")["error"]
+
+
+def test_lan_scan_refuses_public_networks(settings: Settings) -> None:
+    """Fremde Netze durchsucht scoutr nicht."""
+    result = Toolbox(settings).lan_scan("8.8.8.0/24")
+    assert "kein privates Netz" in result["error"]
+
+
+def test_lan_scan_without_a_known_network_says_what_to_do(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("scoutr.lan.own_subnet", lambda: "")
+    result = Toolbox(settings).lan_scan()
+    assert "SCOUTR_LAN_SUBNET" in result["error"]
+
+
+def test_lan_scan_reports_devices(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scoutr.lan import Device
+
+    monkeypatch.setattr(
+        "scoutr.lan.scan",
+        lambda subnet, quick=True: [
+            Device(address="192.168.1.5", name="ha.local", ports=[8123],
+                   services=["Home Assistant"], title="Home Assistant")
+        ],
+    )
+    box = Toolbox(settings)
+    result = box.lan_scan("192.168.1.0/24")
+    assert result["count"] == 1
+    assert result["devices"][0]["title"] == "Home Assistant"
+    assert "kein Beweis" in result["note"]  # ehrlich ueber die Grenzen
+    assert box.stats.lan_scans == 1
+
+
+def test_lan_check_refuses_addresses_outside_the_home(settings: Settings) -> None:
+    result = Toolbox(settings).lan_check("8.8.8.8")
+    assert result["reachable"] is False
+    assert "ausserhalb" in result["error"]
+
+
+def test_lan_check_reports_an_unresolvable_name(settings: Settings) -> None:
+    result = Toolbox(settings).lan_check("gibt-es-nicht.invalid")
+    assert result["reachable"] is False
+    assert "aufloesbar" in result["error"]
+
+
+def test_lan_check_says_silent_not_absent(settings: Settings,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein stilles Geraet kann schlafen -- das ist kein Beweis fuer 'weg'."""
+    monkeypatch.setattr("socket.gethostbyname", lambda host: "192.168.1.99")
+    monkeypatch.setattr("scoutr.lan.check_host", lambda address, ports, **kw: None)
+    result = Toolbox(settings).lan_check("192.168.1.99")
+    assert result["reachable"] is False
+    assert "Ruhezustand" in result["note"]
+
+
+# -- Home Assistant -------------------------------------------------------
+def _ha_settings(settings: Settings, control: bool = False) -> Settings:
+    settings.ha_url = "http://192.168.1.5:8123"
+    settings.ha_token = "geheim"
+    settings.ha_control = control
+    return settings
+
+
+def test_ha_without_setup_points_at_the_command(settings: Settings) -> None:
+    result = Toolbox(settings).ha_states()
+    assert "connect-ha" in result["error"]
+
+
+def test_ha_states_gives_an_overview_first(settings: Settings,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bei tausend Entitaeten ist die Uebersicht der einzige brauchbare Einstieg."""
+    monkeypatch.setattr(
+        "scoutr.homeassistant.HomeAssistant.domains", lambda self: {"light": 12, "sensor": 40}
+    )
+    result = Toolbox(_ha_settings(settings)).ha_states()
+    assert result["overview"] == {"light": 12, "sensor": 40}
+    assert "domain" in result["note"]
+
+
+def test_ha_states_finds_entities(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scoutr.homeassistant import Entity
+
+    monkeypatch.setattr(
+        "scoutr.homeassistant.HomeAssistant.find",
+        lambda self, search="", domain="", limit=60: [
+            Entity(entity_id="light.kueche", state="on", name="Kueche")
+        ],
+    )
+    box = Toolbox(_ha_settings(settings))
+    result = box.ha_states(search="kueche")
+    assert result["entities"] == [{"entity_id": "light.kueche", "name": "Kueche", "state": "on"}]
+    assert box.stats.ha_reads == 1
+
+
+def test_ha_errors_reach_the_model_as_text(settings: Settings,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    from scoutr.homeassistant import HomeAssistantError
+
+    def boom(self, search="", domain="", limit=60):
+        raise HomeAssistantError("Token abgelehnt")
+
+    monkeypatch.setattr("scoutr.homeassistant.HomeAssistant.find", boom)
+    assert Toolbox(_ha_settings(settings)).ha_states(search="x")["error"] == "Token abgelehnt"
+
+
+def test_switching_is_off_unless_allowed(settings: Settings) -> None:
+    """Standardmaessig sieht scoutr nur nach."""
+    result = Toolbox(_ha_settings(settings)).ha_call("light", "turn_on", "light.kueche")
+    assert "nur nachsehen" in result["error"]
+    assert "SCOUTR_HA_CONTROL" in result["error"]
+
+
+def test_unknown_domains_are_refused(settings: Settings) -> None:
+    result = Toolbox(_ha_settings(settings, control=True)).ha_call("shell_command", "rm", "")
+    assert "schaltet im Bereich" in result["error"]
+
+
+def test_a_lock_needs_a_confirmation(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein missverstandener Satz darf nicht die Haustuer aufschliessen."""
+    called: list[tuple] = []
+    monkeypatch.setattr(
+        "scoutr.homeassistant.HomeAssistant.call",
+        lambda self, d, s, e="", data=None: called.append((d, s, e)) or [],
+    )
+    box = Toolbox(_ha_settings(settings, control=True))
+    box.ask_handler = lambda question, options: "nein"
+    result = box.ha_call("lock", "unlock", "lock.haustuer")
+    assert result["done"] is False
+    assert not called, "trotz Ablehnung geschaltet"
+
+
+def test_a_confirmed_lock_is_actually_opened(settings: Settings,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[tuple] = []
+    monkeypatch.setattr(
+        "scoutr.homeassistant.HomeAssistant.call",
+        lambda self, d, s, e="", data=None: called.append((d, s, e)) or [{"x": 1}],
+    )
+    box = Toolbox(_ha_settings(settings, control=True))
+    box.ask_handler = lambda question, options: "ja"
+    result = box.ha_call("lock", "unlock", "lock.haustuer")
+    assert result["done"] is True
+    assert called == [("lock", "unlock", "lock.haustuer")]
+
+
+def test_without_anyone_to_confirm_the_lock_stays_shut(settings: Settings,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list = []
+    monkeypatch.setattr(
+        "scoutr.homeassistant.HomeAssistant.call",
+        lambda self, d, s, e="", data=None: called.append(1) or [],
+    )
+    box = Toolbox(_ha_settings(settings, control=True))  # kein ask_handler
+    result = box.ha_call("alarm_control_panel", "alarm_disarm", "alarm.haus")
+    assert "bestaetigungspflichtig" in result["error"]
+    assert not called
+
+
+def test_a_light_needs_no_confirmation(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Licht anmachen ist umkehrbar -- danach zu fragen waere nur laestig."""
+    asked: list = []
+    monkeypatch.setattr(
+        "scoutr.homeassistant.HomeAssistant.call", lambda self, d, s, e="", data=None: [{"x": 1}]
+    )
+    box = Toolbox(_ha_settings(settings, control=True))
+    box.ask_handler = lambda question, options: asked.append(question) or "ja"
+    result = box.ha_call("light", "turn_on", "light.kueche")
+    assert result["done"] is True
+    assert not asked
+    assert box.stats.ha_calls == 1
+
+
+def test_ha_call_needs_domain_and_service(settings: Settings) -> None:
+    box = Toolbox(_ha_settings(settings, control=True))
+    assert "muessen angegeben sein" in box.ha_call("", "turn_on")["error"]
+
+
+def test_the_home_tools_are_reachable_through_call(settings: Settings,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("scoutr.lan.scan", lambda subnet, quick=True: [])
+    box = Toolbox(settings)
+    assert box.call("lan_scan", {"subnet": "192.168.1.0/24"})["count"] == 0
+    assert "connect-ha" in box.call("ha_states", {})["error"]

@@ -158,6 +158,41 @@ class ChatRenderer:
             f"{payload.get('reason', '')}{suffix}"
         )
 
+    def _on_lan_scan(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(("  [Netz]  ", "bold cyan"), (f"{payload.get('subnet', '')} ...", "dim"))
+        )
+
+    def _on_lan_done(self, payload: dict[str, Any]) -> None:
+        count = int(payload.get("found", 0) or 0)
+        word = "Geraet" if count == 1 else "Geraete"
+        self.console.print(
+            Text.assemble(("  [Netz]  ", "bold cyan"), (f"{count} {word} erreichbar", "white"))
+        )
+
+    def _on_lan_check(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(("  [Netz]  ", "bold cyan"), (str(payload.get("host", "")), "white"))
+        )
+
+    def _on_ha_read(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(("  [Haus]  ", "bold cyan"), (str(payload.get("search", "")), "white"))
+        )
+
+    def _on_ha_call(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        target = payload.get("entity_id") or payload.get("domain", "")
+        self.console.print(
+            Text.assemble(
+                ("  [Haus]  ", "bold yellow"),
+                (f"{payload.get('domain')}.{payload.get('service')} -> {target}", "white"),
+            )
+        )
+
     def _on_ask(self, payload: dict[str, Any]) -> None:
         """Vor einer Rueckfrage muss die Live-Anzeige weg.
 

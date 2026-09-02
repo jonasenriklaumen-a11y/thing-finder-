@@ -2,8 +2,11 @@
 
 Ein KI-Agent, mit dem man chatten kann und der eigenständig das Internet durchsucht,
 die gefundenen Seiten liest und die Ergebnisse ausgewertet zurückgibt — mit Quelle zu
-jeder Angabe. Im Terminal (`scoutr`), im Browser (`scoutr web`) und vom Handy aus
-(`scoutr web --lan`) — derselbe Agent, dieselben Einstellungen.
+jeder Angabe. **Und er kennt dein Zuhause:** er sieht ins eigene Netz und liest Home
+Assistant, beantwortet also auch Fragen, die im Web gar nicht stehen können.
+
+Im Terminal (`scoutr`), im Browser (`scoutr web`) und vom Handy aus (`scoutr web --lan`)
+— derselbe Agent, dieselben Einstellungen.
 
 ```
 $ scoutr
@@ -412,7 +415,78 @@ scoutr install-model                     # lokales Modell einrichten (ohne Key)
 scoutr install-browser                   # Playwright-Fallback aktivieren
 scoutr web                               # Oberflaeche im Browser starten
 scoutr web --lan                         # auch vom Handy im heimischen Netz
+scoutr lan                               # Geraete im eigenen Netz anzeigen
+scoutr connect-ha                        # Home Assistant verbinden
 ```
+
+## Zuhause: Heimnetz und Home Assistant
+
+Manche Fragen kann kein Suchtreffer beantworten. „Welche Geräte hängen hier im Netz",
+„läuft mein Drucker noch", „wie warm ist es im Wohnzimmer" — dafür sieht scoutr selbst
+nach.
+
+### Das eigene Netz
+
+```bash
+scoutr lan                      # zeigt, was erreichbar ist
+scoutr lan --thorough           # alle bekannten Ports statt der zwölf häufigsten
+scoutr lan --subnet 10.0.0.0/24
+```
+
+```
+Adresse        Name              Läuft dort
+192.168.1.1    fritz.box         Webseite, DNS
+192.168.1.5    homeassistant     Home Assistant
+192.168.1.23   HP-LaserJet       Drucker (IPP), Drucker (RAW)
+192.168.1.44   nas               Weboberfläche (Synology), Windows-Freigabe, SSH
+```
+
+Im Chat geht dasselbe in Worten: *„welche Geräte hängen in meinem Netz"*, *„ist
+192.168.1.23 noch da"*. Zwei Grenzen sind fest verdrahtet:
+
+* **Nur private Netze** — 10.x, 172.16–31.x, 192.168.x und das Tailnet (100.64/10).
+  Fremde Adressen lehnt scoutr ab, in jeder Schreibweise. Höchstens 512 Adressen am
+  Stück, ein `/16` also nicht.
+* **Nur die Frage „antwortet da etwas"** — scoutr klopft an, liest den Titel einer
+  Weboberfläche und geht weiter. Keine Passwortversuche, keine Schwachstellensuche.
+  Ein Gerät, das nicht antwortet, heißt „nicht erreichbar", nie „existiert nicht": es
+  kann auch schlafen.
+
+Abschalten: `SCOUTR_LAN_ENABLED=false` oder der Haken in den Einstellungen.
+
+### Home Assistant
+
+```bash
+scoutr connect-ha
+```
+
+Das sucht die Instanz selbst im Netz, zeigt dir, wo du das Zugriffstoken herbekommst,
+testet die Verbindung und schreibt beides in die `.env`. Eine Minute, dann kannst du
+fragen:
+
+```
+> wie warm ist es im Wohnzimmer
+  [Haus]  wohnzimmer
+  Im Wohnzimmer sind es 21,4 °C (Stand: 18:29 Uhr).
+
+> welche lichter sind gerade an
+  [Haus]  light
+  Drei von neun: Küche, Flur und die Stehlampe im Wohnzimmer.
+```
+
+In der Weboberfläche geht dasselbe unter **Einstellungen → Zuhause & Netz**: „Suchen"
+findet die Instanz, „Testen" prüft das Token und sagt dir, wie viele Geräte scoutr
+sieht.
+
+**Schalten ist standardmäßig aus.** Ohne Haken sieht scoutr nur nach. Mit Haken darf er
+Licht, Steckdosen, Szenen und Medien bedienen — und selbst dann fragt er bei
+**Schlössern, Alarmanlagen, Toren, Rollläden, Heizung und Saugrobotern** jedes Mal
+nach, bevor er etwas tut. Ein missverstandener Halbsatz soll nicht die Haustür
+aufschließen. Bereiche außerhalb der Liste (etwa `shell_command`) schaltet er
+grundsätzlich nicht.
+
+Das Token steht in deiner `.env` und wird nie an den Browser geschickt — die Oberfläche
+erfährt nur, *ob* eines gesetzt ist.
 
 ## Ortsfilter
 
@@ -937,6 +1011,8 @@ scoutr/
   render.py      # Live-Anzeige, Produktkarten, Bilder
   web.py         # Weboberflaeche (nur Standardbibliothek)
   webui.html     # die Oberflaeche selbst, eine einzige Datei
+  lan.py         # das eigene Netz erkunden, ohne nmap
+  homeassistant.py # Zustaende lesen, Dienste aufrufen
   export.py      # HTML / Markdown / CSV
   subagents.py   # parallele Rechercheaufträge
   local_model.py # lokale Modelle per Ollama einrichten

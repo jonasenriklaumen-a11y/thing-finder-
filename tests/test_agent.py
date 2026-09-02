@@ -123,20 +123,50 @@ def test_tools_are_offered_to_the_llm(
     monkeypatch.setattr("litellm.completion", llm)
     Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
-    # Ohne Cache kein Merkzettel-Werkzeug.
-    assert names == ["web_search", "fetch_page", "search_news", "calculate", "research_subtasks"]
+    # Ohne Cache kein Merkzettel-Werkzeug; das Heimnetz ist standardmaessig dabei.
+    assert names == [
+        "web_search",
+        "fetch_page",
+        "search_news",
+        "calculate",
+        "lan_scan",
+        "lan_check",
+        "research_subtasks",
+    ]
 
 
 def test_subagents_can_be_switched_off(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
-    """Ohne Subagenten bleiben es die urspruenglichen zwei Werkzeuge."""
+    """Ohne Subagenten bleiben die Kernwerkzeuge."""
     settings.max_subagents = 0
+    settings.lan_enabled = False
     llm = ScriptedLLM(_message(content="fertig"))
     monkeypatch.setattr("litellm.completion", llm)
     Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
     assert names == ["web_search", "fetch_page", "search_news", "calculate"]
+
+
+def test_home_tools_follow_the_settings(settings: Settings) -> None:
+    """Nichts vom Haus taucht auf, was der Nutzer nicht freigegeben hat."""
+    settings.lan_enabled = False
+    names = lambda: [tool["function"]["name"] for tool in Agent(settings).tools]  # noqa: E731
+    assert "lan_scan" not in names() and "ha_states" not in names()
+
+    settings.lan_enabled = True
+    assert "lan_scan" in names() and "lan_check" in names()
+
+    # Home Assistant erscheint erst mit Adresse UND Token.
+    settings.ha_url = "http://192.168.1.5:8123"
+    assert "ha_states" not in names()
+    settings.ha_token = "geheim"
+    assert "ha_states" in names()
+
+    # Schalten erst, wenn es ausdruecklich erlaubt ist.
+    assert "ha_call" not in names()
+    settings.ha_control = True
+    assert "ha_call" in names()
 
 
 def test_budget_limit_forces_interim_answer(

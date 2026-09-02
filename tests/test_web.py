@@ -936,3 +936,107 @@ def test_old_uploads_are_cleaned_up(session: web.ChatSession, seeing: FakeAgent,
     assert len(list(folder.iterdir())) == 3
     # Das zuletzt hochgeladene ist noch da.
     assert any("bild5" in item.name for item in folder.iterdir())
+
+
+# -- Home Assistant in der Oberflaeche ------------------------------------
+def test_the_token_never_goes_to_the_browser(client, session: web.ChatSession) -> None:
+    """Nur ob eines da ist -- nie das Token selbst."""
+    session._settings.ha_url = "http://192.168.1.5:8123"
+    session._settings.ha_token = "streng-geheim"
+    _, body = client("GET", "/api/config")
+    payload = json.loads(body)
+    assert payload["ha_connected"] is True
+    assert "streng-geheim" not in body.decode()
+    assert "SCOUTR_HA_URL" in payload["values"]
+    assert not any("geheim" in str(value) for value in payload["values"].values())
+
+
+def test_ha_discovery_reports_what_it_found(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("scoutr.homeassistant.discover", lambda: ["http://192.168.1.5:8123"])
+    status, body = client("POST", "/api/ha", {"action": "discover"})
+    assert status == 200
+    assert json.loads(body) == {"ok": True, "found": ["http://192.168.1.5:8123"]}
+
+
+def test_ha_test_needs_both_pieces(client) -> None:
+    _, body = client("POST", "/api/ha", {"url": "http://x:8123", "token": ""})
+    assert json.loads(body)["ok"] is False
+    assert "beide" in json.loads(body)["error"]
+
+
+def test_ha_test_reports_success(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("scoutr.homeassistant.HomeAssistant.ping", lambda self: "Zuhause 2026.8")
+    monkeypatch.setattr(
+        "scoutr.homeassistant.HomeAssistant.domains", lambda self: {"light": 4, "sensor": 9}
+    )
+    _, body = client("POST", "/api/ha", {"url": "192.168.1.5", "token": "t"})
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert payload["name"] == "Zuhause 2026.8"
+    assert payload["entities"] == 13
+    assert payload["url"] == "http://192.168.1.5:8123"  # Adresse wurde vervollstaendigt
+
+
+def test_ha_test_passes_the_error_through(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scoutr.homeassistant import HomeAssistantError
+
+    def boom(self):
+        raise HomeAssistantError("Token abgelehnt")
+
+    monkeypatch.setattr("scoutr.homeassistant.HomeAssistant.ping", boom)
+    _, body = client("POST", "/api/ha", {"url": "192.168.1.5", "token": "falsch"})
+    assert json.loads(body) == {"ok": False, "error": "Token abgelehnt"}
+
+
+def test_an_empty_ha_token_keeps_the_stored_one(
+    session: web.ChatSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / ".env"
+    target.write_text("HA_TOKEN=alt-und-gut\n")
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    web.save_values({"SCOUTR_HA_URL": "http://192.168.1.5:8123", web.HA_TOKEN_FIELD: "   "})
+    assert "HA_TOKEN=alt-und-gut" in target.read_text()
+
+
+def test_a_new_ha_token_is_written(
+    session: web.ChatSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / ".env"
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    web.save_values({web.HA_TOKEN_FIELD: "neues-token"})
+    assert "HA_TOKEN=neues-token" in target.read_text()
+
+
+# -- Die neue Oberflaeche -------------------------------------------------
+def test_the_ui_looks_like_the_new_design() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "<aside>" in html                      # Seitenleiste
+    assert 'id="recents"' in html                 # zuletzt Gefragtes
+    assert 'id="greeting"' in html                # Begruessung
+    assert "--serif" in html                      # Serifenschrift fuer die Begruessung
+    assert "prefers-color-scheme" in html         # folgt dem System
+
+
+def test_the_palette_is_green_not_orange() -> None:
+    """Der Akzent traegt die ganze Oberflaeche -- er muss gruen sein."""
+    import re
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    accents = re.findall(r"--accent:\s*(#[0-9a-fA-F]{6})", html)
+    assert accents, "keine Akzentfarbe gefunden"
+    for colour in accents:
+        red, green, blue = (int(colour[i : i + 2], 16) for i in (1, 3, 5))
+        assert green > red and green > blue, f"{colour} ist nicht gruen"
+
+
+def test_the_ui_shows_the_home_steps() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for event in ("lan_scan", "lan_done", "lan_check", "ha_read", "ha_call"):
+        assert f'case "{event}"' in html, f"{event} wird nicht angezeigt"
+
+
+def test_the_ui_can_set_up_home_assistant() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="ha-find"' in html and 'id="ha-test"' in html
+    assert "/api/ha" in html
+    assert f'name="{web.HA_TOKEN_FIELD}"' in html

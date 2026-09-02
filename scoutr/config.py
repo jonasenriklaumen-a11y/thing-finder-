@@ -230,6 +230,18 @@ class Settings:
     #: mehr als zwei wenig -- die GPU rechnet ohnehin nacheinander. Bei
     #: Cloud-Modellen ist mehr fast geschenkt.
     subagent_parallel: int = 0
+    #: Adresse der eigenen Home-Assistant-Instanz, z.B. http://192.168.1.5:8123
+    ha_url: str = ""
+    #: Langlebiges Zugriffstoken aus dem Home-Assistant-Profil.
+    ha_token: str = ""
+    #: Darf scoutr im Haus auch SCHALTEN, oder nur nachsehen? Aus gutem Grund
+    #: standardmaessig aus: eine missverstandene Nebenbemerkung soll nicht das
+    #: Licht ausmachen.
+    ha_control: bool = False
+    #: Darf scoutr das eigene Netz durchsuchen?
+    lan_enabled: bool = True
+    #: Netz, das dabei durchsucht wird. Leer = das eigene automatisch erkennen.
+    lan_subnet: str = ""
     fetch_timeout: float = 15.0
     cache_ttl_hours: int = 24
     max_results_default: int = 8
@@ -364,6 +376,11 @@ def get_settings() -> Settings:
         subagent_model=_env_str("SCOUTR_SUBAGENT_MODEL"),
         subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),
         subagent_parallel=_env_int("SCOUTR_SUBAGENT_PARALLEL", 0),
+        ha_url=_env_str("SCOUTR_HA_URL"),
+        ha_token=_env_str("HA_TOKEN") or _env_str("SCOUTR_HA_TOKEN"),
+        ha_control=_env_bool("SCOUTR_HA_CONTROL", False),
+        lan_enabled=_env_bool("SCOUTR_LAN_ENABLED", True),
+        lan_subnet=_env_str("SCOUTR_LAN_SUBNET"),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),
         cache_ttl_hours=_env_int("SCOUTR_CACHE_TTL_HOURS", 24),
         enable_playwright=_env_bool("SCOUTR_ENABLE_PLAYWRIGHT", True),

@@ -61,10 +61,17 @@ SETTING_KEYS: tuple[str, ...] = (
     "SCOUTR_CONTEXT_TOKENS",
     "SCOUTR_PLANNER_TIMEOUT",
     "SCOUTR_ENABLE_PLAYWRIGHT",
+    "SCOUTR_HA_URL",
+    "SCOUTR_HA_CONTROL",
+    "SCOUTR_LAN_ENABLED",
+    "SCOUTR_LAN_SUBNET",
 )
 
 #: Platzhalter im Formular -- ein leeres Key-Feld darf den Key nicht loeschen.
 API_KEY_FIELD = "__API_KEY__"
+
+#: Dasselbe fuer das Home-Assistant-Token.
+HA_TOKEN_FIELD = "__HA_TOKEN__"
 
 #: Groesse einer einzelnen hochgeladenen Datei. Passt zu der Grenze, die
 #: scoutr auch fuer heruntergeladene PDFs zieht.
@@ -465,6 +472,10 @@ def current_values() -> dict[str, str]:
         "SCOUTR_CONTEXT_TOKENS": str(settings.context_tokens),
         "SCOUTR_PLANNER_TIMEOUT": str(int(settings.planner_timeout)),
         "SCOUTR_ENABLE_PLAYWRIGHT": "true" if settings.enable_playwright else "false",
+        "SCOUTR_HA_URL": settings.ha_url,
+        "SCOUTR_HA_CONTROL": "true" if settings.ha_control else "false",
+        "SCOUTR_LAN_ENABLED": "true" if settings.lan_enabled else "false",
+        "SCOUTR_LAN_SUBNET": settings.lan_subnet,
     }
 
 
@@ -473,6 +484,9 @@ def save_values(payload: dict[str, Any]) -> Path:
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
     }
+    ha_token = str(payload.get(HA_TOKEN_FIELD, "")).strip()
+    if ha_token:
+        values["HA_TOKEN"] = ha_token
     api_key = str(payload.get(API_KEY_FIELD, "")).strip()
     if api_key:
         # Nur setzen, wenn wirklich etwas eingetippt wurde -- ein leeres Feld
@@ -662,6 +676,8 @@ class Handler(BaseHTTPRequestHandler):
                     "key_name": api_key_name_for(settings.model),
                     "env_path": str(settings.env_path or DEFAULT_ENV_PATH),
                     "problems": settings.missing_requirements(),
+                    # Das Token selbst geht nie an den Browser -- nur, ob eines da ist.
+                    "ha_connected": bool(settings.ha_url and settings.ha_token),
                 }
             )
         elif route == "/api/notes":
@@ -692,6 +708,8 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/clear":
             SESSION.reset()
             self._json({"ok": True})
+        elif route == "/api/ha":
+            self._json(self._ha_probe(self._read_json()))
         elif route == "/api/answer":
             text = str(self._read_json().get("text", "")).strip()
             self._json({"ok": SESSION.answer(text)})
@@ -713,6 +731,40 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "path": str(written)})
         else:
             self._json({"error": "unbekannter Pfad"}, 404)
+
+    def _ha_probe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Sucht eine Instanz oder testet die eingetragenen Angaben.
+
+        Damit klappt die Einrichtung in der Oberflaeche genauso wie mit
+        `scoutr connect-ha`: Knopf druecken, Adresse steht da, Token einfuegen,
+        Knopf druecken, fertig.
+        """
+        from scoutr.homeassistant import HomeAssistant, HomeAssistantError, discover
+
+        if payload.get("action") == "discover":
+            try:
+                return {"ok": True, "found": discover()}
+            except Exception as exc:
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+        settings = SESSION.settings()
+        url = str(payload.get("url") or settings.ha_url).strip()
+        token = str(payload.get("token") or "").strip() or settings.ha_token
+        if not url or not token:
+            return {"ok": False, "error": "Adresse und Token werden beide gebraucht."}
+        client = HomeAssistant(url, token)
+        try:
+            hello = client.ping()
+            counts = client.domains()
+        except HomeAssistantError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "name": hello,
+            "url": client.url,
+            "entities": sum(counts.values()),
+            "domains": counts,
+        }
 
     def _send_ui(self) -> None:
         """Liefert die Oberflaeche und legt das Zugangswort als Cookie ab.
@@ -908,6 +960,19 @@ def urls_for(host: str, port: int, token: str = "") -> list[str]:
     return [url for url, _ in addresses_for(host, port, token)]
 
 
+def _warm_up() -> None:
+    """Laedt im Hintergrund, was der erste Seitenaufruf sonst abwarten muesste.
+
+    `model_problem` zieht beim ersten Mal LiteLLM nach -- drei Sekunden, in
+    denen die Kopfzeile leer bliebe und der Nutzer sich fragt, ob etwas kaputt
+    ist. Also erledigen wir das, waehrend er noch den Browser oeffnet.
+    """
+    with contextlib.suppress(Exception):
+        from scoutr.config import model_problem
+
+        model_problem(SESSION.settings().model)
+
+
 def serve(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -924,6 +989,7 @@ def serve(
 
     TOKEN = token
     server = ThreadingHTTPServer((host, port), Handler)
+    threading.Thread(target=_warm_up, daemon=True).start()
     if open_browser:
         # Auf dem eigenen Rechner ist 127.0.0.1 die zuverlaessigste Adresse --
         # die steht immer an letzter Stelle.
