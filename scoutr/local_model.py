@@ -535,7 +535,7 @@ def plan_setup(memory_gb: float | None = None) -> tuple[LocalModel, LocalModel |
             f"{main.name} und {vision.name} passen zusammen in {available} GB."
         )
     return main, vision, (
-        "Beide Modelle passen nicht gleichzeitig hinein -- scoutr laedt sie "
+        "Beide Modelle passen nicht gleichzeitig hinein -- Cortex AI laedt sie "
         "abwechselnd, das kostet bei jedem Bild ein paar Sekunden."
     )
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>scoutr</title>
+<title>Cortex AI</title>
 <style>
 /* =========================================================================
    Farben. Warmes Papier statt kaltem Grau, gruener Akzent.
@@ -53,9 +53,16 @@ body.collapsed aside{margin-left:-260px}
 .newchat .plus{color:var(--accent);font-size:16px;line-height:1}
 .side-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);
   padding:0 18px 6px}
-.recents{flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:1px}
-.recent{background:transparent;border:0;border-radius:9px;padding:8px 10px;cursor:pointer;
-  text-align:left;font-size:13.5px;color:var(--text-2);white-space:nowrap;overflow:hidden;
+/* min-height:0 ist hier keine Kosmetik: ein Flex-Kind mit flex:1 und
+   overflow-y:auto bekommt sonst per Spezifikation min-height:auto und
+   weigert sich, kleiner als sein Inhalt zu werden -- bei vielen Eintraegen
+   quetscht der Browser dann die Zeilen ineinander, statt sauber zu
+   scrollen. Genau das war der gemeldete Fehler. */
+.recents{flex:1;min-height:0;overflow-y:auto;padding:0 8px 8px;
+  display:flex;flex-direction:column;gap:1px}
+.recent{display:block;flex:0 0 auto;width:100%;background:transparent;border:0;
+  border-radius:9px;padding:8px 10px;cursor:pointer;text-align:left;font-size:13.5px;
+  line-height:1.4;color:var(--text-2);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .recent:hover{background:var(--surface);color:var(--text)}
 .side-foot{border-top:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:1px}
@@ -232,11 +239,11 @@ input:focus,select:focus{border-color:var(--accent)}
     <svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M12 1.6l1.9 6.1 5.6-3-3 5.6 6.1 1.9-6.1 1.9 3 5.6-5.6-3L12 22.4l-1.9-6.1-5.6 3 3-5.6L1.4 11.8l6.1-1.9-3-5.6 5.6 3z"/>
     </svg>
-    <span class="name">scoutr</span>
+    <span class="name">Cortex AI</span>
     <span class="ver" id="version">…</span>
   </div>
   <button class="newchat" id="btn-new"><span class="plus">+</span> Neuer Chat</button>
-  <div class="side-title">Zuletzt gefragt</div>
+  <div class="side-title">Letzte Chats</div>
   <div class="recents" id="recents"></div>
   <div class="side-foot">
     <button class="side-btn" id="btn-home"><span class="dot" id="home-dot"></span>
@@ -289,8 +296,8 @@ input:focus,select:focus{border-color:var(--accent)}
 <div class="overlay" id="overlay">
   <div class="sheet">
     <h2>Einstellungen</h2>
-    <p class="lead">Dieselben Angaben wie bei <code>scoutr setup</code>. Wird in deine
-      <code>.env</code> geschrieben.</p>
+    <p class="lead">Alles, was du auch bei <code>scoutr setup</code> festlegst. Landet in
+      deiner <code>.env</code> und gilt sofort.</p>
     <form id="settings">
       <fieldset><legend>Modell</legend>
         <label><span class="lbl">Hauptmodell (LiteLLM-ID)</span>
@@ -322,7 +329,7 @@ input:focus,select:focus{border-color:var(--accent)}
         <div class="note" id="ha-note"></div>
         <div class="check">
           <input type="checkbox" id="hactl" name="SCOUTR_HA_CONTROL">
-          <label for="hactl" style="margin:0">scoutr darf auch schalten
+          <label for="hactl" style="margin:0">Cortex AI darf auch schalten
             <span class="why">Ohne Haken sieht er nur nach. Schlösser, Alarm, Tore und
               Heizung fragen auch mit Haken jedes Mal nach.</span></label>
         </div>
@@ -799,11 +806,20 @@ async function loadRecents(){
     const data = await (await api("/api/history")).json();
     const box = $("#recents");
     box.innerHTML = "";
-    (data.history || []).slice(0, 25).forEach(entry => {
+    // Mehrfaches "hallo" oder Wiederholungen direkt hintereinander sind
+    // keine eigene Erinnerung wert -- nur der neueste Versuch zaehlt.
+    let last = null;
+    const entries = (data.history || []).flatMap(entry => {
+      const label = entry.question.replace(/\s+/g, " ").trim();
+      if (label === last) return [];
+      last = label;
+      return [{ entry, label }];
+    });
+    entries.slice(0, 25).forEach(({ entry, label }) => {
       const item = document.createElement("button");
       item.className = "recent";
-      item.textContent = entry.question;
-      item.title = entry.question;
+      item.textContent = label;
+      item.title = label;
       item.addEventListener("click", () => {
         input.value = entry.question; input.focus();
         input.dispatchEvent(new Event("input"));
@@ -826,7 +842,7 @@ function fill(values){
 $("#btn-settings").addEventListener("click", async () => {
   let cfg;
   try { cfg = await (await api("/api/config")).json(); }
-  catch { alert("Der scoutr-Server antwortet nicht mehr."); return; }
+  catch { alert("Cortex AI antwortet gerade nicht -- laeuft der Server noch?"); return; }
   fill(cfg.values);
   $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
   $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
@@ -899,7 +915,7 @@ form.addEventListener("submit", async (e) => {
     refreshHeader();
     setTimeout(() => overlay.classList.remove("open"), 1100);
   } else {
-    note.textContent = data.error || "Fehlgeschlagen."; note.className = "note bad";
+    note.textContent = data.error || "Das hat nicht geklappt."; note.className = "note bad";
   }
 });
 
@@ -914,7 +930,7 @@ async function refreshHeader(){
   try {
     const cfg = await (await api("/api/config")).json();
     $("#version").textContent = "v" + cfg.version;
-    document.title = `scoutr ${cfg.version}`;
+    document.title = `Cortex AI ${cfg.version}`;
     const bits = [cfg.values.SCOUTR_MODEL, cfg.values.SCOUTR_LOCATION || "kein Ortsfilter"];
     if (cfg.ha_connected) bits.push("Home Assistant");
     $("#status").textContent = bits.join(" · ");

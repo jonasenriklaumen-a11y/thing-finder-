@@ -109,11 +109,11 @@ TOKEN_COOKIE = "scoutr_token"
 
 #: Wird gezeigt, wenn jemand ohne gueltiges Zugangswort anklopft.
 DENIED_PAGE = """<!doctype html><html lang="de"><meta charset="utf-8">
-<title>scoutr</title>
+<title>Cortex AI</title>
 <body style="background:#0d0f0e;color:#e8ece9;font:15px/1.6 system-ui;
              display:grid;place-items:center;height:100vh;margin:0">
 <div style="text-align:center;max-width:34em;padding:20px">
-<h1 style="color:#31c46b;font-size:20px">scoutr</h1>
+<h1 style="color:#31c46b;font-size:20px">Cortex AI</h1>
 <p>Diese Oberflaeche ist mit einem Zugangswort geschuetzt.</p>
 <p style="color:#8b9590;font-size:13px">Nimm die vollstaendige Adresse, die beim
 Start im Terminal steht &mdash; die mit <code>?token=</code> am Ende.</p>
@@ -303,7 +303,7 @@ class ChatSession:
             if not text:
                 return (
                     f"[PDF {name}: kein Text enthalten -- vermutlich ein Scan. "
-                    "Gescannte Seiten kann scoutr nicht lesen.]"
+                    "Gescannte Seiten kann Cortex AI nicht lesen.]"
                 )
             head = f"[PDF {name}" + (f", Titel: {title}" if title else "") + "]"
             return f"{head}\n{text[:limit]}"

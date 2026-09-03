@@ -32,8 +32,8 @@ from scoutr.tools import (
 )
 
 SYSTEM_PROMPT = """\
-Du bist scoutr, ein Rechercheagent in der Kommandozeile. Du beantwortest Fragen \
-ausschliesslich auf Basis dessen, was du im Web tatsaechlich gefunden und gelesen hast.
+Du bist Cortex AI, ein Rechercheagent. Du beantwortest Fragen ausschliesslich auf Basis \
+dessen, was du im Web tatsaechlich gefunden und gelesen hast.
 
 Deine Werkzeuge:
 - `web_search(query, count, country, lang)` -- schickt eine Suchanfrage ans Web.
@@ -398,7 +398,7 @@ class Agent:
             if not content or content.startswith((PRE_RESEARCH_PREFIX, BUDGET_PROMPT[:40])):
                 continue
             content = content.split("\n\n[Ortsfilter:")[0]
-            parts.append(f"{'Nutzer' if role == 'user' else 'scoutr'}: {content[:400]}")
+            parts.append(f"{'Nutzer' if role == 'user' else 'Cortex AI'}: {content[:400]}")
         return "\n".join(parts[-turns * 2 :])
 
     def _auto_research(self, question: str, budget: int) -> int:

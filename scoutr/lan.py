@@ -117,7 +117,7 @@ def is_private_net(network: ipaddress.IPv4Network) -> bool:
 
 
 def in_container() -> bool:
-    """Laeuft scoutr in einem Container?"""
+    """Laeuft Cortex AI in einem Container?"""
     if Path("/.dockerenv").exists():
         return True
     try:
@@ -145,7 +145,7 @@ def container_hint(subnet: str = "") -> str:
     if not inside:
         return ""
     return (
-        "scoutr laeuft in einem Container und sieht nur dessen eigenes Netz "
+        "Cortex AI laeuft in einem Container und sieht nur dessen eigenes Netz "
         f"({subnet or address}), nicht dein Heimnetz. Abhilfe: den Container mit "
         "SCOUTR_NETWORK=host starten "
         "(docker compose) bzw. `--network host` (docker run) -- oder scoutr direkt auf "
@@ -189,13 +189,13 @@ def parse_subnet(subnet: str) -> ipaddress.IPv4Network:
         elif len(parts) == 4:  # eine einzelne Adresse -> ihr /24
             text = f"{text}/24"
         else:
-            raise ValueError(f"Damit kann scoutr nichts anfangen: {subnet}")
+            raise ValueError(f"Damit kann Cortex AI nichts anfangen: {subnet}")
     network = ipaddress.ip_network(text, strict=False)
     if not isinstance(network, ipaddress.IPv4Network):
         raise ValueError("Nur IPv4-Netze.")
     if not is_private_net(network):
         raise NotPrivate(
-            f"{network} ist kein privates Netz. scoutr durchsucht nur das eigene "
+            f"{network} ist kein privates Netz. Cortex AI durchsucht nur das eigene "
             "Heimnetz (10.x, 172.16-31.x, 192.168.x) und das Tailnet."
         )
     if network.num_addresses > MAX_HOSTS:

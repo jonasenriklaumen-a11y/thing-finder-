@@ -1040,3 +1040,17 @@ def test_the_ui_can_set_up_home_assistant() -> None:
     assert 'id="ha-find"' in html and 'id="ha-test"' in html
     assert "/api/ha" in html
     assert f'name="{web.HA_TOKEN_FIELD}"' in html
+
+
+def test_the_sidebar_list_can_shrink_and_scroll() -> None:
+    """Ohne min-height:0 quetscht ein Flex-Kind mit overflow-y:auto seine
+    Zeilen ineinander, statt sauber zu scrollen -- der gemeldete Fehler."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    recents_rule = html[html.index(".recents{") : html.index("}", html.index(".recents{"))]
+    assert "min-height:0" in recents_rule
+
+
+def test_consecutive_duplicate_questions_are_collapsed() -> None:
+    """"hallo" dreimal hintereinander soll nicht dreimal in der Liste stehen."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "label === last" in html

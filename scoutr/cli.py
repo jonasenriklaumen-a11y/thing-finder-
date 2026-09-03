@@ -235,7 +235,7 @@ def setup_command(
     # -- Subagenten ---------------------------------------------------------
     console.print("\n[bold]3. Subagenten[/bold]")
     console.print(
-        "  [dim]scoutr kann jede Anfrage in Teilfragen zerlegen und parallel "
+        "  [dim]Cortex AI kann jede Anfrage in Teilfragen zerlegen und parallel "
         "recherchieren.\n  Das ist gruendlicher, kostet aber mehr Aufrufe.[/dim]"
     )
     subagents_on = typer.confirm("  Subagenten automatisch nutzen?", default=True)
@@ -563,7 +563,7 @@ def web_command(
     settings = get_settings()
     found = addresses_for(bind, port, access)
     width = max(len(url) for url, _ in found)
-    lines = [f"[bold]scoutr {__version__}[/bold]"]
+    lines = [f"[bold]Cortex AI[/bold] [dim]{__version__}[/dim]"]
     if public:
         lines.append("[dim]Diese Adresse im Browser oeffnen:[/dim]")
     lines += [f"  [green]{url:<{width}}[/green]  [dim]{note}[/dim]" for url, note in found]
@@ -650,7 +650,7 @@ def connect_ha_command(
             "  [dim]In Home Assistant: unten links auf deinen Namen klicken →\n"
             "  Reiter [bold]Sicherheit[/bold] → ganz unten [bold]Langlebige "
             "Zugriffstokens[/bold]\n"
-            "  → [bold]Token erstellen[/bold], Namen vergeben (z.B. scoutr), kopieren.[/dim]"
+            "  → [bold]Token erstellen[/bold], Namen vergeben (z.B. Cortex AI), kopieren.[/dim]"
         )
         console.print(f"  [dim]Direkt dorthin: {url}/profile/security[/dim]")
         token = typer.prompt("Token einfuegen", hide_input=True).strip()
@@ -676,7 +676,7 @@ def connect_ha_command(
 
     # -- 4. Schalten? ------------------------------------------------------
     console.print(
-        "\n[bold]Darf scoutr auch schalten?[/bold]\n"
+        "\n[bold]Darf Cortex AI auch schalten?[/bold]\n"
         "  [dim]Nein = er sieht nur nach (Temperaturen, Zustaende, ob etwas an ist).\n"
         "  Ja = er darf Licht, Steckdosen und Szenen bedienen. Schloesser, Alarm,\n"
         "  Tore und Heizung fragen auch dann jedes Mal nach.[/dim]"
@@ -1099,7 +1099,7 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
         console.print(f"  [red]FEHLER[/red]  {detail}")
         console.print(
             "  [yellow]Dieses Modell kann keine Werkzeuge aufrufen.[/yellow] "
-            "Nimm ein anderes aus der Liste -- scoutr wuerde sonst aus dem "
+            "Nimm ein anderes aus der Liste -- Cortex AI wuerde sonst aus dem "
             "Gedaechtnis antworten statt aus dem Web."
         )
         if not (assume_yes or typer.confirm("  Trotzdem eintragen?", default=False)):
@@ -1218,7 +1218,7 @@ HELP_TEXT = """\
 def _banner(settings: Settings) -> Panel:
     location = settings.location or "kein Ortsfilter"
     return Panel.fit(
-        f"[bold]scoutr[/bold] [dim]{__version__}[/dim]\n"
+        f"[bold]Cortex AI[/bold] [dim]{__version__}[/dim]\n"
         f"[dim]Modell {settings.model} · Suche {settings.search_backend} · {location}[/dim]\n"
         "[dim]Frag einfach los. /help zeigt die Befehle.[/dim]",
         border_style="cyan",

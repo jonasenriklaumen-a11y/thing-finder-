@@ -1,12 +1,15 @@
 # scoutr
 
-Ein KI-Agent, mit dem man chatten kann und der eigenständig das Internet durchsucht,
-die gefundenen Seiten liest und die Ergebnisse ausgewertet zurückgibt — mit Quelle zu
-jeder Angabe. **Und er kennt dein Zuhause:** er sieht ins eigene Netz und liest Home
-Assistant, beantwortet also auch Fragen, die im Web gar nicht stehen können.
+**Cortex AI** ist der Rechercheagent, mit dem man chatten kann — er durchsucht
+eigenständig das Internet, liest die gefundenen Seiten und gibt die Ergebnisse
+ausgewertet zurück, mit Quelle zu jeder Angabe. **Und er kennt dein Zuhause:** er sieht
+ins eigene Netz und liest Home Assistant, beantwortet also auch Fragen, die im Web gar
+nicht stehen können.
 
-Im Terminal (`scoutr`), im Browser (`scoutr web`) und vom Handy aus (`scoutr web --lan`)
-— derselbe Agent, dieselben Einstellungen.
+Installiert und gestartet wird er über das Kommandozeilenwerkzeug `scoutr` — im
+Terminal (`scoutr`), im Browser (`scoutr web`) und vom Handy aus (`scoutr web --lan`),
+überall derselbe Agent mit denselben Einstellungen. `scoutr` ist der Name des
+Werkzeugs; **Cortex AI** ist der Name, mit dem der Agent sich selbst vorstellt.
 
 ```
 $ scoutr

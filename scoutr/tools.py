@@ -179,7 +179,7 @@ LAN_SCHEMA: dict[str, Any] = {
                 "subnet": {
                     "type": "string",
                     "description": (
-                        "Netz wie '192.168.1.0/24'. Leer lassen -- dann nimmt scoutr das "
+                        "Netz wie '192.168.1.0/24'. Leer lassen -- dann nimmt Cortex AI das "
                         "eigene. Nur private Netze sind erlaubt."
                     ),
                 },
@@ -764,7 +764,7 @@ class Toolbox:
             return {
                 "host": host,
                 "reachable": False,
-                "error": f"{address} liegt ausserhalb des privaten Netzes -- scoutr prueft "
+                "error": f"{address} liegt ausserhalb des privaten Netzes -- Cortex AI prueft "
                 "nur das eigene Heimnetz.",
             }
 
@@ -841,7 +841,7 @@ class Toolbox:
         if not self.settings.ha_control:
             return {
                 "error": (
-                    "scoutr darf nur nachsehen, nicht schalten. Der Nutzer schaltet das "
+                    "Cortex AI darf nur nachsehen, nicht schalten. Der Nutzer schaltet das "
                     "in den Einstellungen frei (SCOUTR_HA_CONTROL=true). Sag ihm das, "
                     "statt es zu umgehen."
                 )
@@ -854,7 +854,7 @@ class Toolbox:
         if domain not in ALLOWED_DOMAINS:
             return {
                 "error": (
-                    f"scoutr schaltet im Bereich '{domain}' nicht. Erlaubt sind: "
+                    f"Cortex AI schaltet im Bereich '{domain}' nicht. Erlaubt sind: "
                     f"{', '.join(sorted(ALLOWED_DOMAINS))}."
                 )
             }
