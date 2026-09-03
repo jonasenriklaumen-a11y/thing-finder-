@@ -1178,3 +1178,71 @@ def test_the_ui_offers_the_model_picker_and_load_button() -> None:
     assert 'id="btn-usage"' in html and "/api/system" in html
     assert 'id="provider"' in html, "Anbieter zum Auswaehlen"
     assert 'name="SCOUTR_MEMORY"' in html
+
+
+# -- Anbieter-Kuerzel ergaenzen -------------------------------------------
+def test_a_missing_provider_prefix_is_added() -> None:
+    """Wer bei NVIDIA die Modell-ID kopiert, bekommt sie ohne Kuerzel."""
+    assert (
+        web.fix_model_id("nvidia/nemotron-3-ultra-550b-a55b")
+        == "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"
+    )
+
+
+def test_a_complete_model_id_is_left_alone() -> None:
+    for model in ("openai/gpt-4o", "anthropic/claude-sonnet-4-6", "ollama_chat/gemma4:12b"):
+        assert web.fix_model_id(model) == model
+
+
+def test_nonsense_stays_nonsense(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Raten waere schlimmer als eine ehrliche Fehlermeldung."""
+    assert web.fix_model_id("voelliger-quatsch-xyz") == "voelliger-quatsch-xyz"
+    assert web.fix_model_id("") == ""
+
+
+def test_saving_corrects_the_model_id(
+    session: web.ChatSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / ".env"
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    web.save_values({"SCOUTR_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
+    assert "SCOUTR_MODEL=nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in target.read_text()
+
+
+def test_the_key_lands_under_the_corrected_provider(
+    session: web.ChatSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonst waere der Schluessel unter dem falschen Namen abgelegt."""
+    target = tmp_path / ".env"
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    web.save_values(
+        {
+            "SCOUTR_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
+            web.API_KEY_FIELD: "nvapi-Spf8beispiel",
+        }
+    )
+    assert "NVIDIA_NIM_API_KEY=nvapi-Spf8beispiel" in target.read_text()
+
+
+def test_vision_and_helper_models_are_corrected_too(
+    session: web.ChatSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / ".env"
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    web.save_values({"SCOUTR_VISION_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
+    assert "SCOUTR_VISION_MODEL=nvidia_nim/nvidia/" in target.read_text()
+
+
+def test_the_ui_has_its_own_save_button_for_the_model() -> None:
+    """Fuer einen Modellwechsel soll man nicht durch das ganze Formular scrollen."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="save-model"' in html
+    assert "MODEL_FIELDS" in html
+    assert 'id="model-note"' in html
+
+
+def test_the_ui_shows_what_a_key_looks_like() -> None:
+    """Wer den falschen Schluessel einfuegt, soll es sofort sehen."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "nvapi-" in html
+    assert "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in html

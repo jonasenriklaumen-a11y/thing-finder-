@@ -36,6 +36,8 @@ from scoutr.config import (
     get_settings,
     load_env,
     reset_settings_cache,
+    resolve_model,
+    suggest_model,
     write_env_file,
 )
 
@@ -567,11 +569,28 @@ def current_values() -> dict[str, str]:
     }
 
 
+def fix_model_id(model: str) -> str:
+    """Ergaenzt ein fehlendes Anbieter-Praefix, wenn es eindeutig ist.
+
+    Wer bei NVIDIA "nvidia/nemotron-3-ultra-550b-a55b" von der Webseite
+    kopiert, traegt genau das ein -- und LiteLLM findet dazu keinen Anbieter.
+    Statt den Nutzer mit "LLM Provider NOT provided" stehenzulassen, setzen
+    wir das Praefix davor, das ohnehin gemeint war.
+    """
+    model = (model or "").strip()
+    if not model or resolve_model(model):
+        return model
+    return suggest_model(model) or model
+
+
 def save_values(payload: dict[str, Any]) -> Path:
     """Schreibt die Formularwerte in die `.env` und laedt neu."""
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
     }
+    for key in ("SCOUTR_MODEL", "SCOUTR_VISION_MODEL", "SCOUTR_SUBAGENT_MODEL"):
+        if values.get(key):
+            values[key] = fix_model_id(values[key])
     ha_token = str(payload.get(HA_TOKEN_FIELD, "")).strip()
     if ha_token:
         values["HA_TOKEN"] = ha_token

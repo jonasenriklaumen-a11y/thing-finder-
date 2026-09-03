@@ -249,6 +249,10 @@ input:focus,select:focus{border-color:var(--accent)}
 .lbl .why{display:block;color:var(--text-3);font-size:11.5px;margin-top:1px;
   text-transform:none;letter-spacing:0;font-weight:400}
 .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
+/* Speichern direkt im Abschnitt -- damit man fuer einen Modellwechsel nicht
+   durch das ganze Formular nach unten scrollen muss. */
+.actions.section{margin-top:14px;align-items:center}
+.actions.section .note{margin:0;margin-right:auto;text-align:left}
 .btn{border-radius:11px;padding:9px 18px;cursor:pointer;border:1px solid var(--line-2);
   background:var(--surface);color:var(--text);font-size:14px}
 .btn:hover{border-color:var(--accent)}
@@ -449,6 +453,10 @@ input:focus,select:focus{border-color:var(--accent)}
                    placeholder="leer lassen = unverändert"></label>
         </div>
         <div class="note" id="provider-note"></div>
+        <div class="actions section">
+          <span class="note" id="model-note"></span>
+          <button type="button" class="btn primary" id="save-model">Modell speichern</button>
+        </div>
       </fieldset>
 
       <fieldset><legend>Speicher</legend>
@@ -1088,6 +1096,7 @@ $("#btn-settings").addEventListener("click", async () => {
   fillProviders();
   $("#provider").value = "";
   $("#provider-note").textContent = "";
+  $("#model-note").textContent = "";
   $("#usage-note").textContent = "";
   api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
   $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
@@ -1102,16 +1111,28 @@ overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.cla
 /* ---------- Anbieter und Schluessel ---------- */
 // Wer welchen Schluessel braucht -- damit man den Anbieter waehlen kann,
 // ohne die Modell-ID auswendig zu koennen.
+// Anbieter, Schluesselname, Beispielmodell und wie der Schluessel aussieht.
+// Das Aussehen hilft beim Erkennen: ein NVIDIA-Schluessel faengt mit nvapi-
+// an, ein OpenAI-Schluessel mit sk-. Wer den falschen einfuegt, sieht es
+// sofort, statt erst beim ersten Fehlschlag.
 const PROVIDERS = [
-  ["anthropic",   "Anthropic (Claude)", "ANTHROPIC_API_KEY",  "anthropic/claude-sonnet-4-6"],
-  ["openai",      "OpenAI (GPT)",       "OPENAI_API_KEY",     "openai/gpt-4o"],
-  ["gemini",      "Google Gemini",      "GEMINI_API_KEY",     "gemini/gemini-2.0-flash"],
-  ["nvidia_nim",  "NVIDIA NIM",         "NVIDIA_NIM_API_KEY", "nvidia_nim/meta/llama-3.3-70b-instruct"],
-  ["groq",        "Groq",               "GROQ_API_KEY",       "groq/llama-3.3-70b-versatile"],
-  ["deepseek",    "DeepSeek",           "DEEPSEEK_API_KEY",   "deepseek/deepseek-chat"],
-  ["mistral",     "Mistral",            "MISTRAL_API_KEY",    "mistral/mistral-large-latest"],
-  ["openrouter",  "OpenRouter",         "OPENROUTER_API_KEY", "openrouter/meta-llama/llama-3.3-70b-instruct"],
-  ["ollama_chat", "Ollama (lokal)",     "",                   "ollama_chat/gemma4:12b"],
+  ["anthropic",   "Anthropic (Claude)", "ANTHROPIC_API_KEY",  "anthropic/claude-sonnet-4-6",
+   "sk-ant-…"],
+  ["openai",      "OpenAI (GPT)",       "OPENAI_API_KEY",     "openai/gpt-4o",
+   "sk-…"],
+  ["gemini",      "Google Gemini",      "GEMINI_API_KEY",     "gemini/gemini-2.0-flash",
+   "AIza…"],
+  ["nvidia_nim",  "NVIDIA NIM",         "NVIDIA_NIM_API_KEY",
+   "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b", "nvapi-…"],
+  ["groq",        "Groq",               "GROQ_API_KEY",       "groq/llama-3.3-70b-versatile",
+   "gsk_…"],
+  ["deepseek",    "DeepSeek",           "DEEPSEEK_API_KEY",   "deepseek/deepseek-chat",
+   "sk-…"],
+  ["mistral",     "Mistral",            "MISTRAL_API_KEY",    "mistral/mistral-large-latest",
+   ""],
+  ["openrouter",  "OpenRouter",         "OPENROUTER_API_KEY",
+   "openrouter/meta-llama/llama-3.3-70b-instruct", "sk-or-…"],
+  ["ollama_chat", "Ollama (lokal)",     "",                   "ollama_chat/gemma4:12b", ""],
 ];
 
 function fillProviders(){
@@ -1125,15 +1146,56 @@ function fillProviders(){
   select.addEventListener("change", () => {
     const found = PROVIDERS.find(entry => entry[0] === select.value);
     if (!found) return;
-    const [, label, keyName, example] = found;
+    const [, label, keyName, example, shape] = found;
     const model = form.elements["SCOUTR_MODEL"];
     if (!model.value.startsWith(select.value + "/")) model.value = example;
+    const key = form.elements["__API_KEY__"];
+    key.placeholder = shape ? `${shape}  (leer lassen = unverändert)` : "leer lassen = unverändert";
     $("#keyname").textContent = keyName ? `(${keyName})` : "(nicht nötig)";
     $("#provider-note").textContent = keyName
-      ? `${label} braucht ${keyName}. Trag ihn rechts ein — er landet in deiner .env.`
+      ? `${label} braucht ${keyName}${shape ? ` — er beginnt mit ${shape}` : ""}. `
+        + "Trag ihn rechts ein, er landet in deiner .env."
       : `${label} läuft auf deinem Rechner. Kein Schlüssel nötig.`;
   });
 }
+
+// Nur die Felder aus dem Modell-Abschnitt speichern, nicht das ganze Formular.
+const MODEL_FIELDS = ["SCOUTR_MODEL", "SCOUTR_VISION_MODEL", "SCOUTR_SUBAGENT_MODEL",
+                      "SCOUTR_API_BASE"];
+
+$("#save-model").addEventListener("click", async () => {
+  const note = $("#model-note");
+  note.className = "note"; note.textContent = "Speichere …";
+  const values = {};
+  MODEL_FIELDS.forEach(name => { values[name] = form.elements[name].value; });
+  const key = form.elements["__API_KEY__"].value;
+  if (key.trim()) values["__API_KEY__"] = key;
+
+  let data;
+  try {
+    const res = await api("/api/config", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(values)
+    });
+    data = await res.json();
+  } catch (err){
+    note.className = "note bad"; note.textContent = String(err); return;
+  }
+  if (!data.ok){
+    note.className = "note bad"; note.textContent = data.error || "Das hat nicht geklappt.";
+    return;
+  }
+  note.className = "note ok";
+  // Der Server ergaenzt ein fehlendes Anbieter-Praefix -- das soll man sehen.
+  const fresh = await (await api("/api/config")).json();
+  const saved = fresh.values.SCOUTR_MODEL;
+  form.elements["SCOUTR_MODEL"].value = saved;
+  form.elements["__API_KEY__"].value = "";
+  note.textContent = saved !== values.SCOUTR_MODEL
+    ? `Gespeichert als ${saved} — das Anbieter-Kürzel hat gefehlt.`
+    : `${saved} ist jetzt aktiv.`;
+  refreshHeader();
+});
 
 /* ---------- Auslastung ---------- */
 function gauge(name, value, sub, percent){

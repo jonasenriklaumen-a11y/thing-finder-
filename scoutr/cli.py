@@ -156,6 +156,12 @@ def setup_command(
             model = MODEL_PRESETS[int(choice) - 1][0]
         except (ValueError, IndexError):
             model = MODEL_PRESETS[0][0]
+    from scoutr.web import fix_model_id
+
+    corrected = fix_model_id(model)
+    if corrected != model:
+        console.print(f"  [dim]Anbieter-Kuerzel ergaenzt: {model} -> {corrected}[/dim]")
+        model = corrected
     console.print(f"  Modell: [bold cyan]{model}[/bold cyan]")
     model_issue = model_problem(model)
     if model_issue:
@@ -1503,13 +1509,21 @@ def _handle_slash(
         if not argument:
             console.print(f"Aktuelles Modell: [bold]{settings.model}[/bold]")
         else:
-            problem = model_problem(argument)
+            from scoutr.web import fix_model_id
+
+            # Fehlt nur das Anbieter-Kuerzel, ergaenzen wir es, statt den
+            # Nutzer mit einer Fehlermeldung stehenzulassen.
+            fixed = fix_model_id(argument)
+            problem = model_problem(fixed)
             if problem:
                 console.print(f"[yellow]{problem}[/yellow]")
                 console.print(f"[dim]Weiter mit {settings.model}.[/dim]")
             else:
-                agent.set_model(argument)
-                console.print(f"[green]Modell:[/green] {argument}")
+                agent.set_model(fixed)
+                if fixed != argument:
+                    console.print(f"[green]Modell:[/green] {fixed} [dim](Kuerzel ergaenzt)[/dim]")
+                else:
+                    console.print(f"[green]Modell:[/green] {fixed}")
     elif command == "export":
         _do_export(turns, argument or "html", settings)
     elif command == "image":

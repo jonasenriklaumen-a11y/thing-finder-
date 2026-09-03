@@ -1065,10 +1065,15 @@ SCOUTR_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct
 NVIDIA_NIM_API_KEY=nvapi-...
 ```
 
-Die Modell-ID ist genau die von build.nvidia.com, mit `nvidia_nim/` davor. Achte darauf,
-ein Modell zu wählen, das in der Modellkarte Tool-Calling aufführt — nicht alle dort
-angebotenen Modelle können das. Eine eigene, selbst gehostete NIM-Instanz erreichst du
-über `SCOUTR_API_BASE=http://dein-host:8000/v1`.
+Die Modell-ID ist genau die von build.nvidia.com, mit `nvidia_nim/` davor. Vergisst du
+das Kürzel, ergänzt scoutr es selbst — kopierst du `nvidia/nemotron-3-ultra-550b-a55b`
+von der Seite, wird daraus beim Speichern `nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b`.
+Am schnellsten geht es in der Weboberfläche: *Einstellungen → Modell → Anbieter: NVIDIA
+NIM*, Schlüssel einfügen, **Modell speichern**. Mehr braucht es nicht.
+
+Achte darauf, ein Modell zu wählen, das in der Modellkarte Tool-Calling aufführt — nicht
+alle dort angebotenen Modelle können das. Eine eigene, selbst gehostete NIM-Instanz
+erreichst du über `SCOUTR_API_BASE=http://dein-host:8000/v1`.
 
 SQLite (`~/.scoutr/scoutr.sqlite3`) wird für genau zwei Dinge benutzt: Response-Cache
 (TTL 24 h) und Verlauf vergangener Recherchen.
