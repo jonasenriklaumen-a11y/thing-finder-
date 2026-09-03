@@ -159,6 +159,64 @@ CALC_SCHEMA: dict[str, Any] = {
     },
 }
 
+#: Etwas fuer spaeter behalten. Der Merkzettel ist fuer ausdrueckliche
+#: Bitten des Nutzers; der Speicher fuer alles, was der Agent selbst als
+#: wichtig erkennt.
+MEMORY_WRITE_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "save_memory",
+        "description": (
+            "Legt eine Notiz im Langzeitspeicher ab, die in spaeteren Gespraechen wieder "
+            "auftaucht. Nimm es fuer Dinge, die laenger gelten: Vorlieben, Wohnort, "
+            "Ausstattung, laufende Vorhaben, wichtige Ergebnisse einer Recherche. Nicht "
+            "fuer Belangloses und nicht fuer etwas, das gleich wieder veraltet ist. "
+            "Schreib in ganzen Saetzen, damit die Notiz spaeter allein verstaendlich ist. "
+            "Nur Text -- Bilder und Dateien gehoeren nicht hierher."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Die Notiz, ein bis drei Saetze, aus sich heraus verstaendlich.",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Ein Stichwort zum Wiederfinden, z.B. 'Wohnort' oder 'Laptop'.",
+                },
+            },
+            "required": ["text"],
+        },
+    },
+}
+
+#: Im Speicher nachsehen.
+MEMORY_READ_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "recall_memory",
+        "description": (
+            "Sieht im Langzeitspeicher nach, was du frueher ueber den Nutzer oder ein "
+            "Thema festgehalten hast. Nimm es GLEICH ZU BEGINN, wenn die Frage von "
+            "persoenlichen Umstaenden abhaengt -- Ort, Ausstattung, Vorlieben, frueher "
+            "Besprochenes. Lieber einmal zu viel nachsehen als den Nutzer wiederholt "
+            "dasselbe fragen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Wonach du suchst. Leer lassen zeigt die juengsten Notizen."
+                    ),
+                }
+            },
+        },
+    },
+}
+
 #: Das eigene Netz ansehen. Kein Ersatz fuer die Websuche, sondern die Antwort
 #: auf Fragen, die im Web gar nicht stehen koennen.
 LAN_SCHEMA: dict[str, Any] = {
@@ -362,6 +420,7 @@ class ToolStats:
     #: Rueckfragen zaehlen NICHT als Werkzeugaufruf -- eine Nachfrage soll den
     #: Rechercheetat nicht schmaelern.
     questions: int = 0
+    memories: int = 0
     lan_scans: int = 0
     ha_reads: int = 0
     ha_calls: int = 0
@@ -375,6 +434,7 @@ class ToolStats:
             + len(self.skipped)
             + self.calculations
             + self.notes_saved
+            + self.memories
             + self.lan_scans
             + self.ha_reads
             + self.ha_calls
@@ -390,6 +450,7 @@ class ToolStats:
         self.calculations = 0
         self.notes_saved = 0
         self.questions = 0
+        self.memories = 0
         self.lan_scans = 0
         self.ha_reads = 0
         self.ha_calls = 0
@@ -416,6 +477,9 @@ class Toolbox:
         self.subagent_runner: Callable[[list[str]], list[dict[str, Any]]] | None = None
         #: Setzt die Oberflaeche, wenn jemand da ist, der antworten kann.
         self.ask_handler: AskHandler | None = None
+        #: Wird beim ersten Zugriff geoeffnet, nicht beim Start -- wer den
+        #: Speicher nie benutzt, soll auch keine Datei dafuer anlegen.
+        self._memory_store: Any = None
         self._fetcher = fetcher or Fetcher(
             user_agent=settings.user_agent,
             timeout=settings.fetch_timeout,
@@ -599,6 +663,12 @@ class Toolbox:
             return self.calculate(expression=str(arguments.get("expression", "")))
         if name == "remember":
             return self.remember(text=str(arguments.get("text", "")))
+        if name == "save_memory":
+            return self.save_memory(
+                text=str(arguments.get("text", "")), topic=str(arguments.get("topic") or "")
+            )
+        if name == "recall_memory":
+            return self.recall_memory(query=str(arguments.get("query") or ""))
         if name == "lan_scan":
             return self.lan_scan(
                 subnet=str(arguments.get("subnet") or ""),
@@ -697,6 +767,67 @@ class Toolbox:
         self.stats.notes_saved += 1
         self._emit("remember", text=text)
         return {"saved": True, "note_id": note_id, "text": text}
+
+    # -- Werkzeug: Langzeitspeicher ---------------------------------------
+    def _memory(self) -> Any:
+        """Den Speicher oeffnen -- oder None, wenn er abgeschaltet ist."""
+        if not self.settings.memory_enabled:
+            return None
+        if self._memory_store is None:
+            from scoutr.memory import Memory
+
+            self._memory_store = Memory(
+                self.settings.db_path, self.settings.data_dir, self.settings.memory_key
+            )
+        return self._memory_store
+
+    def save_memory(self, text: str, topic: str = "") -> dict[str, Any]:
+        """Legt eine Textnotiz im Langzeitspeicher ab."""
+        from scoutr.memory import MemoryFull
+
+        store = self._memory()
+        if store is None:
+            return {
+                "error": (
+                    "Der Speicher ist abgeschaltet. Der Nutzer kann ihn in den "
+                    "Einstellungen wieder einschalten."
+                )
+            }
+        text = (text or "").strip()
+        if not text:
+            return {"error": "Leere Notiz."}
+        try:
+            entry = store.remember(text, topic)
+        except MemoryFull as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+        self.stats.memories += 1
+        self._emit("memory_save", text=entry.text, topic=entry.topic)
+        return {"saved": True, "id": entry.id, "topic": entry.topic}
+
+    def recall_memory(self, query: str = "") -> dict[str, Any]:
+        """Sucht im Langzeitspeicher."""
+        store = self._memory()
+        if store is None:
+            return {
+                "found": 0,
+                "entries": [],
+                "note": "Der Speicher ist abgeschaltet -- frag den Nutzer direkt.",
+            }
+        self._emit("memory_read", query=query or "alles")
+        entries = store.recall(query)
+        self.stats.memories += 1
+        return {
+            "found": len(entries),
+            "entries": [entry.as_dict() for entry in entries],
+            "note": (
+                "Nichts gefunden. Das heisst nur, dass nichts abgelegt wurde -- "
+                "frag den Nutzer, statt zu raten."
+                if not entries
+                else ""
+            ),
+        }
 
     # -- Werkzeug: das eigene Netz ----------------------------------------
     def lan_scan(self, subnet: str = "", thorough: bool = False) -> dict[str, Any]:

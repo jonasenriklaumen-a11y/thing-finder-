@@ -65,6 +65,7 @@ SETTING_KEYS: tuple[str, ...] = (
     "SCOUTR_HA_CONTROL",
     "SCOUTR_LAN_ENABLED",
     "SCOUTR_LAN_SUBNET",
+    "SCOUTR_MEMORY",
 )
 
 #: Platzhalter im Formular -- ein leeres Key-Feld darf den Key nicht loeschen.
@@ -129,6 +130,10 @@ HELP_MARKDOWN = """### Befehle
 - `/history` — fruehere Recherchen
 - `/notes` — Merkzettel
 - `/clear` — Gespraechsverlauf verwerfen
+- `/memory` — zeigen, was im Langzeitspeicher liegt
+- `/uploads` — zeigen, was du hochgeladen hast
+- `/uploads clear` — alle hochgeladenen Dateien loeschen
+- `/forget` — den Langzeitspeicher leeren
 - `/help` — diese Uebersicht
 
 Dauerhaft aendern lassen sich Modell, Suche und Ort oben unter **Einstellungen**."""
@@ -376,6 +381,15 @@ class ChatSession:
                     self._agent.clear()
                 return {"text": "Verlauf verworfen.", "clear": True}
 
+            if command == "memory":
+                return {"text": self._memory_overview()}
+
+            if command == "forget":
+                return {"text": self._forget()}
+
+            if command == "uploads":
+                return {"text": self._uploads(argument)}
+
             if command == "notes":
                 notes = self._cache().list_notes()
                 if not notes:
@@ -397,6 +411,79 @@ class ChatSession:
                 return {"text": "Im Browser reicht es, das Fenster zu schliessen."}
 
         return {"text": f"Unbekannter Befehl `/{command}` — `/help` zeigt alle."}
+
+    def memory(self) -> Any:
+        """Den Langzeitspeicher oeffnen.
+
+        Nicht `_store` nennen: so heisst schon die Ablage fuer hochgeladene
+        Dateien, und die haette diese Methode ueberschrieben.
+        """
+        from scoutr.memory import Memory
+
+        settings = self.settings()
+        return Memory(settings.db_path, settings.data_dir, settings.memory_key)
+
+    def _memory_overview(self) -> str:
+        """Was liegt im Speicher, und wie voll ist er?"""
+        from scoutr.memory import human_size
+
+        settings = self.settings()
+        if not settings.memory_enabled:
+            return (
+                "Der Speicher ist ausgeschaltet. Unter **Einstellungen → Speicher** "
+                "laesst er sich wieder einschalten."
+            )
+        store = self.memory()
+        usage = store.usage()
+        entries = store.all_entries(limit=30)
+        head = (
+            f"### Speicher\n{usage['entries']} Notizen · "
+            f"{usage['used_mb']} von {usage['limit_mb']} MB belegt "
+            f"({usage['percent']} %), davon {human_size(int(usage['uploads']))} Dateien."
+        )
+        if not entries:
+            return f"{head}\n\nNoch nichts abgelegt."
+        lines = "\n".join(
+            f"- **{entry.topic or 'Notiz'}** — {entry.text}" for entry in entries
+        )
+        return f"{head}\n\n{lines}"
+
+    def _forget(self) -> str:
+        """Den Speicher leeren."""
+        if not self.settings().memory_enabled:
+            return "Der Speicher ist ausgeschaltet -- da ist nichts zu loeschen."
+        count = self.memory().clear()
+        if not count:
+            return "Der Speicher war schon leer."
+        return f"{count} Notizen geloescht. Hochgeladene Dateien bleiben -- `/uploads clear`."
+
+    def _uploads(self, argument: str) -> str:
+        """Hochgeladenes zeigen oder loeschen."""
+        from scoutr.memory import human_size
+
+        store = self.memory()
+        if argument.strip().lower() in ("clear", "loeschen", "löschen", "weg"):
+            count, freed = store.clear_uploads()
+            if not count:
+                return "Es liegt nichts Hochgeladenes herum."
+            word = "Datei" if count == 1 else "Dateien"
+            return f"{count} {word} geloescht, {human_size(freed)} wieder frei."
+
+        folder = self.settings().data_dir / "uploads"
+        files = sorted(folder.iterdir()) if folder.is_dir() else []
+        files = [item for item in files if item.is_file()]
+        if not files:
+            return "Es liegt nichts Hochgeladenes herum."
+        lines = "\n".join(
+            # Der Zeitstempel vorne im Dateinamen interessiert niemanden.
+            f"- {item.name.split('-', 1)[-1]} ({human_size(item.stat().st_size)})"
+            for item in files[-30:]
+        )
+        total = human_size(sum(item.stat().st_size for item in files))
+        return (
+            f"### Hochgeladen\n{len(files)} Dateien, zusammen {total}.\n\n{lines}"
+            "\n\nAlles loeschen: `/uploads clear`"
+        )
 
     def _cache(self) -> Cache:
         settings = self.settings()
@@ -476,6 +563,7 @@ def current_values() -> dict[str, str]:
         "SCOUTR_HA_CONTROL": "true" if settings.ha_control else "false",
         "SCOUTR_LAN_ENABLED": "true" if settings.lan_enabled else "false",
         "SCOUTR_LAN_SUBNET": settings.lan_subnet,
+        "SCOUTR_MEMORY": "true" if settings.memory_enabled else "false",
     }
 
 
@@ -680,6 +768,20 @@ class Handler(BaseHTTPRequestHandler):
                     "ha_connected": bool(settings.ha_url and settings.ha_token),
                 }
             )
+        elif route == "/api/models":
+            from scoutr.system import available_models
+
+            self._json({"models": available_models(SESSION.settings())})
+        elif route == "/api/system":
+            from scoutr.system import snapshot
+
+            settings = SESSION.settings()
+            payload = snapshot(settings.data_dir)
+            # Nicht "memory" nennen -- das ist im Abbild schon der
+            # Arbeitsspeicher, der Schluessel wuerde ihn ueberschreiben.
+            if settings.memory_enabled:
+                payload["storage"] = SESSION.memory().usage()
+            self._json(payload)
         elif route == "/api/notes":
             settings = SESSION.settings()
             cache = Cache(settings.db_path, settings.cache_ttl_hours)

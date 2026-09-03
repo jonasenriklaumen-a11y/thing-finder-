@@ -1054,3 +1054,127 @@ def test_consecutive_duplicate_questions_are_collapsed() -> None:
     """"hallo" dreimal hintereinander soll nicht dreimal in der Liste stehen."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "label === last" in html
+
+
+# -- Modellauswahl, Auslastung, Speicher ----------------------------------
+def test_the_model_list_offers_what_actually_works(
+    client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eine Auswahl, die beim Anklicken scheitert, hilft niemandem."""
+    monkeypatch.setattr("scoutr.local_model.installed_models", lambda base: ["gemma4:12b"])
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    status, body = client("GET", "/api/models")
+    assert status == 200
+    models = json.loads(body)["models"]
+    ids = [item["id"] for item in models]
+    assert "ollama_chat/gemma4:12b" in ids
+    assert "openai/gpt-4o" in ids
+    # Ohne Schluessel keine Zeile -- sonst waehlt man etwas, das nicht laeuft.
+    assert not any(item["id"].startswith("anthropic/") for item in models)
+    assert all(item["note"] for item in models), "jede Zeile braucht eine Erklaerung"
+
+
+def test_every_model_says_where_it_runs(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("scoutr.local_model.installed_models", lambda base: ["qwen3:8b"])
+    _, body = client("GET", "/api/models")
+    local = [m for m in json.loads(body)["models"] if m["id"].startswith("ollama_chat/")]
+    assert local and local[0]["kind"] == "lokal"
+
+
+def test_the_system_endpoint_reports_the_load(client) -> None:
+    status, body = client("GET", "/api/system")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["cpu"]["cores"] >= 1
+    assert "system" in payload and "python" in payload
+
+
+def test_the_load_includes_the_storage_when_it_is_on(
+    client, session: web.ChatSession
+) -> None:
+    session._settings.memory_enabled = True
+    _, body = client("GET", "/api/system")
+    storage = json.loads(body)["storage"]
+    assert storage["limit_mb"] == 400
+    # Der Arbeitsspeicher darf davon nicht ueberschrieben werden.
+    assert "memory" in json.loads(body)
+
+
+def test_no_storage_line_when_memory_is_off(client, session: web.ChatSession) -> None:
+    session._settings.memory_enabled = False
+    assert "storage" not in json.loads(client("GET", "/api/system")[1])
+
+
+# -- Slash-Befehle fuer den Speicher --------------------------------------
+def test_memory_command_shows_what_is_stored(client, session: web.ChatSession) -> None:
+    session.memory().remember("Der Nutzer wohnt in Bremen.", topic="Wohnort")
+    _, body = client("POST", "/api/command", {"line": "/memory"})
+    text = json.loads(body)["text"]
+    assert "Bremen" in text
+    assert "von 400 MB" in text
+
+
+def test_forget_empties_the_store(client, session: web.ChatSession) -> None:
+    session.memory().remember("weg damit")
+    _, body = client("POST", "/api/command", {"line": "/forget"})
+    assert "1 Notizen" in json.loads(body)["text"]
+    assert session.memory().count() == 0
+
+
+def test_uploads_command_lists_and_clears(client, session: web.ChatSession) -> None:
+    uploads = session.settings().data_dir / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    (uploads / "123-foto.png").write_bytes(b"x" * 2048)
+
+    _, body = client("POST", "/api/command", {"line": "/uploads"})
+    listing = json.loads(body)["text"]
+    assert "foto.png" in listing
+    assert "123-" not in listing, "der Zeitstempel interessiert niemanden"
+
+    _, body = client("POST", "/api/command", {"line": "/uploads clear"})
+    assert "geloescht" in json.loads(body)["text"]
+    assert not list(uploads.iterdir())
+
+
+def test_uploads_command_on_an_empty_folder(client) -> None:
+    assert "nichts" in json.loads(client("POST", "/api/command", {"line": "/uploads"})[1])["text"]
+
+
+def test_memory_command_says_when_it_is_off(client, session: web.ChatSession) -> None:
+    session._settings.memory_enabled = False
+    text = json.loads(client("POST", "/api/command", {"line": "/memory"})[1])["text"]
+    assert "ausgeschaltet" in text
+    assert "Einstellungen" in text
+
+
+# -- Handy-Layout ---------------------------------------------------------
+def test_the_ui_has_a_phone_layout() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "@media (max-width:900px)" in html
+    assert "@media (max-width:430px)" in html
+    assert "env(safe-area-inset-bottom)" in html, "randlose Bildschirme"
+    assert "viewport-fit=cover" in html
+
+
+def test_the_input_does_not_zoom_on_ios() -> None:
+    """Unter 16px zoomt iOS beim Antippen ins Feld hinein."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    phone = html[html.index("@media (max-width:900px)") :]
+    assert "textarea{font-size:16px}" in phone
+
+
+def test_newest_chat_comes_first() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert ".slice().reverse()" in html
+
+
+def test_the_ui_offers_the_model_picker_and_load_button() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="btn-model"' in html and 'id="model-list"' in html
+    assert "/api/models" in html
+    assert 'id="btn-usage"' in html and "/api/system" in html
+    assert 'id="provider"' in html, "Anbieter zum Auswaehlen"
+    assert 'name="SCOUTR_MEMORY"' in html

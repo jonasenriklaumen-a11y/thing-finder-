@@ -1210,6 +1210,9 @@ HELP_TEXT = """\
   [cyan]/history[/cyan]             Fruehere Recherchen anzeigen
   [cyan]/notes[/cyan]               Merkzettel anzeigen (verwalten: scoutr notes)
   [cyan]/clear[/cyan]               Gespraechsverlauf verwerfen
+  [cyan]/memory[/cyan]              Langzeitspeicher anzeigen
+  [cyan]/forget[/cyan]              Langzeitspeicher leeren
+  [cyan]/uploads [clear][/cyan]     Hochgeladenes anzeigen oder loeschen
   [cyan]/help[/cyan]                Diese Uebersicht
   [cyan]/quit[/cyan]                Beenden (auch Strg+D)
 """
@@ -1521,6 +1524,12 @@ def _handle_slash(
         history_command(limit=15)
     elif command == "notes":
         notes_command(delete=0, clear=False)
+    elif command == "memory":
+        _show_memory(settings)
+    elif command == "forget":
+        _clear_memory(settings)
+    elif command == "uploads":
+        _show_uploads(settings, argument)
     elif command == "clear":
         agent.clear()
         turns.clear()
@@ -1528,6 +1537,83 @@ def _handle_slash(
     else:
         console.print(f"[yellow]Unbekannter Befehl '/{command}'.[/yellow] /help zeigt alle.")
     return False
+
+
+def _open_memory(settings: Settings):
+    """Den Langzeitspeicher oeffnen."""
+    from scoutr.memory import Memory
+
+    return Memory(settings.db_path, settings.data_dir, settings.memory_key)
+
+
+def _show_memory(settings: Settings) -> None:
+    """Zeigt, was im Langzeitspeicher liegt."""
+    if not settings.memory_enabled:
+        console.print("[yellow]Der Speicher ist ausgeschaltet.[/yellow]")
+        console.print("[dim]Einschalten mit SCOUTR_MEMORY=true in der .env.[/dim]")
+        return
+    from scoutr.memory import human_size
+
+    store = _open_memory(settings)
+    usage = store.usage()
+    entries = store.all_entries(limit=30)
+    console.print(
+        f"[bold]Speicher[/bold] [dim]{usage['entries']} Notizen · "
+        f"{usage['used_mb']} von {usage['limit_mb']} MB ({usage['percent']} %), "
+        f"davon {human_size(int(usage['uploads']))} Dateien[/dim]"
+    )
+    if not entries:
+        console.print("[dim]Noch nichts abgelegt.[/dim]")
+        return
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column(style="cyan", no_wrap=True)
+    table.add_column()
+    for entry in entries:
+        table.add_row(entry.topic or "-", entry.text)
+    console.print(table)
+
+
+def _clear_memory(settings: Settings) -> None:
+    """Leert den Langzeitspeicher."""
+    if not settings.memory_enabled:
+        console.print("[yellow]Der Speicher ist ausgeschaltet.[/yellow]")
+        return
+    count = _open_memory(settings).clear()
+    if count:
+        console.print(f"[green]{count} Notizen geloescht.[/green]")
+        console.print("[dim]Hochgeladene Dateien bleiben -- /uploads clear.[/dim]")
+    else:
+        console.print("[dim]Der Speicher war schon leer.[/dim]")
+
+
+def _show_uploads(settings: Settings, argument: str) -> None:
+    """Zeigt Hochgeladenes oder loescht es."""
+    from scoutr.memory import human_size
+
+    store = _open_memory(settings)
+    if argument.strip().lower() in ("clear", "loeschen", "löschen", "weg"):
+        count, freed = store.clear_uploads()
+        if count:
+            word = "Datei" if count == 1 else "Dateien"
+            console.print(f"[green]{count} {word} geloescht[/green], {human_size(freed)} frei.")
+        else:
+            console.print("[dim]Es liegt nichts Hochgeladenes herum.[/dim]")
+        return
+
+    folder = settings.data_dir / "uploads"
+    files = [item for item in sorted(folder.iterdir())] if folder.is_dir() else []
+    files = [item for item in files if item.is_file()]
+    if not files:
+        console.print("[dim]Es liegt nichts Hochgeladenes herum.[/dim]")
+        return
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column()
+    table.add_column(style="dim", justify="right")
+    for item in files[-30:]:
+        table.add_row(item.name.split("-", 1)[-1], human_size(item.stat().st_size))
+    console.print(table)
+    total = human_size(sum(item.stat().st_size for item in files))
+    console.print(f"[dim]{len(files)} Dateien, zusammen {total}. Loeschen: /uploads clear[/dim]")
 
 
 def _console_ask(question: str, options: list[str]) -> str:

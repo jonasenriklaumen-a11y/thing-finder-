@@ -158,6 +158,22 @@ class ChatRenderer:
             f"{payload.get('reason', '')}{suffix}"
         )
 
+    def _on_memory_save(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(
+                ("  [Merke] ", "bold cyan"), (str(payload.get("text", ""))[:70], "white")
+            )
+        )
+
+    def _on_memory_read(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(
+                ("  [Speicher] ", "bold cyan"), (str(payload.get("query", "")), "white")
+            )
+        )
+
     def _on_lan_scan(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         self.console.print(

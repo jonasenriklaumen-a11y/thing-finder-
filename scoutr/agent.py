@@ -24,7 +24,9 @@ from scoutr.tools import (
     HA_STATES_SCHEMA,
     LAN_HOST_SCHEMA,
     LAN_SCHEMA,
+    MEMORY_READ_SCHEMA,
     MEMORY_SCHEMA,
+    MEMORY_WRITE_SCHEMA,
     SUBAGENT_SCHEMA,
     TOOL_SCHEMAS,
     EventHook,
@@ -163,6 +165,17 @@ TRIAGE_PROMPT = (
     "zum Gespraech). Nachfragen zu einer laufenden Recherche zaehlen als Recherche. "
     "Antworte mit GENAU einem Wort: RECHERCHE oder CHAT.\n\nNachricht: %s"
 )
+
+#: Wird angehaengt, wenn der Langzeitspeicher an ist.
+MEMORY_PROMPT = """\
+
+Du hast einen Langzeitspeicher, der ueber Gespraeche hinweg haelt:
+- `recall_memory(query)` -- nachsehen, was du frueher festgehalten hast.
+- `save_memory(text, topic)` -- etwas fuer spaeter ablegen.
+Sieh am Anfang nach, sobald die Antwort von persoenlichen Umstaenden abhaengt: Wohnort, \
+Ausstattung, Vorlieben, laufende Vorhaben. Leg ab, was laenger gilt -- nicht jede \
+Kleinigkeit und nichts, was morgen veraltet ist. Schreib ganze Saetze, damit die Notiz \
+spaeter fuer sich steht. In den Speicher gehoert nur Text, nie Bilder oder Dateien."""
 
 #: Wird angehaengt, wenn scoutr ins eigene Netz sehen darf.
 LAN_PROMPT = """\
@@ -319,6 +332,8 @@ class Agent:
             extra.append(MEMORY_SCHEMA)
         # Das Heimnetz gehoert dem Nutzer, nicht dem Web -- die Werkzeuge
         # erscheinen nur, wenn er sie zugelassen hat.
+        if self.settings.memory_enabled:
+            extra.extend((MEMORY_READ_SCHEMA, MEMORY_WRITE_SCHEMA))
         if self.settings.lan_enabled:
             extra.extend((LAN_SCHEMA, LAN_HOST_SCHEMA))
         if self.settings.ha_url and self.settings.ha_token:
@@ -365,7 +380,7 @@ class Agent:
             text,
             self.settings,
             context=self._planner_context(),
-            limit=max(1, min(self.settings.max_subagents, 4)),
+            limit=max(1, self.settings.max_subagents),
         )
         elapsed = round(time.monotonic() - started, 2)
         if not needs:
@@ -409,7 +424,11 @@ class Agent:
         """
         from scoutr.subagents import plan_subtasks
 
-        limit = max(1, min(self.settings.max_subagents, 4))
+        # Wie viele Teilfragen hoechstens entstehen duerfen. Wie viele davon
+        # GLEICHZEITIG laufen, entscheidet effective_parallel -- zwoelf
+        # Anfragen auf einmal an eine lokale GPU waeren kontraproduktiv, also
+        # arbeitet sie der Pool in Wellen ab.
+        limit = max(1, self.settings.max_subagents)
         tasks = getattr(self, "_planned_tasks", None)
         if tasks:
             # Die Vorpruefung hat die Teilfragen schon mitgeliefert -- ein
@@ -482,6 +501,8 @@ class Agent:
     def _home_prompt(self) -> str:
         """Die Absaetze zu Heimnetz und Zuhause -- nur, was freigegeben ist."""
         parts = []
+        if self.settings.memory_enabled:
+            parts.append(MEMORY_PROMPT)
         if self.settings.lan_enabled:
             parts.append(LAN_PROMPT)
         if self.settings.ha_url and self.settings.ha_token:

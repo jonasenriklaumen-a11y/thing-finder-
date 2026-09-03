@@ -209,7 +209,7 @@ class Settings:
     #: So viele der juengsten Werkzeug-Ergebnisse bleiben ungekuerzt.
     keep_full_results: int = 4
     #: Obergrenze fuer parallele Subagenten.
-    max_subagents: int = 4
+    max_subagents: int = 12
     #: Zerlegt scoutr jede Frage von sich aus in Teilaufgaben?
     subagents_auto: bool = True
     #: Zeitlimit fuer die Chat-oder-Recherche-Vorpruefung in Sekunden.
@@ -238,6 +238,12 @@ class Settings:
     #: standardmaessig aus: eine missverstandene Nebenbemerkung soll nicht das
     #: Licht ausmachen.
     ha_control: bool = False
+    #: Darf Cortex AI sich ueber Gespraeche hinweg Dinge merken?
+    memory_enabled: bool = True
+    #: Passphrase fuer den Speicher. Leer = Schluesseldatei im Datenordner.
+    #: Gesetzt = der Schluessel wird bei jedem Start neu abgeleitet und liegt
+    #: nirgends auf der Platte.
+    memory_key: str = ""
     #: Darf scoutr das eigene Netz durchsuchen?
     lan_enabled: bool = True
     #: Netz, das dabei durchsucht wird. Leer = das eigene automatisch erkennen.
@@ -368,7 +374,7 @@ def get_settings() -> Settings:
         llm_retries=_env_int("SCOUTR_LLM_RETRIES", 3),
         max_tool_chars=_env_int("SCOUTR_MAX_TOOL_CHARS", 8000),
         keep_full_results=_env_int("SCOUTR_KEEP_FULL_RESULTS", 4),
-        max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 4),
+        max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 12),
         subagents_auto=_env_bool("SCOUTR_SUBAGENTS_AUTO", True),
         triage_timeout=float(_env_int("SCOUTR_TRIAGE_TIMEOUT", 5)),
         planner_timeout=float(_env_int("SCOUTR_PLANNER_TIMEOUT", 20)),
@@ -379,6 +385,8 @@ def get_settings() -> Settings:
         ha_url=_env_str("SCOUTR_HA_URL"),
         ha_token=_env_str("HA_TOKEN") or _env_str("SCOUTR_HA_TOKEN"),
         ha_control=_env_bool("SCOUTR_HA_CONTROL", False),
+        memory_enabled=_env_bool("SCOUTR_MEMORY", True),
+        memory_key=_env_str("SCOUTR_MEMORY_KEY"),
         lan_enabled=_env_bool("SCOUTR_LAN_ENABLED", True),
         lan_subnet=_env_str("SCOUTR_LAN_SUBNET"),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),

@@ -129,6 +129,8 @@ def test_tools_are_offered_to_the_llm(
         "fetch_page",
         "search_news",
         "calculate",
+        "recall_memory",
+        "save_memory",
         "lan_scan",
         "lan_check",
         "research_subtasks",
@@ -141,6 +143,7 @@ def test_subagents_can_be_switched_off(
     """Ohne Subagenten bleiben die Kernwerkzeuge."""
     settings.max_subagents = 0
     settings.lan_enabled = False
+    settings.memory_enabled = False
     llm = ScriptedLLM(_message(content="fertig"))
     monkeypatch.setattr("litellm.completion", llm)
     Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
@@ -150,12 +153,18 @@ def test_subagents_can_be_switched_off(
 
 def test_home_tools_follow_the_settings(settings: Settings) -> None:
     """Nichts vom Haus taucht auf, was der Nutzer nicht freigegeben hat."""
+    settings.memory_enabled = False
     settings.lan_enabled = False
     names = lambda: [tool["function"]["name"] for tool in Agent(settings).tools]  # noqa: E731
     assert "lan_scan" not in names() and "ha_states" not in names()
 
     settings.lan_enabled = True
     assert "lan_scan" in names() and "lan_check" in names()
+
+    # Der Speicher ebenso -- ohne Freigabe kein Werkzeug.
+    assert "save_memory" not in names()
+    settings.memory_enabled = True
+    assert "save_memory" in names() and "recall_memory" in names()
 
     # Home Assistant erscheint erst mit Adresse UND Token.
     settings.ha_url = "http://192.168.1.5:8123"

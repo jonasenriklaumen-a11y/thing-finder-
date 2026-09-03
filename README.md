@@ -422,6 +422,57 @@ scoutr lan                               # Geraete im eigenen Netz anzeigen
 scoutr connect-ha                        # Home Assistant verbinden
 ```
 
+## Der Speicher: was Cortex AI behält
+
+Ohne Speicher fängt jedes Gespräch bei null an. Mit Speicher merkt sich Cortex AI, was
+länger gilt — Wohnort, Vorlieben, laufende Vorhaben — und findet es beim nächsten Mal
+wieder.
+
+```
+> ich suche einen laptop bis 1200 euro für bildbearbeitung
+  [Merke] Sucht Laptop bis 1200 Euro für Bildbearbeitung
+
+  (drei Tage später, neues Gespräch)
+
+> gibt es dazu was neues
+  [Speicher] laptop
+  Du suchst einen Laptop bis 1200 Euro für Bildbearbeitung. Dazu ist neu: …
+```
+
+Vier Regeln bestimmen den Aufbau:
+
+* **Nur Text.** Cortex AI legt ab, was es selbst formuliert hat. Bilder und Dateien
+  kommen ausschließlich von dir und liegen getrennt.
+* **Verschlüsselt.** Die Notizen stehen nicht im Klartext in der Datenbank. Wer die
+  Datei kopiert — aus einem Backup, von einem verlorenen Laptop — liest ohne Schlüssel
+  nichts.
+* **Höchstens 400 MB**, zusammen mit Verlauf und hochgeladenen Dateien. Wird es eng,
+  fliegen zuerst alte Uploads raus: ein Bild liegt meist noch woanders, eine Notiz nicht.
+* **Abschaltbar** unter *Einstellungen → Speicher*, oder mit `SCOUTR_MEMORY=false`.
+
+```bash
+/memory            # was liegt drin, wie voll ist es
+/forget            # alle Notizen löschen
+/uploads           # was du hochgeladen hast
+/uploads clear     # alle hochgeladenen Dateien löschen
+```
+
+### Was die Verschlüsselung leistet — und was nicht
+
+Der Schlüssel liegt standardmäßig als Datei neben der Datenbank, lesbar nur für dein
+Benutzerkonto. Das schützt alles, was die Datei allein betrifft: Backups, Kopien,
+Datenträger in fremden Händen. Es schützt **nicht** gegen jemanden, der schon in deinem
+Benutzerkonto sitzt — der liest den Schlüssel einfach mit.
+
+Wer auch das abdecken will, setzt eine Passphrase:
+
+```bash
+SCOUTR_MEMORY_KEY="ein langes Passwort" scoutr web
+```
+
+Dann wird der Schlüssel bei jedem Start neu abgeleitet und liegt nirgends auf der
+Platte. Der Preis: ohne die Passphrase ist der Speicher unwiederbringlich weg.
+
 ## Zuhause: Heimnetz und Home Assistant
 
 Manche Fragen kann kein Suchtreffer beantworten. „Welche Geräte hängen hier im Netz",

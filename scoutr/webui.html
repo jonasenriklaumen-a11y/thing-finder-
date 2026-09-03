@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cortex AI</title>
 <style>
 /* =========================================================================
@@ -80,12 +80,43 @@ body.collapsed aside{margin-left:-260px}
   color:var(--text-3);font-size:15px;line-height:1}
 .iconbtn:hover{background:var(--surface-2);color:var(--text)}
 .topbar .where{font-size:13px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap}
+  white-space:nowrap;min-width:0}
 .topbar .spacer{flex:1}
+
+/* ---------- Modellauswahl in der Mitte ---------- */
+.modelpick{display:flex;align-items:center;gap:6px;background:var(--surface);
+  border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer;
+  font-size:13.5px;max-width:min(46vw,340px)}
+.modelpick:hover{border-color:var(--accent)}
+.modelpick #model-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modelpick .caret{color:var(--text-3);flex:0 0 auto;font-size:11px}
+.picker{position:absolute;top:52px;left:50%;transform:translateX(-50%);z-index:30;
+  width:min(420px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line-2);
+  border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.picker-head{padding:12px 16px 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-3)}
+.picker-list{max-height:min(52vh,420px);overflow-y:auto;padding:0 8px 8px}
+.pick{display:block;width:100%;text-align:left;background:transparent;border:0;
+  border-radius:10px;padding:10px 12px;cursor:pointer}
+.pick:hover{background:var(--surface-2)}
+.pick.active{background:var(--accent-soft)}
+.pick .top{display:flex;align-items:baseline;gap:8px}
+.pick .nm{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick .kind{font-size:11px;color:var(--accent-text);background:var(--accent-soft);
+  border-radius:999px;padding:1px 7px;flex:0 0 auto}
+.pick.active .kind{background:var(--surface)}
+.pick .note{font-size:12px;color:var(--text-3);margin-top:2px;line-height:1.35}
+.picker-foot{border-top:1px solid var(--line);padding:10px 16px;font-size:12px;
+  color:var(--text-3)}
+.linkish{background:none;border:0;padding:0;color:var(--accent-text);cursor:pointer;
+  text-decoration:underline;font-size:12px}
+.backdrop{position:fixed;inset:0;z-index:25}
 main{flex:1;overflow-y:auto;scroll-behavior:smooth;min-height:0}
 /* Startbildschirm: Begruessung und Eingabe stehen zusammen in der Mitte,
    nicht oben und unten auseinandergezogen. */
+/* Nur der Inhalt rueckt in die Mitte -- die Kopfzeile bleibt oben stehen. */
 body.start .pane{justify-content:center}
+body.start .topbar{position:absolute;top:0;left:0;right:0}
 body.start main{flex:0 0 auto;overflow:visible}
 /* Der leere Gespraechsbereich hat unten Platz fuer die schwebende Eingabe --
    auf dem Startbildschirm wuerde der nur eine Luecke aufreissen. */
@@ -193,7 +224,9 @@ body.dragging::after{content:"Datei hier ablegen";position:fixed;inset:14px;z-in
   pointer-events:none}
 
 /* =========================== Einstellungen ============================== */
-.overlay{position:fixed;inset:0;background:rgba(20,20,17,.45);display:none;z-index:50;
+/* Ueber der Seitenleiste (z-index 60) -- ein modales Fenster, das halb
+   verdeckt wird, ist keins. */
+.overlay{position:fixed;inset:0;background:rgba(20,20,17,.45);display:none;z-index:80;
   align-items:flex-start;justify-content:center;padding:5vh 20px;overflow-y:auto}
 .overlay.open{display:flex}
 .sheet{background:var(--bg);border:1px solid var(--line);border-radius:18px;width:100%;
@@ -213,6 +246,8 @@ input:focus,select:focus{border-color:var(--accent)}
 .check{display:flex;align-items:flex-start;gap:10px;margin:14px 0;font-size:14px}
 .check input{accent-color:var(--accent);width:16px;height:16px;margin-top:3px;flex:0 0 auto}
 .check .why{display:block;color:var(--text-3);font-size:12.5px;margin-top:2px}
+.lbl .why{display:block;color:var(--text-3);font-size:11.5px;margin-top:1px;
+  text-transform:none;letter-spacing:0;font-weight:400}
 .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
 .btn{border-radius:11px;padding:9px 18px;cursor:pointer;border:1px solid var(--line-2);
   background:var(--surface);color:var(--text);font-size:14px}
@@ -223,12 +258,95 @@ input:focus,select:focus{border-color:var(--accent)}
 .note.ok{color:var(--accent-text)} .note.bad{color:var(--err)}
 .inline{display:flex;gap:8px;align-items:flex-end}
 .inline label{flex:1;margin:0}
+.meter{flex:1;height:10px;border-radius:999px;background:var(--surface-2);
+  border:1px solid var(--line);overflow:hidden}
+.meter span{display:block;height:100%;width:0;background:var(--accent);
+  transition:width .3s ease}
+.meter.warn span{background:var(--warn)}
+.gauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;
+  margin-top:10px}
+.gauge{background:var(--surface);border:1px solid var(--line);border-radius:11px;
+  padding:10px 12px}
+.gauge .g-name{font-size:11px;color:var(--text-3);text-transform:uppercase;
+  letter-spacing:.06em}
+.gauge .g-val{font-size:17px;margin:3px 0 6px}
+.gauge .bar{height:6px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.gauge .bar span{display:block;height:100%;background:var(--accent)}
+.gauge .bar.hot span{background:var(--err)}
+.gauge .g-sub{font-size:11.5px;color:var(--text-3);margin-top:5px}
 
-@media (max-width:820px){
-  aside{position:fixed;z-index:60;height:100%;box-shadow:var(--shadow)}
+/* =========================================================================
+   Handy und Tablet. Auf einem 390 Pixel breiten Bildschirm ist alles knapp:
+   die Seitenleiste nimmt die halbe Breite, die Serifen-Begruessung passt
+   nicht in eine Zeile, und die Eingabe darf nicht unter der Tastatur oder
+   der Browserleiste verschwinden.
+   ========================================================================= */
+@media (max-width:900px){
+  /* Die Seitenleiste liegt ueber dem Chat statt daneben und ist zu. */
+  aside{position:fixed;top:0;bottom:0;z-index:60;width:min(84vw,300px);
+    box-shadow:var(--shadow)}
   body:not(.collapsed) aside{margin-left:0}
-  body{--sidebar-hidden:1}
-  .thread,.composer,.hello,.files,.hint{max-width:100%}
+  body.collapsed aside{margin-left:calc(-1 * min(84vw,300px))}
+  /* Wer die Leiste offen hat, tippt daneben und sie geht wieder zu. */
+  body:not(.collapsed) .pane::before{content:"";position:fixed;inset:0;z-index:55;
+    background:rgba(20,20,17,.45)}
+  .thread,.composer,.hello,.files,.hint,.chips{max-width:100%}
+  .thread{padding:4px 14px 190px}
+  .hello{padding:0 18px 20px}
+  .hello h1{font-size:25px;line-height:1.2}
+  .hello p{font-size:14px;margin-bottom:22px}
+  .hello .star{width:28px;height:28px;margin-bottom:12px}
+  footer{padding:0 12px 12px}
+  body.start footer{padding:0 14px 4px}
+  .composer{border-radius:18px;padding:10px 11px 8px}
+  /* 16px verhindert, dass iOS beim Antippen hineinzoomt. */
+  textarea{font-size:16px}
+  .msg.user .bubble{max-width:92%;font-size:15px}
+  .msg.bot .bubble{font-size:15.5px}
+  .step .tag{min-width:54px;font-size:11px}
+  .step .sub{padding-left:63px}
+  .chips{gap:7px}
+  .chip{font-size:12.5px;padding:7px 12px}
+  .hint{font-size:11px}
+  /* Nur zwei Vorschlaege -- drei stapeln sich sonst zu einem Block. */
+  .chip:nth-child(n+3){display:none}
+  .sheet{padding:18px 16px 20px;border-radius:14px}
+  .overlay{padding:2vh 10px}
+  .row{grid-template-columns:1fr}
+  .picker{width:calc(100vw - 20px)}
+  .modelpick{max-width:52vw}
+  .topbar{padding:10px 12px;gap:6px}
+  .topbar .where{font-size:12px}
+  /* Auf schmalen Schirmen zaehlt die Modellwahl mehr als der Ortsfilter. */
+  .topbar .spacer:first-of-type{flex:0 0 auto}
+}
+
+/* Sehr schmale Geraete: der Ortsfilter weicht ganz, damit der Modellname
+   nicht auf zwei Zeichen zusammenschrumpft. */
+@media (max-width:430px){
+  /* Nebeneinander wird es zu eng, also darunter -- weg soll die Angabe
+     nicht, sie sagt schliesslich, womit gerade gearbeitet wird. */
+  .topbar{flex-wrap:wrap;row-gap:2px}
+  .topbar .where{order:3;width:100%;font-size:11.5px;padding-left:2px}
+  .topbar .spacer{display:none}
+  .modelpick{margin-left:auto;margin-right:auto;max-width:72vw}
+  .hello h1{font-size:22px}
+  .thread{padding:4px 12px 180px}
+}
+
+/* Randlose Bildschirme: unten liegt sonst die Wischleiste auf der Eingabe. */
+@supports (padding:max(0px)){
+  @media (max-width:900px){
+    footer{padding-bottom:max(12px, env(safe-area-inset-bottom))}
+    aside{padding-top:env(safe-area-inset-top)}
+  }
+}
+
+/* Liegendes Handy: kaum Hoehe, also weniger Luft um die Begruessung. */
+@media (max-height:520px) and (max-width:900px){
+  .hello{padding-bottom:10px}
+  .hello h1{font-size:20px;margin-bottom:4px}
+  .hello p,.chips{display:none}
 }
 </style>
 </head>
@@ -259,6 +377,17 @@ input:focus,select:focus{border-color:var(--accent)}
     <button class="iconbtn" id="btn-side" title="Seitenleiste">☰</button>
     <span class="where" id="status"></span>
     <span class="spacer"></span>
+    <button class="modelpick" id="btn-model" title="Modell wechseln">
+      <span id="model-name">Modell</span><span class="caret">▾</span>
+    </button>
+    <span class="spacer"></span>
+  </div>
+
+  <div class="picker" id="picker-models" hidden>
+    <div class="picker-head">Modell wählen</div>
+    <div class="picker-list" id="model-list"></div>
+    <div class="picker-foot">Weitere Anbieter und Schlüssel unter
+      <button class="linkish" id="picker-settings">Einstellungen</button>.</div>
   </div>
 
   <main id="main">
@@ -300,7 +429,7 @@ input:focus,select:focus{border-color:var(--accent)}
       deiner <code>.env</code> und gilt sofort.</p>
     <form id="settings">
       <fieldset><legend>Modell</legend>
-        <label><span class="lbl">Hauptmodell (LiteLLM-ID)</span>
+        <label><span class="lbl">Hauptmodell <span class="why">Anbieter und Name, z.B. openai/gpt-4o</span></span>
           <input type="text" name="SCOUTR_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
         <div class="row">
           <label><span class="lbl">Vision-Modell (leer = Hauptmodell)</span>
@@ -308,10 +437,33 @@ input:focus,select:focus{border-color:var(--accent)}
           <label><span class="lbl">Subagenten-Modell (leer = Hauptmodell)</span>
             <input type="text" name="SCOUTR_SUBAGENT_MODEL"></label>
         </div>
-        <label><span class="lbl">API-Basis-URL (Ollama, Proxy)</span>
+        <label><span class="lbl">Eigene Adresse <span class="why">Nur nötig, wenn das Modell nicht beim Anbieter selbst liegt</span></span>
           <input type="text" name="SCOUTR_API_BASE" placeholder="http://localhost:11434"></label>
-        <label><span class="lbl">API-Key <span id="keyname"></span></span>
-          <input type="password" name="__API_KEY__" placeholder="leer lassen = unverändert"></label>
+        <div class="row">
+          <label><span class="lbl">Anbieter</span>
+            <select id="provider">
+              <option value="">— aus der Modell-ID übernehmen —</option>
+            </select></label>
+          <label><span class="lbl">Schlüssel <span id="keyname"></span></span>
+            <input type="password" name="__API_KEY__"
+                   placeholder="leer lassen = unverändert"></label>
+        </div>
+        <div class="note" id="provider-note"></div>
+      </fieldset>
+
+      <fieldset><legend>Speicher</legend>
+        <div class="check">
+          <input type="checkbox" id="memon" name="SCOUTR_MEMORY">
+          <label for="memon" style="margin:0">Cortex AI darf sich Dinge merken
+            <span class="why">Legt an, was länger gilt — Wohnort, Vorlieben, laufende
+              Vorhaben — und findet es im nächsten Gespräch wieder. Nur Text, nie Bilder.
+              Verschlüsselt abgelegt, höchstens 400 MB.</span></label>
+        </div>
+        <div class="inline">
+          <div class="meter" id="storage-meter"><span></span></div>
+          <button type="button" class="btn" id="btn-usage">Auslastung</button>
+        </div>
+        <div class="note" id="usage-note"></div>
       </fieldset>
 
       <fieldset><legend>Zuhause &amp; Netz</legend>
@@ -352,7 +504,7 @@ input:focus,select:focus{border-color:var(--accent)}
               <option value="brave">Brave Search (Key)</option>
               <option value="tavily">Tavily (Key)</option>
             </select></label>
-          <label><span class="lbl">Engines (leer = alle)</span>
+          <label><span class="lbl">Suchdienste <span class="why">Leer lassen nutzt alle</span></span>
             <input type="text" name="SCOUTR_SEARCH_ENGINES" placeholder="duckduckgo,mojeek"></label>
         </div>
         <label><span class="lbl">SearXNG-Adresse</span>
@@ -374,29 +526,33 @@ input:focus,select:focus{border-color:var(--accent)}
       <fieldset><legend>Subagenten &amp; Limits</legend>
         <div class="check">
           <input type="checkbox" id="auto" name="SCOUTR_SUBAGENTS_AUTO">
-          <label for="auto" style="margin:0">Jede Anfrage automatisch in Teilfragen zerlegen</label>
+          <label for="auto" style="margin:0">Fragen automatisch aufteilen
+            <span class="why">Große Fragen werden in Teilfragen zerlegt und parallel
+              recherchiert. Das dauert kürzer, kostet aber mehr Aufrufe.</span></label>
         </div>
         <div class="row">
-          <label><span class="lbl">Subagenten je Anfrage (0 = aus)</span>
+          <label><span class="lbl">Helfer je Anfrage <span class="why">Wie viele Teilfragen gleichzeitig bearbeitet werden. 0 schaltet sie ab</span></span>
             <input type="text" name="SCOUTR_MAX_SUBAGENTS"></label>
-          <label><span class="lbl">Budget je Subagent</span>
+          <label><span class="lbl">Suchen je Helfer <span class="why">Wie oft ein Helfer suchen oder eine Seite lesen darf</span></span>
             <input type="text" name="SCOUTR_SUBAGENT_BUDGET"></label>
         </div>
         <div class="row">
-          <label><span class="lbl">Werkzeug-Budget je Anfrage</span>
+          <label><span class="lbl">Suchen je Anfrage <span class="why">Obergrenze für Suchen und Seitenaufrufe zusammen</span></span>
             <input type="text" name="SCOUTR_MAX_TOOL_CALLS"></label>
-          <label><span class="lbl">Kontextfenster (Token, lokal)</span>
+          <label><span class="lbl">Gedächtnis im Gespräch <span class="why">Wie viel vom Gespräch das Modell überblickt. Gilt nur für lokale Modelle</span></span>
             <input type="text" name="SCOUTR_CONTEXT_TOKENS"></label>
         </div>
         <div class="row">
-          <label><span class="lbl">Zeitlimit Planung (s)</span>
+          <label><span class="lbl">Zeit fürs Planen <span class="why">Sekunden, die das Zerlegen einer Frage dauern darf</span></span>
             <input type="text" name="SCOUTR_PLANNER_TIMEOUT"></label>
-          <label><span class="lbl">Gleichzeitige Subagenten (0 = automatisch)</span>
+          <label><span class="lbl">Gleichzeitig <span class="why">Wie viele Helfer parallel laufen. 0 überlässt es Cortex AI</span></span>
             <input type="text" name="SCOUTR_SUBAGENT_PARALLEL"></label>
         </div>
         <div class="check">
           <input type="checkbox" id="pw" name="SCOUTR_ENABLE_PLAYWRIGHT">
-          <label for="pw" style="margin:0">Browser-Fallback für JavaScript-Seiten</label>
+          <label for="pw" style="margin:0">Seiten mit echtem Browser laden
+            <span class="why">Für Seiten, die ihren Inhalt erst nachladen. Braucht
+              einmalig <code>scoutr install-browser</code>.</span></label>
         </div>
       </fieldset>
 
@@ -413,6 +569,7 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
+let currentModel = "";
 
 /* ---------- Zugangswort (nur im Netzbetrieb) ----------
    Der Server setzt es auch als Cookie. Wir merken es zusaetzlich selbst und
@@ -734,6 +891,8 @@ async function ask(text){
       case "ask": askCard(bubble, ev.question, ev.options || []); break;
       case "image": step(steps, "[Bild]", ev.path); break;
       case "image_done": step(steps, "[Bild]", "beschrieben"); break;
+      case "memory_read": step(steps, "[Speicher]", ev.query); break;
+      case "memory_save": step(steps, "[Merke]", ev.text); break;
       case "lan_scan": step(steps, "[Netz]", `${ev.subnet} …`); break;
       case "lan_done": step(steps, "[Netz]",
         `${ev.found} ${ev.found === 1 ? "Gerät" : "Geräte"} erreichbar`); break;
@@ -779,12 +938,25 @@ document.querySelectorAll(".chip").forEach(c =>
   }));
 
 /* ---------- Seitenleiste ---------- */
+const narrow = () => window.matchMedia("(max-width:900px)").matches;
+// Auf dem Handy liegt die Leiste ueber dem Chat -- offen waere sie im Weg.
+if (narrow()) document.body.classList.add("collapsed");
 $("#btn-side").addEventListener("click", () => document.body.classList.toggle("collapsed"));
+// Tippt jemand neben die offene Leiste, geht sie wieder zu.
+$(".pane").addEventListener("click", (e) => {
+  if (narrow() && !document.body.classList.contains("collapsed")
+      && e.target.closest(".pane") && !e.target.closest("aside")){
+    document.body.classList.add("collapsed");
+  }
+}, true);
 $("#btn-new").addEventListener("click", async () => {
   await api("/api/clear", { method:"POST" });
   location.reload();
 });
-$("#btn-notes").addEventListener("click", () => ask("/notes"));
+$("#btn-notes").addEventListener("click", () => {
+  if (narrow()) document.body.classList.add("collapsed");
+  ask("/notes");
+});
 $("#btn-home").addEventListener("click", () => {
   $("#btn-settings").click();
   setTimeout(() => document.querySelector('[name="SCOUTR_HA_URL"]')?.focus(), 120);
@@ -809,7 +981,9 @@ async function loadRecents(){
     // Mehrfaches "hallo" oder Wiederholungen direkt hintereinander sind
     // keine eigene Erinnerung wert -- nur der neueste Versuch zaehlt.
     let last = null;
-    const entries = (data.history || []).flatMap(entry => {
+    // Der Verlauf kommt aeltester zuerst -- in der Liste soll der juengste
+    // Chat oben stehen, so wie man es von Chat-Oberflaechen kennt.
+    const entries = (data.history || []).slice().reverse().flatMap(entry => {
       const label = entry.question.replace(/\s+/g, " ").trim();
       if (label === last) return [];
       last = label;
@@ -821,13 +995,78 @@ async function loadRecents(){
       item.textContent = label;
       item.title = label;
       item.addEventListener("click", () => {
-        input.value = entry.question; input.focus();
+        input.value = entry.question;
         input.dispatchEvent(new Event("input"));
+        if (narrow()) document.body.classList.add("collapsed");
+        input.focus();
       });
       box.appendChild(item);
     });
   } catch {}
 }
+
+/* ---------- Modellauswahl ---------- */
+const modelBox = $("#picker-models");
+let backdrop = null;
+
+function closePicker(){
+  modelBox.hidden = true;
+  backdrop?.remove();
+  backdrop = null;
+}
+
+async function openPicker(){
+  const list = $("#model-list");
+  list.innerHTML = '<div class="picker-foot">Sehe nach …</div>';
+  modelBox.hidden = false;
+  backdrop = document.createElement("div");
+  backdrop.className = "backdrop";
+  backdrop.addEventListener("click", closePicker);
+  document.body.appendChild(backdrop);
+
+  let models = [];
+  try {
+    models = (await (await api("/api/models")).json()).models || [];
+  } catch { /* Server weg -- die Liste bleibt leer, der Hinweis unten steht */ }
+
+  if (!models.length){
+    list.innerHTML = '<div class="picker-foot">Kein Modell gefunden. '
+      + 'Trag unter Einstellungen einen Anbieter samt Schlüssel ein, '
+      + 'oder installiere eins mit <code>scoutr install-model</code>.</div>';
+    return;
+  }
+  list.innerHTML = "";
+  models.forEach(model => {
+    const item = document.createElement("button");
+    item.className = "pick" + (model.id === currentModel ? " active" : "");
+    item.innerHTML = `<span class="top"><span class="nm"></span><span class="kind"></span></span>
+      <span class="note"></span>`;
+    item.querySelector(".nm").textContent = model.label;
+    item.querySelector(".kind").textContent = model.kind;
+    item.querySelector(".note").textContent = model.note || "";
+    item.title = model.id;
+    item.addEventListener("click", () => chooseModel(model));
+    list.appendChild(item);
+  });
+}
+
+async function chooseModel(model){
+  closePicker();
+  $("#model-name").textContent = model.label;
+  const res = await api("/api/config", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ SCOUTR_MODEL: model.id })
+  });
+  const data = await res.json();
+  if (data.ok){ currentModel = model.id; refreshHeader(); }
+  else alert(data.error || "Das Modell ließ sich nicht umstellen.");
+}
+
+$("#btn-model").addEventListener("click", () => modelBox.hidden ? openPicker() : closePicker());
+$("#picker-settings").addEventListener("click", () => {
+  closePicker(); $("#btn-settings").click();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePicker(); });
 
 /* ---------- Einstellungen ---------- */
 const overlay = $("#overlay"), form = $("#settings");
@@ -840,10 +1079,17 @@ function fill(values){
   }
 }
 $("#btn-settings").addEventListener("click", async () => {
+  // Auf dem Handy steht die offene Leiste sonst im Weg.
+  if (narrow()) document.body.classList.add("collapsed");
   let cfg;
   try { cfg = await (await api("/api/config")).json(); }
   catch { alert("Cortex AI antwortet gerade nicht -- laeuft der Server noch?"); return; }
   fill(cfg.values);
+  fillProviders();
+  $("#provider").value = "";
+  $("#provider-note").textContent = "";
+  $("#usage-note").textContent = "";
+  api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
   $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
   $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
   $("#savenote").textContent = ""; $("#savenote").className = "note";
@@ -852,6 +1098,91 @@ $("#btn-settings").addEventListener("click", async () => {
 });
 $("#cancel").addEventListener("click", () => overlay.classList.remove("open"));
 overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.classList.remove("open"); });
+
+/* ---------- Anbieter und Schluessel ---------- */
+// Wer welchen Schluessel braucht -- damit man den Anbieter waehlen kann,
+// ohne die Modell-ID auswendig zu koennen.
+const PROVIDERS = [
+  ["anthropic",   "Anthropic (Claude)", "ANTHROPIC_API_KEY",  "anthropic/claude-sonnet-4-6"],
+  ["openai",      "OpenAI (GPT)",       "OPENAI_API_KEY",     "openai/gpt-4o"],
+  ["gemini",      "Google Gemini",      "GEMINI_API_KEY",     "gemini/gemini-2.0-flash"],
+  ["nvidia_nim",  "NVIDIA NIM",         "NVIDIA_NIM_API_KEY", "nvidia_nim/meta/llama-3.3-70b-instruct"],
+  ["groq",        "Groq",               "GROQ_API_KEY",       "groq/llama-3.3-70b-versatile"],
+  ["deepseek",    "DeepSeek",           "DEEPSEEK_API_KEY",   "deepseek/deepseek-chat"],
+  ["mistral",     "Mistral",            "MISTRAL_API_KEY",    "mistral/mistral-large-latest"],
+  ["openrouter",  "OpenRouter",         "OPENROUTER_API_KEY", "openrouter/meta-llama/llama-3.3-70b-instruct"],
+  ["ollama_chat", "Ollama (lokal)",     "",                   "ollama_chat/gemma4:12b"],
+];
+
+function fillProviders(){
+  const select = $("#provider");
+  if (select.options.length > 1) return;   // nur einmal aufbauen
+  PROVIDERS.forEach(([id, label]) => {
+    const option = document.createElement("option");
+    option.value = id; option.textContent = label;
+    select.appendChild(option);
+  });
+  select.addEventListener("change", () => {
+    const found = PROVIDERS.find(entry => entry[0] === select.value);
+    if (!found) return;
+    const [, label, keyName, example] = found;
+    const model = form.elements["SCOUTR_MODEL"];
+    if (!model.value.startsWith(select.value + "/")) model.value = example;
+    $("#keyname").textContent = keyName ? `(${keyName})` : "(nicht nötig)";
+    $("#provider-note").textContent = keyName
+      ? `${label} braucht ${keyName}. Trag ihn rechts ein — er landet in deiner .env.`
+      : `${label} läuft auf deinem Rechner. Kein Schlüssel nötig.`;
+  });
+}
+
+/* ---------- Auslastung ---------- */
+function gauge(name, value, sub, percent){
+  const hot = percent >= 85 ? " hot" : "";
+  const width = Math.max(0, Math.min(100, percent || 0));
+  return `<div class="gauge"><div class="g-name">${name}</div>
+    <div class="g-val">${value}</div>
+    <div class="bar${hot}"><span style="width:${width}%"></span></div>
+    <div class="g-sub">${sub}</div></div>`;
+}
+
+$("#btn-usage").addEventListener("click", async () => {
+  const note = $("#usage-note");
+  note.className = "note"; note.textContent = "Sehe nach …";
+  let data;
+  try { data = await (await api("/api/system")).json(); }
+  catch (err){ note.className = "note bad"; note.textContent = String(err); return; }
+
+  const parts = [];
+  if (data.cpu?.percent !== undefined)
+    parts.push(gauge("Prozessor", data.cpu.percent + " %",
+      `${data.cpu.cores} Kerne · Last ${data.cpu.load}`, data.cpu.percent));
+  if (data.memory?.percent !== undefined)
+    parts.push(gauge("Arbeitsspeicher", data.memory.used_gb + " GB",
+      `von ${data.memory.total_gb} GB`, data.memory.percent));
+  if (data.disk?.percent !== undefined)
+    parts.push(gauge("Festplatte", data.disk.free_gb + " GB frei",
+      `von ${data.disk.total_gb} GB`, data.disk.percent));
+  if (data.gpu?.name)
+    parts.push(gauge("Grafikkarte", data.gpu.percent + " %",
+      `${data.gpu.name} · ${data.gpu.used_gb} von ${data.gpu.total_gb} GB`, data.gpu.percent));
+  if (data.storage)
+    parts.push(gauge("Speicher", data.storage.used_mb + " MB",
+      `von ${data.storage.limit_mb} MB · ${data.storage.entries} Notizen`,
+      data.storage.percent));
+
+  note.className = "note";
+  note.innerHTML = `<div class="gauges">${parts.join("")}</div>`
+    + `<div style="margin-top:8px">${data.system} · Python ${data.python}</div>`;
+  showStorage(data.storage);
+});
+
+function showStorage(storage){
+  const meter = $("#storage-meter");
+  if (!storage){ meter.firstElementChild.style.width = "0"; return; }
+  meter.firstElementChild.style.width = Math.min(100, storage.percent) + "%";
+  meter.className = "meter" + (storage.percent >= 85 ? " warn" : "");
+  meter.title = `${storage.used_mb} von ${storage.limit_mb} MB belegt`;
+}
 
 async function haCall(payload){
   const note = $("#ha-note");
@@ -900,7 +1231,7 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const values = {};
   for (const el of form.elements){
-    if (!el.name) continue;
+    if (!el.name) continue;   // z.B. die Anbieterauswahl, die nur die Felder fuellt
     values[el.name] = el.type === "checkbox" ? String(el.checked) : el.value;
   }
   const note = $("#savenote");
@@ -931,8 +1262,13 @@ async function refreshHeader(){
     const cfg = await (await api("/api/config")).json();
     $("#version").textContent = "v" + cfg.version;
     document.title = `Cortex AI ${cfg.version}`;
-    const bits = [cfg.values.SCOUTR_MODEL, cfg.values.SCOUTR_LOCATION || "kein Ortsfilter"];
-    if (cfg.ha_connected) bits.push("Home Assistant");
+    currentModel = cfg.values.SCOUTR_MODEL || "";
+    $("#model-name").textContent = currentModel.split("/").pop() || "Modell wählen";
+    // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
+    // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.
+    const bits = [cfg.values.SCOUTR_LOCATION || "kein Ortsfilter"];
+    if (cfg.ha_connected) bits.push("Zuhause verbunden");
+    if (cfg.values.SCOUTR_MEMORY === "true") bits.push("Speicher an");
     $("#status").textContent = bits.join(" · ");
     $("#status").title = cfg.problems?.length ? cfg.problems.join("; ") : "";
     $("#home-dot").className = "dot" + (cfg.ha_connected ? " on" : "");
