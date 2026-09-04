@@ -33,6 +33,7 @@ from cortex.tools import (
     MEMORY_READ_SCHEMA,
     MEMORY_SCHEMA,
     MEMORY_WRITE_SCHEMA,
+    SETTING_SCHEMA,
     STORAGE_ADD_SCHEMA,
     STORAGE_BROWSE_SCHEMA,
     STORAGE_EDIT_SCHEMA,
@@ -238,6 +239,18 @@ HA_CONTROL_PROMPT = """\
 Schalte nur, worum der Nutzer wirklich gebeten hat, und nur eine Sache auf einmal. Bei \
 Schloessern, Alarmanlagen, Toren und Heizung wird er ohnehin noch einmal gefragt. Sag \
 hinterher in einem Satz, was du getan hast."""
+
+#: Immer dabei, wo es Einstellungen zu aendern gibt.
+SETTING_PROMPT = """\
+
+Bittet dich der Nutzer, etwas an dir umzustellen -- "mach den Hintergrund weiss", \
+"such lieber auf Englisch", "nimm weniger Teilfragen" -- dann tu das mit \
+`change_setting(setting, value)`, statt ihn in die Einstellungen zu schicken.
+- Aendere nur, worum ausdruecklich gebeten wurde. Eine Sache je Aufruf.
+- Sag hinterher in EINEM Satz, was jetzt gilt. Keine Aufzaehlung, kein Formular.
+- Zugangsdaten und alles, was mir mehr Zugriff gaebe -- Schalten im Haus, Mail und \
+Kalender, Schreibrechte im Lager, Netzzugriff, Gedaechtnis -- aenderst du NICHT. \
+Danach fragst du auch nicht: du sagst, wo es steht, und machst weiter."""
 
 #: Wird angehaengt, wenn das Lager freigegeben ist. %(rechte)s wird ersetzt.
 STORAGE_PROMPT = """\
@@ -515,6 +528,10 @@ class Agent:
                 extra.append(HA_CALL_SCHEMA)
         if self.use_subagents:
             extra.append(SUBAGENT_SCHEMA)
+        # Subagenten bekommen diese Liste nie -- sie arbeiten mit TOOL_SCHEMAS
+        # allein. Einstellungen aendert also nur der Hauptagent, und das ist
+        # genau richtig so.
+        extra.append(SETTING_SCHEMA)
         # Nur anbieten, wenn wirklich jemand da ist, der antworten kann --
         # sonst wartet der Agent auf eine Rueckmeldung, die nie kommt.
         if self.toolbox.ask_handler is not None:
@@ -700,7 +717,7 @@ class Agent:
 
     def _home_prompt(self) -> str:
         """Die Absaetze zu Heimnetz und Zuhause -- nur, was freigegeben ist."""
-        parts = []
+        parts = [SETTING_PROMPT]
         if self.settings.memory_enabled:
             parts.append(MEMORY_PROMPT)
         if self.settings.lan_enabled:

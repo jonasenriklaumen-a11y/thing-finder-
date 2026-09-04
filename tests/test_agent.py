@@ -134,6 +134,7 @@ def test_tools_are_offered_to_the_llm(
         "lan_scan",
         "lan_check",
         "research_subtasks",
+        "change_setting",
     ]
 
 
@@ -148,7 +149,13 @@ def test_subagents_can_be_switched_off(
     monkeypatch.setattr("litellm.completion", llm)
     Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     names = [tool["function"]["name"] for tool in llm.calls[0]["tools"]]
-    assert names == ["web_search", "fetch_page", "search_news", "calculate"]
+    assert names == [
+        "web_search",
+        "fetch_page",
+        "search_news",
+        "calculate",
+        "change_setting",
+    ]
 
 
 def test_home_tools_follow_the_settings(settings: Settings) -> None:

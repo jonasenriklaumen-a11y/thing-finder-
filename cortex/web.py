@@ -185,6 +185,9 @@ class ChatSession:
         #: Antworten auf Rueckfragen. Nur eine Anfrage laeuft gleichzeitig,
         #: deshalb genuegt eine Schlange fuer die ganze Sitzung.
         self._answers: queue.Queue[str] = queue.Queue()
+        #: Eine Einstellung wurde im Gespraech geaendert -- nach dem Durchlauf
+        #: wird der Agent neu gebaut.
+        self._reload_after = False
 
     def settings(self) -> Settings:
         if self._settings is None:
@@ -242,6 +245,14 @@ class ChatSession:
             self._settings = None
             reset_settings_cache()
 
+    def _settings_dirty(self) -> None:
+        """Merkt vor, dass der Agent neu gebaut werden muss.
+
+        Sofort neu bauen geht nicht: der laufende Durchlauf benutzt ihn
+        gerade. Also erst, wenn er fertig ist.
+        """
+        self._reload_after = True
+
     def stop(self) -> bool:
         """Bricht den laufenden Durchlauf ab. `False` = es lief gerade keiner.
 
@@ -275,13 +286,25 @@ class ChatSession:
         # Im Netzbetrieb sitzen mehrere Geraete an derselben Sitzung. Wer
         # wartet, soll das sehen und nicht vor einem stummen Fenster sitzen.
         if self.busy():
-            emit("waiting", {"reason": "Ein anderes Geraet fragt gerade -- ich bin gleich da."})
+            emit(
+                "waiting",
+                {
+                    "reason": (
+                        "Es laeuft noch eine frueher gestellte Anfrage -- ich bin "
+                        "gleich da."
+                    )
+                },
+            )
         with self._lock:
             self._drain_answers()
             agent = self.agent()
             try:
                 agent.on_event = lambda name, payload: emit(name, payload)
                 agent.toolbox.on_event = agent.on_event
+                # Aendert Cortex im Gespraech eine Einstellung, muss der Agent
+                # danach neu gebaut werden -- sonst arbeitet die naechste Frage
+                # noch mit den alten Werten weiter.
+                agent.toolbox.on_settings_changed = self._settings_dirty
                 agent.set_ask_handler(self._ask_browser)
                 if message.startswith("/image"):
                     message = self._image_question(agent, message)
@@ -292,6 +315,10 @@ class ChatSession:
             finally:
                 agent.on_event = None
                 agent.toolbox.on_event = None
+                agent.toolbox.on_settings_changed = None
+                if self._reload_after:
+                    self._reload_after = False
+                    self.reload()
                 # Der Handler bleibt bestehen -- das Werkzeug soll auch in der
                 # naechsten Runde angeboten werden.
 
@@ -989,6 +1016,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._google(self._read_json()))
         elif route == "/api/storage":
             self._json(self._storage_probe(self._read_json()))
+        elif route == "/api/chat-edit":
+            self._json(self._chat_edit(self._read_json()))
         elif route == "/api/stop":
             self._json({"ok": SESSION.stop()})
         elif route == "/api/answer":
@@ -1075,6 +1104,25 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def _chat_edit(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Benennt einen Chat um oder loescht ihn."""
+        session_id = str(payload.get("session_id", "")).strip()
+        action = str(payload.get("action", "")).strip()
+        if not session_id:
+            return {"ok": False, "error": "keine Chat-Kennung"}
+        settings = SESSION.settings()
+        cache = Cache(settings.db_path, settings.cache_ttl_hours)
+        if action == "rename":
+            return {"ok": True, "title": cache.rename_chat(session_id, str(payload.get("title")))}
+        if action == "delete":
+            removed = cache.delete_chat(session_id)
+            # Der geloeschte Chat war vielleicht der offene -- dann faengt der
+            # naechste Satz einen neuen an, statt in ein Nichts zu schreiben.
+            if session_id == SESSION.chat_id():
+                SESSION.reset()
+            return {"ok": True, "removed": removed}
+        return {"ok": False, "error": f"unbekannte Aktion '{action}'"}
 
     def _storage_probe(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Sucht die Lagerverwaltung im Netz oder testet eine eingetippte Adresse."""
@@ -1261,15 +1309,18 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
     def _sse(self, text: str) -> bool:
         """Schreibt ein Stueck in den Ereignisstrom. `False` = niemand mehr da.
 
-        Bricht die Verbindung ab, laeuft die Recherche im Hintergrund aus --
-        aber eine offene Rueckfrage wuerde die Sitzung sonst bis zum Zeitlimit
-        besetzt halten, obwohl niemand mehr antworten kann.
+        Bricht die Verbindung ab -- Tab zu, Seite neu geladen, Handy im
+        Standby -- dann wird der Lauf beendet. Frueher lief er im Hintergrund
+        zu Ende und hielt die Sitzung dabei besetzt; die naechste Frage
+        bekam dann minutenlang "Ein anderes Geraet fragt gerade" zu sehen,
+        obwohl gar kein anderes Geraet da war. Es war die eigene, laengst
+        verlassene Anfrage.
         """
         try:
             self.wfile.write(text.encode("utf-8"))
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
-            SESSION.answer("")
+            SESSION.stop()
             return False
         return True
 

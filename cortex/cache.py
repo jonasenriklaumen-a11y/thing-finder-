@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS history (
 );
 CREATE INDEX IF NOT EXISTS history_session_idx ON history(session_id);
 
+-- Ein Chat heisst normalerweise nach seiner ersten Frage. Wer ihn umbenennt,
+-- bekommt hier einen Eintrag; die erste Frage bleibt unangetastet.
+CREATE TABLE IF NOT EXISTS chat_titles (
+    session_id TEXT PRIMARY KEY,
+    title      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at REAL NOT NULL,
@@ -223,18 +230,58 @@ class Cache:
             rows = cur.execute(query, (limit,)).fetchall()
             chats = []
             for row in rows:
-                title = cur.execute(
+                first = cur.execute(
                     "SELECT question FROM history WHERE id = ?", (row["first_id"],)
                 ).fetchone()
+                own = cur.execute(
+                    "SELECT title FROM chat_titles WHERE session_id = ?",
+                    (row["session_id"],),
+                ).fetchone()
+                title = str(own["title"] if own else "").strip()
                 chats.append(
                     {
                         "session_id": row["session_id"],
-                        "title": str(title["question"] if title else "").strip(),
+                        "title": title or str(first["question"] if first else "").strip(),
+                        "renamed": bool(title),
                         "turns": int(row["turns"]),
-                        "touched": str(row["touched"] or ""),
+                        "touched": float(row["touched"] or 0.0),
                     }
                 )
         return chats
+
+    def rename_chat(self, session_id: str, title: str) -> str:
+        """Gibt einem Chat einen eigenen Namen. Leer = zurueck zur ersten Frage."""
+        session_id = (session_id or "").strip()
+        title = " ".join((title or "").split())[:120]
+        if not session_id:
+            return ""
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            if title:
+                cur.execute(
+                    "INSERT INTO chat_titles (session_id, title) VALUES (?, ?) "
+                    "ON CONFLICT(session_id) DO UPDATE SET title = excluded.title",
+                    (session_id, title),
+                )
+            else:
+                cur.execute("DELETE FROM chat_titles WHERE session_id = ?", (session_id,))
+            conn.commit()
+        return title
+
+    def delete_chat(self, session_id: str) -> int:
+        """Loescht einen Chat samt seinem eigenen Namen.
+
+        Returns:
+            Wie viele Austausche geloescht wurden.
+        """
+        session_id = (session_id or "").strip()
+        if not session_id:
+            return 0
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            cur.execute("DELETE FROM history WHERE session_id = ?", (session_id,))
+            removed = cur.rowcount
+            cur.execute("DELETE FROM chat_titles WHERE session_id = ?", (session_id,))
+            conn.commit()
+        return max(0, removed)
 
     def chat_history(self, session_id: str, limit: int = 100) -> list[HistoryEntry]:
         """Alle Fragen und Antworten eines Chats, aelteste zuerst.

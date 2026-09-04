@@ -95,6 +95,10 @@ def client(session: web.ChatSession):
         conn.close()
         return response.status, data
 
+    # Manche Tests brauchen eine eigene Verbindung -- etwa um sie mitten im
+    # Strom zu kappen. Der Port haengt deshalb am Helfer.
+    request.port = server.server_address[1]
+
     try:
         yield request
     finally:
@@ -1854,3 +1858,200 @@ def test_searching_the_network_says_so_when_nothing_answers(
     data = json.loads(body)
     assert data["ok"] is False
     assert "Nichts gefunden" in data["error"]
+
+
+def test_a_closed_tab_ends_the_run(
+    client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonst haelt die verlassene Anfrage die Sitzung minutenlang besetzt.
+
+    Genau das war der Fehler: die naechste Frage bekam "Ein anderes Geraet
+    fragt gerade" zu sehen, obwohl gar kein anderes Geraet da war -- es war
+    die eigene, laengst geschlossene Anfrage.
+    """
+    monkeypatch.setattr(web, "HEARTBEAT_SECONDS", 0.05)
+    started = threading.Event()
+    cancelled = threading.Event()
+
+    class Slow:
+        on_event = None
+        toolbox = None
+
+        def set_ask_handler(self, handler):
+            pass
+
+        def cancel(self):
+            cancelled.set()
+
+        def ask(self, message, stream=True):
+            started.set()
+            for _ in range(200):
+                if cancelled.is_set():
+                    break
+                time.sleep(0.02)
+            self.on_event("done", {"tool_calls": 0, "hit_limit": False})
+            return SimpleNamespace(answer="")
+
+    slow = Slow()
+    slow.toolbox = slow
+    monkeypatch.setattr(session, "agent", lambda: slow)
+    monkeypatch.setattr(session, "_agent", slow)
+
+    # Verbindung aufbauen, Kopfzeilen abholen, dann einfach weggehen.
+    conn = HTTPConnection("127.0.0.1", client.port, timeout=10)
+    conn.request(
+        "POST",
+        "/api/chat",
+        body=json.dumps({"message": "dauert"}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    conn.getresponse()
+    assert started.wait(timeout=5)
+    conn.close()
+
+    assert cancelled.wait(timeout=10), "der Lauf muss enden, wenn niemand mehr zuhoert"
+    # Der Arbeitsthread braucht noch einen Wimpernschlag, um die Sperre
+    # freizugeben -- darauf warten, statt es im selben Atemzug zu pruefen.
+    for _ in range(100):
+        if not session.busy():
+            break
+        time.sleep(0.05)
+    assert not session.busy(), "und die Sitzung danach wieder frei sein"
+
+
+def test_the_waiting_notice_does_not_invent_another_device(
+    client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wer allein ist, soll nicht lesen, jemand anderes sei schuld."""
+    monkeypatch.setattr(web, "HEARTBEAT_SECONDS", 0.05)
+    running = threading.Event()
+    release = threading.Event()
+
+    class Slow:
+        on_event = None
+        toolbox = None
+
+        def set_ask_handler(self, handler):
+            pass
+
+        def cancel(self):
+            release.set()
+
+        def ask(self, message, stream=True):
+            running.set()
+            release.wait(timeout=10)
+            self.on_event("done", {"tool_calls": 0, "hit_limit": False})
+            return SimpleNamespace(answer="")
+
+    slow = Slow()
+    slow.toolbox = slow
+    monkeypatch.setattr(session, "agent", lambda: slow)
+    monkeypatch.setattr(session, "_agent", slow)
+
+    first = threading.Thread(
+        target=lambda: client("POST", "/api/chat", {"message": "erste"}), daemon=True
+    )
+    first.start()
+    assert running.wait(timeout=5)
+
+    result: list[bytes] = []
+    second = threading.Thread(
+        target=lambda: result.append(client("POST", "/api/chat", {"message": "zweite"})[1]),
+        daemon=True,
+    )
+    second.start()
+    time.sleep(0.4)
+    release.set()
+    second.join(timeout=10)
+    first.join(timeout=10)
+
+    waiting = [event for event in sse_events(result[0]) if event["type"] == "waiting"]
+    assert waiting, "wer wartet, soll das sehen"
+    assert "anderes Geraet" not in waiting[0]["reason"]
+    assert "frueher gestellte Anfrage" in waiting[0]["reason"]
+
+
+# ---------------------------------------------------------------------------
+# Letzte Chats: umbenennen, loeschen, sofort sichtbar
+# ---------------------------------------------------------------------------
+def test_a_chat_can_be_renamed(client, session: web.ChatSession) -> None:
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id="s1", question="Wo liegt das Kabel?", answer="…", meta={})
+
+    status, body = client(
+        "POST", "/api/chat-edit", {"action": "rename", "session_id": "s1", "title": "Werkzeug"}
+    )
+    assert status == 200 and json.loads(body)["title"] == "Werkzeug"
+
+    _, listing = client("GET", "/api/chats")
+    assert json.loads(listing)["chats"][0]["title"] == "Werkzeug"
+
+
+def test_a_chat_can_be_deleted(client, session: web.ChatSession) -> None:
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id="s1", question="Weg damit", answer="…", meta={})
+    cache.add_history(session_id="s2", question="Bleibt", answer="…", meta={})
+
+    status, body = client("POST", "/api/chat-edit", {"action": "delete", "session_id": "s1"})
+    assert status == 200 and json.loads(body)["removed"] == 1
+
+    _, listing = client("GET", "/api/chats")
+    assert [chat["title"] for chat in json.loads(listing)["chats"]] == ["Bleibt"]
+
+
+def test_deleting_the_open_chat_starts_a_fresh_one(client, session: web.ChatSession) -> None:
+    """Sonst schriebe die naechste Frage in einen Verlauf, den es nicht mehr gibt."""
+    open_id = session.chat_id()
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id=open_id, question="Offen", answer="…", meta={})
+
+    client("POST", "/api/chat-edit", {"action": "delete", "session_id": open_id})
+    assert session.chat_id() != open_id
+
+
+def test_an_edit_without_an_id_is_refused(client) -> None:
+    _, body = client("POST", "/api/chat-edit", {"action": "delete"})
+    assert json.loads(body)["ok"] is False
+
+
+def test_an_unknown_edit_action_is_refused(client, session: web.ChatSession) -> None:
+    _, body = client("POST", "/api/chat-edit", {"action": "verbrennen", "session_id": "s1"})
+    data = json.loads(body)
+    assert data["ok"] is False and "verbrennen" in data["error"]
+
+
+def test_the_chat_list_carries_what_the_grouping_needs(
+    client, session: web.ChatSession
+) -> None:
+    """Ohne Zeitstempel gaebe es kein "Heute" und kein "Gestern"."""
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id="s1", question="Frage", answer="…", meta={})
+    _, body = client("GET", "/api/chats")
+    chat = json.loads(body)["chats"][0]
+    assert isinstance(chat["touched"], (int, float)) and chat["touched"] > 0
+
+
+def test_the_sidebar_shows_a_chat_the_moment_it_starts() -> None:
+    """Bei einer laengeren Recherche waere die Leiste sonst minutenlang leer."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "function noteChat(" in html
+    assert "noteChat(text.trim()" in html
+
+
+def test_the_sidebar_groups_by_day() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for label in ('"Heute"', '"Gestern"', '"Letzte 7 Tage"', '"Älter"'):
+        assert label in html, label
+
+
+def test_the_sidebar_offers_renaming_and_deleting() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "Umbenennen" in html and "Löschen" in html
+    assert "function deleteChat(" in html and "function renameChat(" in html
+
+
+def test_deleting_a_chat_asks_first() -> None:
+    """Das laesst sich nicht rueckgaengig machen -- also nicht auf einen Klick."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "confirm(" in html
+    assert "nicht rückgängig" in html

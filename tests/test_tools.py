@@ -1011,3 +1011,84 @@ def test_the_storage_tools_are_dispatched(settings: Settings) -> None:
         "add_furniture",
         "change_quantity",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Einstellungen aus dem Gespraech
+# ---------------------------------------------------------------------------
+def test_the_appearance_is_changed_in_the_browser_not_in_a_file(
+    settings: Settings, tmp_path: Path
+) -> None:
+    """Aussehen steht in keiner .env -- die Oberflaeche hoert auf das Ereignis."""
+    events: list[tuple[str, dict[str, Any]]] = []
+    box = Toolbox(
+        settings,
+        cache=None,
+        on_event=lambda name, payload: events.append((name, payload)),
+        fetcher=_mock_fetcher(_html_handler("<html></html>")),
+    )
+    result = box.change_setting("hintergrund", "weiß")
+    assert result["value"] == "hell"
+    assert ("appearance", {"theme": "light"}) in events
+    assert "path" not in result, "es wurde nichts geschrieben"
+
+
+def test_a_setting_is_written_and_the_agent_rebuilt(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / ".env"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr("cortex.config.find_env_file", lambda: target)
+    rebuilt: list[bool] = []
+
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.on_settings_changed = lambda: rebuilt.append(True)
+    result = box.change_setting("ort", "Hamburg")
+
+    assert result["changed"] == "Standard-Ort"
+    assert "CORTEX_LOCATION=Hamburg" in target.read_text(encoding="utf-8")
+    assert rebuilt == [True], "die naechste Frage laeuft mit den neuen Werten"
+
+
+def test_changing_rights_is_refused_with_a_reason(settings: Settings) -> None:
+    """Ein Satz im Chat darf die Rechteauswahl nicht aushebeln."""
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    for name in ("storage_access", "ha_control", "google", "lan_enabled", "memory"):
+        error = box.change_setting(name, "an")["error"]
+        assert "Einstellungen" in error, name
+        assert "aendere ich nicht" in error, name
+
+
+def test_a_key_is_never_entered_from_the_chat(settings: Settings) -> None:
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    assert "Zugangsdaten" in box.change_setting("anthropic_api_key", "sk-ant-123")["error"]
+
+
+def test_an_unknown_setting_lists_what_is_possible(settings: Settings) -> None:
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    error = box.change_setting("lieblingsfarbe", "gruen")["error"]
+    assert "kenne ich nicht" in error
+    assert "aussehen" in error, "was geht, steht dabei"
+
+
+def test_a_bad_value_is_reported_not_stored(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / ".env"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr("cortex.config.find_env_file", lambda: target)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    assert "zwischen 1 und 60" in box.change_setting("werkzeug_budget", "9999")["error"]
+    assert target.read_text(encoding="utf-8") == "", "nichts geschrieben"
+
+
+def test_the_setting_tool_is_dispatched(settings: Settings) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    box = Toolbox(
+        settings,
+        cache=None,
+        on_event=lambda name, payload: events.append((name, payload)),
+        fetcher=_mock_fetcher(_html_handler("<html></html>")),
+    )
+    box.call("change_setting", {"setting": "aussehen", "value": "dunkel"})
+    assert ("appearance", {"theme": "dark"}) in events

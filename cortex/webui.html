@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cortex AI</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28'%3E%E2%9C%B3%3C/text%3E%3C/svg%3E">
 <style>
 /* =========================================================================
    Farben. Warmes Papier statt kaltem Grau, gruener Akzent.
@@ -60,12 +61,39 @@ body.collapsed aside{margin-left:-260px}
    scrollen. Genau das war der gemeldete Fehler. */
 .recents{flex:1;min-height:0;overflow-y:auto;padding:0 8px 8px;
   display:flex;flex-direction:column;gap:1px}
-.recent{display:block;flex:0 0 auto;width:100%;background:transparent;border:0;
-  border-radius:9px;padding:8px 10px;cursor:pointer;text-align:left;font-size:13.5px;
-  line-height:1.4;color:var(--text-2);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis}
+/* Eine Zeile besteht aus dem Chat und einem Menue, das erst beim Darauffahren
+   erscheint -- sonst stuende neben jedem Chat ein Knopf im Weg. */
+.recent{display:flex;align-items:center;flex:0 0 auto;width:100%;background:transparent;
+  border:0;border-radius:9px;cursor:pointer;text-align:left;font-size:13.5px;
+  line-height:1.4;color:var(--text-2);position:relative}
+.recent .name{flex:1;min-width:0;padding:8px 4px 8px 10px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
 .recent:hover{background:var(--surface);color:var(--text)}
 .recent.active{background:var(--accent-soft);color:var(--accent-text)}
+.recent .more{flex:0 0 auto;width:26px;height:26px;margin-right:5px;border:0;
+  border-radius:7px;background:transparent;color:var(--text-3);cursor:pointer;
+  font-size:15px;line-height:1;opacity:0}
+.recent:hover .more,.recent .more:focus,.recent.menu-open .more{opacity:1}
+.recent .more:hover{background:var(--surface-2);color:var(--text)}
+.recent input.rename{flex:1;min-width:0;margin:3px 4px 3px 8px;padding:5px 7px;
+  font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--accent);
+  border-radius:7px}
+/* Die Gruppenueberschrift trennt Heute von Gestern -- wie im Posteingang. */
+.recent-group{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-3);padding:12px 10px 4px;flex:0 0 auto}
+.recent-group:first-child{padding-top:2px}
+.chatmenu{position:fixed;z-index:90;background:var(--bg);border:1px solid var(--line);
+  border-radius:11px;box-shadow:var(--shadow);padding:4px;min-width:150px}
+.chatmenu button{display:block;width:100%;background:transparent;border:0;
+  border-radius:7px;padding:8px 10px;text-align:left;font-size:13px;cursor:pointer;
+  color:var(--text-2)}
+.chatmenu button:hover{background:var(--surface);color:var(--text)}
+.chatmenu button.danger:hover{background:var(--err);color:#fff}
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);
+  background:var(--text);color:var(--bg);padding:10px 16px;border-radius:11px;
+  font-size:13px;z-index:120;opacity:0;pointer-events:none;
+  transition:opacity .18s,transform .18s;max-width:min(90vw,30rem)}
+#toast.on{opacity:1;transform:translate(-50%,0)}
 .side-foot{border-top:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:1px}
 .side-btn{display:flex;align-items:center;gap:10px;background:transparent;border:0;
   border-radius:9px;padding:9px 10px;cursor:pointer;font-size:13.5px;color:var(--text-2);
@@ -1023,6 +1051,7 @@ async function ask(text){
   const attachments = pending;
   pending = []; drawFiles();
   addUser(text, attachments); input.value = ""; input.style.height = "auto";
+  noteChat(text.trim() || "Angehängte Datei");
   const { steps, bubble } = addBot();
   // `thinking` gehoert hier hoch und nicht zu seiner Funktion: die
   // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile
@@ -1123,6 +1152,11 @@ async function ask(text){
       case "lan_done": step(steps, "[Netz]",
         `${ev.found} ${ev.found === 1 ? "Gerät" : "Geräte"} erreichbar`); break;
       case "lan_check": step(steps, "[Netz]", ev.host); break;
+      case "setting": step(steps, "[Stelle um]", `${ev.label}: ${ev.value}`); break;
+      case "setting_done": break;   // die Antwort sagt es ohnehin
+      case "appearance":
+        // Cortex stellt das Aussehen um, weil jemand darum gebeten hat.
+        setTheme(ev.theme); break;
       case "storage": step(steps, "[Lager]", `${ev.action} ${ev.detail || ""}`.trim()); break;
       case "storage_done": step(steps, "[Lager]", ev.action
         || `${ev.found} ${ev.found === 1 ? "Eintrag" : "Einträge"}`); break;
@@ -1214,11 +1248,13 @@ $("#btn-home").addEventListener("click", () => {
   $("#btn-settings").click();
   setTimeout(() => document.querySelector('[name="CORTEX_HA_URL"]')?.focus(), 120);
 });
-$("#btn-theme").addEventListener("click", () => {
-  const light = document.documentElement.getAttribute("data-theme") !== "dark";
-  document.documentElement.setAttribute("data-theme", light ? "dark" : "light");
-  try { localStorage.setItem("cortex-theme", light ? "dark" : "light"); } catch {}
-});
+function setTheme(theme){
+  document.documentElement.setAttribute("data-theme", theme);
+  try { localStorage.setItem("cortex-theme", theme); } catch {}
+}
+$("#btn-theme").addEventListener("click", () =>
+  setTheme(document.documentElement.getAttribute("data-theme") === "dark"
+    ? "light" : "dark"));
 try {
   const saved = localStorage.getItem("cortex-theme");
   if (saved) document.documentElement.setAttribute("data-theme", saved);
@@ -1228,25 +1264,196 @@ try {
 
 let currentChat = "";
 
+// Ein Eintrag ist ein Chat, keine einzelne Frage. Benannt nach der ersten
+// Frage darin -- oder nach dem, was der Nutzer selbst vergeben hat.
+let chats = [];
+
+function chatGroup(touched){
+  const day = 86400;
+  const now = Date.now() / 1000;
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  const today = midnight.getTime() / 1000;
+  if (touched >= today) return "Heute";
+  if (touched >= today - day) return "Gestern";
+  if (touched >= now - 7 * day) return "Letzte 7 Tage";
+  if (touched >= now - 30 * day) return "Letzte 30 Tage";
+  return "Älter";
+}
+
+function drawRecents(){
+  const box = $("#recents");
+  box.innerHTML = "";
+  // Ueberschriften nur, wenn es wirklich mehrere Tage gibt. Sonst stuende
+  // unter "Letzte Chats" gleich noch ein "Heute" -- zwei Ueberschriften
+  // uebereinander, die dasselbe sagen.
+  const groups = new Set(chats.map(chat => chatGroup(chat.touched || 0)));
+  const showGroups = groups.size > 1;
+  let group = "";
+  for (const chat of chats){
+    const label = (chat.title || "Ohne Titel").replace(/\s+/g, " ").trim();
+    const where = chatGroup(chat.touched || 0);
+    if (showGroups && where !== group){
+      group = where;
+      const head = document.createElement("div");
+      head.className = "recent-group";
+      head.textContent = where;
+      box.appendChild(head);
+    }
+    const row = document.createElement("div");
+    row.className = "recent" + (chat.session_id === currentChat ? " active" : "");
+    row.innerHTML = '<span class="name"></span>'
+      + '<button class="more" title="Mehr" aria-label="Mehr">⋯</button>';
+    const name = row.querySelector(".name");
+    name.textContent = label;
+    name.title = chat.turns > 1 ? `${label}  (${chat.turns} Fragen)` : label;
+    name.addEventListener("click", () => openChat(chat.session_id));
+    row.querySelector(".more").addEventListener("click", (e) => {
+      e.stopPropagation();
+      chatMenu(row, chat);
+    });
+    box.appendChild(row);
+  }
+}
+
 async function loadRecents(){
   try {
     const data = await (await api("/api/chats")).json();
     currentChat = data.current || "";
-    const box = $("#recents");
-    box.innerHTML = "";
-    // Ein Eintrag ist ein Chat, keine einzelne Frage. Benannt nach der
-    // ersten Frage darin -- so wie man einen Ordner nach dem benennt,
-    // weswegen man ihn angelegt hat.
-    (data.chats || []).forEach(chat => {
-      const label = (chat.title || "Ohne Titel").replace(/\s+/g, " ").trim();
-      const item = document.createElement("button");
-      item.className = "recent" + (chat.session_id === currentChat ? " active" : "");
-      item.textContent = label;
-      item.title = chat.turns > 1 ? `${label}  (${chat.turns} Fragen)` : label;
-      item.addEventListener("click", () => openChat(chat.session_id));
-      box.appendChild(item);
-    });
+    chats = data.chats || [];
+    drawRecents();
   } catch {}
+}
+
+// Ein neuer Chat soll in dem Moment in der Liste stehen, in dem man ihn
+// beginnt -- nicht erst, wenn die Antwort fertig ist. Bis dahin waeren es
+// bei einer laengeren Recherche Minuten, in denen die Leiste leer bleibt.
+function noteChat(question){
+  const known = chats.find(chat => chat.session_id === currentChat);
+  if (known){ known.turns += 1; known.touched = Date.now() / 1000; }
+  else {
+    chats.unshift({
+      session_id: currentChat || "neu",
+      title: question, turns: 1, touched: Date.now() / 1000,
+    });
+  }
+  chats.sort((a, b) => (b.touched || 0) - (a.touched || 0));
+  drawRecents();
+}
+
+// Kurze Meldung am unteren Rand. Eine Aktion, die stillschweigend nichts
+// tut, ist schlimmer als eine, die sagt woran sie gescheitert ist.
+let toastTimer = null;
+function toast(text){
+  let box = $("#toast");
+  if (!box){
+    box = document.createElement("div");
+    box.id = "toast";
+    document.body.appendChild(box);
+  }
+  box.textContent = text;
+  box.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove("on"), 4000);
+}
+
+/* ---------- Umbenennen und Löschen ---------- */
+let openMenu = null;
+
+function closeChatMenu(){
+  openMenu?.remove();
+  openMenu = null;
+  document.querySelectorAll(".recent.menu-open")
+    .forEach(row => row.classList.remove("menu-open"));
+}
+addEventListener("click", closeChatMenu);
+addEventListener("keydown", (e) => { if (e.key === "Escape") closeChatMenu(); });
+
+function chatMenu(row, chat){
+  const wasOpen = openMenu && openMenu.dataset.chat === chat.session_id;
+  closeChatMenu();
+  if (wasOpen) return;
+  row.classList.add("menu-open");
+  const menu = document.createElement("div");
+  menu.className = "chatmenu";
+  menu.dataset.chat = chat.session_id;
+  menu.innerHTML = '<button data-do="rename">Umbenennen</button>'
+    + '<button class="danger" data-do="delete">Löschen</button>';
+  const box = row.getBoundingClientRect();
+  menu.style.left = Math.min(box.left + 12, innerWidth - 170) + "px";
+  menu.style.top = (box.bottom + 4) + "px";
+  menu.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const what = e.target.dataset.do;
+    closeChatMenu();
+    if (what === "rename") renameChat(row, chat);
+    if (what === "delete") deleteChat(chat);
+  });
+  document.body.appendChild(menu);
+  openMenu = menu;
+}
+
+async function chatEdit(body){
+  try {
+    return await (await api("/api/chat-edit", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body),
+    })).json();
+  } catch { return null; }
+}
+
+function renameChat(row, chat){
+  const name = row.querySelector(".name");
+  const field = document.createElement("input");
+  field.className = "rename";
+  field.value = chat.title || "";
+  field.maxLength = 120;
+  row.replaceChild(field, name);
+  field.focus(); field.select();
+
+  let done = false;
+  const finish = async (keep) => {
+    if (done) return;
+    done = true;
+    const title = field.value.trim();
+    if (keep && title !== (chat.title || "")){
+      const data = await chatEdit({
+        action: "rename", session_id: chat.session_id, title,
+      });
+      // Leerer Name heisst: zurueck zur ersten Frage. Was dann gilt, weiss
+      // nur der Server -- deshalb neu laden statt zu raten.
+      if (data && data.ok && title) chat.title = data.title;
+      else if (data && !data.ok) toast(data.error || "Umbenennen hat nicht geklappt.");
+      else { await loadRecents(); return; }
+    }
+    drawRecents();
+  };
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){ e.preventDefault(); finish(true); }
+    if (e.key === "Escape"){ e.preventDefault(); finish(false); }
+  });
+  field.addEventListener("blur", () => finish(true));
+  field.addEventListener("click", (e) => e.stopPropagation());
+}
+
+async function deleteChat(chat){
+  const label = (chat.title || "dieser Chat").slice(0, 60);
+  if (!confirm(`„${label}" löschen? Das lässt sich nicht rückgängig machen.`)) return;
+  const data = await chatEdit({ action: "delete", session_id: chat.session_id });
+  if (!data || !data.ok){
+    toast(data?.error || "Löschen hat nicht geklappt.");
+    return;
+  }
+  chats = chats.filter(entry => entry.session_id !== chat.session_id);
+  // War es der offene Chat, faengt der Server einen neuen an -- das Fenster
+  // soll dann nicht weiter einen geloeschten Verlauf zeigen.
+  if (chat.session_id === currentChat){
+    currentChat = "";
+    thread.innerHTML = "";
+    document.body.classList.add("start");   // zurueck zum Begruessungsbild
+    await loadRecents();
+    return;
+  }
+  drawRecents();
 }
 
 async function openChat(sessionId){
@@ -1259,8 +1466,12 @@ async function openChat(sessionId){
       body: JSON.stringify({ session_id: sessionId })
     });
     data = await res.json();
-  } catch { return; }
-  if (!data.ok || !data.turns?.length) return;
+  } catch {
+    toast("Der Chat ließ sich nicht öffnen — läuft Cortex noch?");
+    return;
+  }
+  if (!data.ok){ toast(data.error || "Der Chat ließ sich nicht öffnen."); return; }
+  if (!data.turns?.length){ toast("In diesem Chat steht noch nichts."); return; }
 
   currentChat = sessionId;
   thread.innerHTML = "";

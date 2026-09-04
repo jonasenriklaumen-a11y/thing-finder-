@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 7.5.1                                      │
+│ Cortex AI 7.5.2                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -338,13 +338,30 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Antwort das Ergebnis wirklich ändert; sonst trifft er eine Annahme und sagt sie dazu.
 * **Letzte Chats** in der Seitenleiste sind Chats, keine Einzelfragen. Ein Chat
   beginnt mit **Neuer Chat**, bekommt seinen Namen von der ersten Frage darin und
-  sammelt alles Weitere, bis du den nächsten startest. Klick auf einen Eintrag holt
-  ihn zurück — samt Verlauf, an den der Agent wieder anknüpft. Neueste oben.
+  sammelt alles Weitere, bis du den nächsten startest. Er erscheint in dem Moment in
+  der Liste, in dem du ihn beginnst — nicht erst, wenn die Antwort fertig ist. Klick
+  auf einen Eintrag holt ihn zurück, samt Verlauf, an den der Agent wieder anknüpft.
+  Neueste oben, ab dem zweiten Tag nach *Heute*, *Gestern*, *Letzte 7 Tage* gruppiert.
+  Über **⋯** lässt sich ein Chat **umbenennen** (der eigene Name überschreibt die
+  erste Frage; leer lassen setzt zurück) oder **löschen** — mit Rückfrage, denn das
+  lässt sich nicht rückgängig machen.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
 * **Abbrechen:** Sobald eine Anfrage läuft, wird aus *Anhängen* ein
   *Abbrechen*. Ein Klick beendet den Lauf wirklich — nicht nur die Anzeige:
   der Browser hört auf zuzuhören *und* der Agent hört auf zu arbeiten. Was bis
   dahin da war, bleibt stehen. Danach ist der Knopf wieder das Anhängen.
+* **Einstellungen im Gespräch ändern:** „Mach den Hintergrund weiß", „such lieber
+  auf Englisch", „nimm weniger Teilfragen" — das erledigt Cortex direkt, statt dich
+  ins Formular zu schicken. Änderbar sind Erscheinungsbild, Ort, Sprache, Land,
+  Suchmaschine, Formulierungen je Suche, Subagenten, Werkzeug-Budget, Kontextfenster,
+  Browser-Fallback und das Modell.
+
+  **Nicht änderbar sind Zugangsdaten und alles, was Cortex mehr Zugriff gäbe:**
+  Schalten im Haus, Mail und Kalender, Schreibrechte im Lager, Netzzugriff,
+  Gedächtnis. Das ist kein Misstrauen, sondern Bauweise: Wer Rechte vergibt, darf
+  nicht derselbe sein, der sie bekommt — sonst wäre die dreistufige Rechteauswahl beim
+  Lager eine Verabredung statt einer Grenze, und ein Satz im Chat würde genügen, um
+  sie aufzuheben. Diese Schalter bleiben im Formular.
 * **Mitlesen** unter *Einstellungen → Mitlesen*: Der Haken „Gedanken und Aktionen
   mitlesen" zeigt während der Antwort, was Cortex AI gerade denkt und tut — jede
   Suchanfrage im Wortlaut, jeden Werkzeugaufruf mit seinen Argumenten, was
@@ -384,7 +401,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 7.5.1                                                   │
+│ Cortex AI 7.5.2                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

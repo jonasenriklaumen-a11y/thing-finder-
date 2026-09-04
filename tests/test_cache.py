@@ -52,3 +52,64 @@ def test_history(tmp_path: Path) -> None:
     assert [entry.question for entry in entries] == ["Frage 1", "Frage 2"]
     assert entries[0].meta == {"tool_calls": 3}
     assert len(cache.recent_history(limit=10)) == 3
+
+
+# ---------------------------------------------------------------------------
+# Chats umbenennen und loeschen
+# ---------------------------------------------------------------------------
+def test_a_chat_is_named_after_its_first_question(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history("s1", "Wo liegt das Ladekabel?", "Im Keller.")
+    cache.add_history("s1", "Und die Zange?", "Daneben.")
+    chat = cache.recent_chats()[0]
+    assert chat["title"] == "Wo liegt das Ladekabel?"
+    assert chat["turns"] == 2
+    assert chat["renamed"] is False
+    assert chat["touched"] > 0, "fuer die Gruppierung nach Datum"
+
+
+def test_a_renamed_chat_keeps_its_new_name(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history("s1", "Wo liegt das Ladekabel?", "Im Keller.")
+    cache.rename_chat("s1", "  Werkzeug   suchen  ")
+    chat = cache.recent_chats()[0]
+    assert chat["title"] == "Werkzeug suchen", "Leerraum wird zusammengefasst"
+    assert chat["renamed"] is True
+
+
+def test_an_empty_name_falls_back_to_the_first_question(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history("s1", "Wo liegt das Ladekabel?", "Im Keller.")
+    cache.rename_chat("s1", "Eigener Name")
+    cache.rename_chat("s1", "   ")
+    assert cache.recent_chats()[0]["title"] == "Wo liegt das Ladekabel?"
+
+
+def test_a_very_long_name_is_cut(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history("s1", "Frage", "Antwort")
+    assert len(cache.rename_chat("s1", "N" * 500)) == 120
+
+
+def test_deleting_a_chat_removes_it_completely(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history("s1", "Erste", "A")
+    cache.add_history("s1", "Zweite", "B")
+    cache.add_history("s2", "Andere", "C")
+    cache.rename_chat("s1", "Eigener Name")
+
+    assert cache.delete_chat("s1") == 2
+    remaining = cache.recent_chats()
+    assert [chat["session_id"] for chat in remaining] == ["s2"]
+    assert cache.chat_history("s1") == []
+
+    # Der eigene Name darf nicht als Leiche zurueckbleiben und einen spaeteren
+    # Chat mit derselben Kennung falsch benennen.
+    cache.add_history("s1", "Ganz neue Frage", "D")
+    assert cache.recent_chats()[0]["title"] == "Ganz neue Frage"
+
+
+def test_deleting_something_that_is_not_there_is_no_error(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    assert cache.delete_chat("gibtesnicht") == 0
+    assert cache.delete_chat("") == 0

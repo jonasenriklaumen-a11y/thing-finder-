@@ -85,6 +85,15 @@ class ChatRenderer:
         self._skips.append(f"{_domain(payload.get('url', ''))} uebersprungen: {reason}")
         self._update_reading()
 
+    def _on_setting(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(
+                ("  [Stelle um] ", "bold magenta"),
+                (f"{payload.get('label', '')}: {payload.get('value', '')}", "white"),
+            )
+        )
+
     def _on_storage(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         self.console.print(

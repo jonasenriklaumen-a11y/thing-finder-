@@ -595,6 +595,37 @@ STORAGE_EDIT_SCHEMA: dict[str, Any] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Einstellungen aus dem Gespraech heraus
+# ---------------------------------------------------------------------------
+SETTING_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "change_setting",
+        "description": (
+            "Aendert eine Einstellung, wenn der Nutzer darum bittet -- etwa 'mach den "
+            "Hintergrund weiss', 'such lieber auf Englisch', 'nimm weniger Teilfragen'. "
+            "Moegliche Namen: aussehen (hell/dunkel), ort, sprache, land, suchmaschine, "
+            "formulierungen, subagenten (an/aus), subagenten_anzahl, werkzeug_budget, "
+            "kontextfenster, browser_fallback (an/aus), modell. "
+            "NICHT aenderbar sind Zugangsdaten und alles, was mir mehr Zugriff gaebe: "
+            "Schalten im Haus, Mail und Kalender, Schreibrechte im Lager, Netzzugriff, "
+            "Gedaechtnis. Frag danach gar nicht erst -- verweise auf die Einstellungen. "
+            "Aendere nur, worum ausdruecklich gebeten wurde, eine Sache je Aufruf, und "
+            "sag hinterher in einem Satz, was jetzt gilt."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "setting": {"type": "string", "description": "Name der Einstellung."},
+                "value": {"type": "string", "description": "Der neue Wert."},
+            },
+            "required": ["setting", "value"],
+        },
+    },
+}
+
+
 TOOL_SCHEMAS.extend([NEWS_SCHEMA, CALC_SCHEMA])
 
 
@@ -620,6 +651,7 @@ class ToolStats:
     google_reads: int = 0
     storage_reads: int = 0
     storage_writes: int = 0
+    settings_changed: int = 0
 
     @property
     def tool_calls(self) -> int:
@@ -637,6 +669,7 @@ class ToolStats:
             + self.google_reads
             + self.storage_reads
             + self.storage_writes
+            + self.settings_changed
         )
 
     def reset(self) -> None:
@@ -656,6 +689,7 @@ class ToolStats:
         self.google_reads = 0
         self.storage_reads = 0
         self.storage_writes = 0
+        self.settings_changed = 0
 
 
 class Toolbox:
@@ -696,6 +730,9 @@ class Toolbox:
         self._google_client: Any = None
         #: Ebenso das Lager -- ohne eingetragene Adresse wird nichts gebaut.
         self._storage_client: Any = None
+        #: Wird gerufen, wenn sich eine Einstellung geaendert hat. Die
+        #: Oberflaeche baut daraufhin den Agenten fuer die naechste Frage neu.
+        self.on_settings_changed: Any = None
 
     def close(self) -> None:
         self._fetcher.close()
@@ -1128,6 +1165,60 @@ class Toolbox:
         self._emit("storage_done", found=1, action="geaendert")
         return {"changed": entry}
 
+    # -- Werkzeug: Einstellungen ------------------------------------------
+    def change_setting(self, setting: str, value: str) -> dict[str, Any]:
+        """Aendert eine Einstellung -- soweit sie dafuer vorgesehen ist."""
+        from cortex import preferences
+
+        preference = preferences.find(setting)
+        if preference is None:
+            refused = preferences.refusal(setting)
+            if refused:
+                return {"error": refused}
+            return {
+                "error": (
+                    f"'{setting}' kenne ich nicht als Einstellung. Aendern kann ich: "
+                    + ", ".join(preferences.catalogue_names())
+                    + ". Alles Weitere steht in den Einstellungen."
+                )
+            }
+        try:
+            stored = preferences.coerce(preference, value)
+        except preferences.BadValue as exc:
+            return {"error": str(exc)}
+
+        self._emit("setting", label=preference.label, value=stored)
+
+        if preference.name == preferences.APPEARANCE:
+            # Aussehen ist Sache des Browsers -- es steht in keiner Datei. Die
+            # Oberflaeche hoert auf dieses Ereignis und stellt es um.
+            self._emit("appearance", theme="light" if stored == "hell" else "dark")
+            self.stats.settings_changed += 1
+            return {
+                "changed": preference.label,
+                "value": stored,
+                "note": "Gilt sofort und bleibt in diesem Browser gespeichert.",
+            }
+
+        try:
+            written = preferences.store(preference, stored)
+        except OSError as exc:
+            return {"error": f"Konnte die Einstellung nicht speichern: {exc}"}
+
+        self.stats.settings_changed += 1
+        if self.on_settings_changed is not None:
+            self.on_settings_changed()
+        self._emit("setting_done", label=preference.label, value=stored)
+        return {
+            "changed": preference.label,
+            "value": stored,
+            "path": str(written),
+            "note": (
+                "Gespeichert. Aktiv ist es ab der naechsten Frage -- diese hier "
+                "laeuft noch mit den alten Werten weiter."
+            ),
+        }
+
     # -- Dispatch ---------------------------------------------------------
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt den Tool-Call *name* mit *arguments* aus."""
@@ -1161,6 +1252,11 @@ class Toolbox:
             return self.lan_scan(
                 subnet=str(arguments.get("subnet") or ""),
                 thorough=bool(arguments.get("thorough")),
+            )
+        if name == "change_setting":
+            return self.change_setting(
+                setting=str(arguments.get("setting", "")),
+                value=str(arguments.get("value", "")),
             )
         if name == "storage_find":
             return self.storage_find(
