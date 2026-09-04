@@ -22,7 +22,7 @@ def fixture_html() -> callable:
 @pytest.fixture
 def settings(tmp_path: Path):
     """Settings, die nichts ausserhalb von tmp_path anfassen."""
-    from scoutr.config import Settings
+    from cortex.config import Settings
 
     return Settings(
         model="openai/gpt-4o",

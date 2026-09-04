@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from scoutr import cli
-from scoutr.models import PageResult, SearchResult
+from cortex import cli
+from cortex.models import PageResult, SearchResult
 
 runner = CliRunner()
 
@@ -19,13 +19,13 @@ runner = CliRunner()
 @pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cli, "ENV_CANDIDATES", (), raising=False)
-    monkeypatch.setattr("scoutr.config.ENV_CANDIDATES", ())
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("SCOUTR_MODEL", "openai/gpt-4o")
+    monkeypatch.setattr("cortex.config.ENV_CANDIDATES", ())
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_MODEL", "openai/gpt-4o")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setenv("SCOUTR_SUBAGENTS_AUTO", "false")
-    monkeypatch.delenv("SCOUTR_LOCATION", raising=False)
-    from scoutr.config import reset_settings_cache
+    monkeypatch.setenv("CORTEX_SUBAGENTS_AUTO", "false")
+    monkeypatch.delenv("CORTEX_LOCATION", raising=False)
+    from cortex.config import reset_settings_cache
 
     reset_settings_cache()
 
@@ -44,7 +44,7 @@ def test_config_reports_complete_setup() -> None:
 
 def test_config_reports_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY")
-    from scoutr.config import reset_settings_cache
+    from cortex.config import reset_settings_cache
 
     reset_settings_cache()
     result = runner.invoke(cli.app, ["config"])
@@ -53,7 +53,7 @@ def test_config_reports_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_search_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "scoutr.tools.search_web",
+        "cortex.tools.search_web",
         lambda query, **kwargs: [
             SearchResult(
                 title="Café Nordwand", url="https://cafe-nordwand.de/", snippet="WLAN", rank=1
@@ -67,12 +67,12 @@ def test_search_command(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_search_command_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scoutr.search import SearchError
+    from cortex.search import SearchError
 
     def failing(*args: Any, **kwargs: Any):
         raise SearchError("kein Netz")
 
-    monkeypatch.setattr("scoutr.tools.search_web", failing)
+    monkeypatch.setattr("cortex.tools.search_web", failing)
     result = runner.invoke(cli.app, ["search", "egal"])
     assert result.exit_code == 1
     assert "kein Netz" in result.output
@@ -80,7 +80,7 @@ def test_search_command_reports_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _patch_fetch(monkeypatch: pytest.MonkeyPatch, page: PageResult) -> None:
     monkeypatch.setattr(
-        "scoutr.fetch.Fetcher.fetch", lambda self, url, want_products=False: page
+        "cortex.fetch.Fetcher.fetch", lambda self, url, want_products=False: page
     )
 
 
@@ -112,7 +112,7 @@ def test_fetch_command_reports_skips(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_cache_command_shows_and_clears(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "scoutr.tools.search_web",
+        "cortex.tools.search_web",
         lambda query, **kwargs: [
             SearchResult(title="T", url="https://a.de/")
         ],
@@ -152,7 +152,7 @@ def test_one_shot_question(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_chat_aborts_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY")
-    from scoutr.config import reset_settings_cache
+    from cortex.config import reset_settings_cache
 
     reset_settings_cache()
     result = runner.invoke(cli.app, ["chat", "Frage"])
@@ -189,7 +189,7 @@ def test_slash_export_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     monkeypatch.setattr("litellm.completion", _llm("Die Antwort mit Quelle: a.de"))
     result = runner.invoke(cli.app, ["chat", "--no-stream"], input="Frage\n/export md\n/quit\n")
     assert "Gespeichert:" in result.output
-    exported = list(tmp_path.glob("scoutr-*.md"))
+    exported = list(tmp_path.glob("cortex-*.md"))
     assert exported and "Die Antwort" in exported[0].read_text(encoding="utf-8")
 
 
@@ -199,7 +199,7 @@ def test_export_command_uses_history(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     runner.invoke(cli.app, ["chat", "Frage", "--no-stream"])
     result = runner.invoke(cli.app, ["export", "html"])
     assert "Gespeichert:" in result.output
-    exported = list(tmp_path.glob("scoutr-*.html"))
+    exported = list(tmp_path.glob("cortex-*.html"))
     assert exported and "Antwort aus dem Verlauf" in exported[0].read_text(encoding="utf-8")
 
 
@@ -246,7 +246,7 @@ def test_missing_image_is_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 
 def test_bare_question_is_routed_to_chat(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sys_argv := __import__("sys"), "argv", ["scoutr", "Meine Frage"])
+    monkeypatch.setattr(sys_argv := __import__("sys"), "argv", ["cortex", "Meine Frage"])
     monkeypatch.setattr("litellm.completion", _llm("Antwort"))
     called: list[list[str]] = []
     monkeypatch.setattr(cli, "app", lambda: called.append(list(sys_argv.argv)))
@@ -257,17 +257,17 @@ def test_bare_question_is_routed_to_chat(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_known_subcommand_is_not_rerouted(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    monkeypatch.setattr(sys, "argv", ["scoutr", "config"])
+    monkeypatch.setattr(sys, "argv", ["cortex", "config"])
     called: list[list[str]] = []
     monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
     cli.main()
-    assert called[0] == ["scoutr", "config"]
+    assert called[0] == ["cortex", "config"]
 
 
 def test_bare_flags_are_routed_to_chat(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    monkeypatch.setattr(sys, "argv", ["scoutr", "--location", "Köln", "--lang", "de"])
+    monkeypatch.setattr(sys, "argv", ["cortex", "--location", "Köln", "--lang", "de"])
     called: list[list[str]] = []
     monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
     cli.main()
@@ -282,7 +282,7 @@ def test_location_flag_reaches_the_search_api(monkeypatch: pytest.MonkeyPatch) -
         captured.update(country=kwargs["country"], lang=kwargs["lang"])
         return [SearchResult(title="T", url="https://a.de/")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
 
     tool_call = SimpleNamespace(
         id="c1",
@@ -311,7 +311,7 @@ def test_location_flag_reaches_the_search_api(monkeypatch: pytest.MonkeyPatch) -
 def test_version_flag(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     import sys
 
-    monkeypatch.setattr(sys, "argv", ["scoutr", "--version"])
+    monkeypatch.setattr(sys, "argv", ["cortex", "--version"])
     monkeypatch.setattr(cli, "app", lambda: pytest.fail("app haette nicht laufen duerfen"))
     cli.main()
     assert "cortex" in capsys.readouterr().out
@@ -320,11 +320,11 @@ def test_version_flag(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFix
 def test_help_is_not_rerouted(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    monkeypatch.setattr(sys, "argv", ["scoutr", "--help"])
+    monkeypatch.setattr(sys, "argv", ["cortex", "--help"])
     called: list[list[str]] = []
     monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
     cli.main()
-    assert called[0] == ["scoutr", "--help"]
+    assert called[0] == ["cortex", "--help"]
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +334,7 @@ def _fake_ollama(monkeypatch: pytest.MonkeyPatch, *, tool_calling: bool = True) 
     """Stellt eine vollstaendig funktionierende Ollama-Umgebung nach."""
     from types import SimpleNamespace
 
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state: dict[str, Any] = {"pulled": []}
     monkeypatch.setattr(lm, "ollama_binary", lambda: "/usr/bin/ollama")
@@ -378,11 +378,11 @@ def test_install_model_writes_the_env(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert state["pulled"] == ["qwen2.5:7b"]
     content = target.read_text(encoding="utf-8")
     # Muss ollama_chat sein -- das nackte ollama kann kein Tool-Calling.
-    assert "SCOUTR_MODEL=ollama_chat/qwen2.5:7b" in content
-    assert "SCOUTR_API_BASE=http://localhost:11434" in content
+    assert "CORTEX_MODEL=ollama_chat/qwen2.5:7b" in content
+    assert "CORTEX_API_BASE=http://localhost:11434" in content
     assert "Werkzeug aufgerufen" in result.output
     # --yes laedt kein Vision-Modell ungefragt nach.
-    assert "SCOUTR_VISION_MODEL" not in content
+    assert "CORTEX_VISION_MODEL" not in content
 
 
 def test_install_model_refuses_a_model_without_tool_calling(
@@ -404,7 +404,7 @@ def test_install_model_refuses_a_model_without_tool_calling(
 def test_install_model_aborts_without_ollama(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     monkeypatch.setattr(lm, "ollama_binary", lambda: None)
     monkeypatch.setattr(lm.platform, "system", lambda: "Linux")
@@ -421,7 +421,7 @@ def test_install_model_aborts_without_ollama(
 def test_install_model_skips_an_already_loaded_model(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "installed_models", lambda *a, **k: ["qwen2.5:7b"])
@@ -441,7 +441,7 @@ def _main_with(monkeypatch: pytest.MonkeyPatch, args: list[str]) -> list[list[st
     """Ruft cli.main() mit *args* und faengt ab, womit die App gestartet wuerde."""
     import sys
 
-    monkeypatch.setattr(sys, "argv", ["scoutr", *args])
+    monkeypatch.setattr(sys, "argv", ["cortex", *args])
     called: list[list[str]] = []
     monkeypatch.setattr(cli, "app", lambda: called.append(list(sys.argv)))
     cli.main()
@@ -451,10 +451,10 @@ def _main_with(monkeypatch: pytest.MonkeyPatch, args: list[str]) -> list[list[st
 def test_unknown_subcommand_is_not_sent_to_the_llm(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """`scoutr install-modell` darf keine Recherche ausloesen."""
+    """`cortex install-modell` darf keine Recherche ausloesen."""
     import sys
 
-    monkeypatch.setattr(sys, "argv", ["scoutr", "install-modell"])
+    monkeypatch.setattr(sys, "argv", ["cortex", "install-modell"])
     monkeypatch.setattr(cli, "app", lambda: pytest.fail("haette nicht starten duerfen"))
     with pytest.raises(SystemExit) as excinfo:
         cli.main()
@@ -472,7 +472,7 @@ def test_outdated_installation_gets_a_hint(
     import sys
 
     monkeypatch.setattr(cli, "COMMANDS", cli.COMMANDS - {"install-model"})
-    monkeypatch.setattr(sys, "argv", ["scoutr", "install-model"])
+    monkeypatch.setattr(sys, "argv", ["cortex", "install-model"])
     monkeypatch.setattr(cli, "app", lambda: pytest.fail("haette nicht starten duerfen"))
     with pytest.raises(SystemExit):
         cli.main()
@@ -480,8 +480,8 @@ def test_outdated_installation_gets_a_hint(
 
 
 def test_known_subcommands_still_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _main_with(monkeypatch, ["install-model"])[0] == ["scoutr", "install-model"]
-    assert _main_with(monkeypatch, ["install-browser"])[0] == ["scoutr", "install-browser"]
+    assert _main_with(monkeypatch, ["install-model"])[0] == ["cortex", "install-model"]
+    assert _main_with(monkeypatch, ["install-browser"])[0] == ["cortex", "install-browser"]
 
 
 def test_real_questions_are_never_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -503,7 +503,7 @@ def test_hyphenated_single_word_question_needs_quotes(
     """Preis der Eindeutigkeit: `cortex e-bike` wird abgefangen, mit Hinweis."""
     import sys
 
-    monkeypatch.setattr(sys, "argv", ["scoutr", "e-bike"])
+    monkeypatch.setattr(sys, "argv", ["cortex", "e-bike"])
     monkeypatch.setattr(cli, "app", lambda: pytest.fail("haette nicht starten duerfen"))
     with pytest.raises(SystemExit):
         cli.main()
@@ -514,7 +514,7 @@ def test_install_model_adds_a_vision_model(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Text- und Vision-Modell in einem Durchlauf."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "verify_vision", lambda *a, **k: (True, "Testbild erkannt"))
@@ -532,20 +532,20 @@ def test_install_model_adds_a_vision_model(
     assert result.exit_code == 0, result.output
     assert state["pulled"] == ["qwen2.5:7b", "llava:7b"]
     content = target.read_text(encoding="utf-8")
-    assert "SCOUTR_MODEL=ollama_chat/qwen2.5:7b" in content
-    assert "SCOUTR_VISION_MODEL=ollama_chat/llava:7b" in content
+    assert "CORTEX_MODEL=ollama_chat/qwen2.5:7b" in content
+    assert "CORTEX_VISION_MODEL=ollama_chat/llava:7b" in content
     assert "--image" in result.output
 
 
 def test_vision_only_leaves_the_text_model_alone(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "verify_vision", lambda *a, **k: (True, "Testbild erkannt"))
     target = tmp_path / ".env"
-    target.write_text("SCOUTR_MODEL=anthropic/claude-sonnet-4-6\n", encoding="utf-8")
+    target.write_text("CORTEX_MODEL=anthropic/claude-sonnet-4-6\n", encoding="utf-8")
     result = runner.invoke(
         cli.app,
         ["install-model", "--vision-only", "--vision-model", "llava:7b", "--env-file", str(target)],
@@ -553,16 +553,16 @@ def test_vision_only_leaves_the_text_model_alone(
     assert result.exit_code == 0, result.output
     assert state["pulled"] == ["llava:7b"]
     content = target.read_text(encoding="utf-8")
-    assert "SCOUTR_VISION_MODEL=ollama_chat/llava:7b" in content
+    assert "CORTEX_VISION_MODEL=ollama_chat/llava:7b" in content
     # Das bestehende Hauptmodell bleibt unangetastet.
-    assert "SCOUTR_MODEL=anthropic/claude-sonnet-4-6" in content
+    assert "CORTEX_MODEL=anthropic/claude-sonnet-4-6" in content
 
 
 def test_blind_vision_model_is_not_written(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Ein Modell, das das Testbild nicht erkennt, wird nicht eingetragen."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     _fake_ollama(monkeypatch)
     monkeypatch.setattr(
@@ -582,8 +582,8 @@ def test_blind_vision_model_is_not_written(
     )
     assert result.exit_code == 0, result.output
     content = target.read_text(encoding="utf-8")
-    assert "SCOUTR_MODEL=ollama_chat/qwen2.5:7b" in content
-    assert "SCOUTR_VISION_MODEL" not in content
+    assert "CORTEX_MODEL=ollama_chat/qwen2.5:7b" in content
+    assert "CORTEX_VISION_MODEL" not in content
 
 
 def test_no_vision_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -601,14 +601,14 @@ def test_no_vision_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     )
     assert result.exit_code == 0, result.output
     assert state["pulled"] == ["qwen2.5:7b"]
-    assert "SCOUTR_VISION_MODEL" not in target.read_text(encoding="utf-8")
+    assert "CORTEX_VISION_MODEL" not in target.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
 # Bild aus einem Ordner
 # ---------------------------------------------------------------------------
 def _png(path: Path) -> Path:
-    from scoutr.local_model import solid_png
+    from cortex.local_model import solid_png
 
     path.write_bytes(solid_png())
     return path
@@ -717,7 +717,7 @@ def test_memory_is_freed_before_the_sight_test(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Sonst liegen Text- und Vision-Modell gleichzeitig im VRAM."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     _fake_ollama(monkeypatch)
     order: list[str] = []
@@ -744,7 +744,7 @@ def test_out_of_memory_offers_a_smaller_vision_model(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Speichermangel darf nicht als 'Modell ist blind' enden."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "free_memory", lambda *a, **k: [])
@@ -765,7 +765,7 @@ def test_out_of_memory_offers_a_smaller_vision_model(
     )
     assert result.exit_code == 0, result.output
     assert any("moondream" in attempt for attempt in attempts)
-    assert "SCOUTR_VISION_MODEL=ollama_chat/moondream" in target.read_text(encoding="utf-8")
+    assert "CORTEX_VISION_MODEL=ollama_chat/moondream" in target.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -775,7 +775,7 @@ def test_without_yes_the_user_confirms_the_recommendation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Der VRAM waehlt die Vorauswahl -- bestaetigt wird sie vom Nutzer."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
@@ -795,7 +795,7 @@ def test_yes_takes_the_recommendation_without_asking(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """--yes darf nicht an einer Rueckfrage haengen bleiben."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
@@ -812,7 +812,7 @@ def test_a_chosen_model_that_is_too_big_is_only_flagged(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Die Hardware empfiehlt -- sie verbietet nichts."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 12.0)
@@ -832,14 +832,14 @@ def test_a_chosen_model_that_is_too_big_is_only_flagged(
     assert "braucht etwa 24 GB" in result.output
     # Trotz Warnung wird geladen, ohne Rueckfrage.
     assert state["pulled"] == ["gemma4:26b"]
-    assert "SCOUTR_MODEL=ollama_chat/gemma4:26b" in target.read_text(encoding="utf-8")
+    assert "CORTEX_MODEL=ollama_chat/gemma4:26b" in target.read_text(encoding="utf-8")
 
 
 def test_no_question_is_asked_about_size(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Ohne jede Eingabe muss der Lauf durchgehen -- es wird nichts gefragt."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 4.0)
@@ -862,7 +862,7 @@ def test_a_free_model_name_is_not_second_guessed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Unbekannte Namen laufen ohne Warnung durch -- wir kennen ihre Groesse nicht."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "gpu_vram_gb", lambda: 4.0)
@@ -887,12 +887,12 @@ def test_slash_image_respects_no_stream(
 ) -> None:
     """/image lief immer im Streaming-Modus, egal was --no-stream sagte."""
     image = tmp_path / "foto.png"
-    from scoutr.local_model import solid_png
+    from cortex.local_model import solid_png
 
     image.write_bytes(solid_png())
     seen_stream: list[bool] = []
 
-    from scoutr.agent import Agent
+    from cortex.agent import Agent
 
     original_ask = Agent.ask
 
@@ -914,7 +914,7 @@ def test_slash_image_respects_no_stream(
 
 def test_web_command_stays_local_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
-    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr("cortex.web.serve", lambda **kwargs: seen.update(kwargs))
     result = runner.invoke(cli.app, ["web", "--no-open"])
     assert result.exit_code == 0
     assert seen["host"] == "127.0.0.1"
@@ -925,9 +925,9 @@ def test_web_command_stays_local_by_default(monkeypatch: pytest.MonkeyPatch) -> 
 def test_web_lan_needs_nothing_but_the_address(monkeypatch: pytest.MonkeyPatch) -> None:
     """Adresse und Port genuegen -- kein Zugangswort, keine Anmeldung."""
     seen: dict[str, Any] = {}
-    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
-    monkeypatch.setattr("scoutr.web.lan_address", lambda: "192.168.1.44")
-    monkeypatch.setattr("scoutr.web.tailscale_address", lambda: "")
+    monkeypatch.setattr("cortex.web.serve", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr("cortex.web.lan_address", lambda: "192.168.1.44")
+    monkeypatch.setattr("cortex.web.tailscale_address", lambda: "")
     result = runner.invoke(cli.app, ["web", "--lan", "--no-open"])
     assert result.exit_code == 0
     assert seen["host"] == "0.0.0.0"
@@ -937,9 +937,9 @@ def test_web_lan_needs_nothing_but_the_address(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_web_lan_lists_the_tailscale_address(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: None)
-    monkeypatch.setattr("scoutr.web.lan_address", lambda: "192.168.1.44")
-    monkeypatch.setattr("scoutr.web.tailscale_address", lambda: "100.81.120.100")
+    monkeypatch.setattr("cortex.web.serve", lambda **kwargs: None)
+    monkeypatch.setattr("cortex.web.lan_address", lambda: "192.168.1.44")
+    monkeypatch.setattr("cortex.web.tailscale_address", lambda: "100.81.120.100")
     output = runner.invoke(cli.app, ["web", "--lan", "--no-open"]).output
     assert "http://100.81.120.100:8765/" in output
     assert "Tailscale" in output
@@ -947,7 +947,7 @@ def test_web_lan_lists_the_tailscale_address(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_web_accepts_an_own_token(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
-    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr("cortex.web.serve", lambda **kwargs: seen.update(kwargs))
     runner.invoke(cli.app, ["web", "--lan", "--token", "familie", "--no-open"])
     assert seen["token"] == "familie"
 
@@ -956,7 +956,7 @@ def test_web_reports_a_taken_port(monkeypatch: pytest.MonkeyPatch) -> None:
     def busy(**kwargs):
         raise OSError("Address already in use")
 
-    monkeypatch.setattr("scoutr.web.serve", busy)
+    monkeypatch.setattr("cortex.web.serve", busy)
     result = runner.invoke(cli.app, ["web", "--no-open"])
     assert result.exit_code == 1
     assert "--port 8766" in result.output
@@ -964,7 +964,7 @@ def test_web_reports_a_taken_port(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_web_rejects_a_token_with_umlauts(monkeypatch: pytest.MonkeyPatch) -> None:
     """Der Browser schickt es als Kopfzeile -- die darf nur ASCII enthalten."""
-    monkeypatch.setattr("scoutr.web.serve", lambda **kwargs: None)
+    monkeypatch.setattr("cortex.web.serve", lambda **kwargs: None)
     result = runner.invoke(cli.app, ["web", "--lan", "--token", "grün", "--no-open"])
     assert result.exit_code == 2
     assert "gruen" in result.output
@@ -973,25 +973,45 @@ def test_web_rejects_a_token_with_umlauts(monkeypatch: pytest.MonkeyPatch) -> No
 # ---------------------------------------------------------------------------
 # Der Befehl heisst cortex
 # ---------------------------------------------------------------------------
-def test_both_command_names_start_the_same_program() -> None:
-    """`scoutr` bleibt neben `cortex` bestehen -- Skripte sollen weiterlaufen."""
+def test_there_is_exactly_one_command() -> None:
+    """Ein Programm, ein Name."""
     import tomllib
     from pathlib import Path
 
     data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    scripts = data["project"]["scripts"]
-    assert scripts["cortex"] == "scoutr.cli:main"
-    assert scripts["scoutr"] == scripts["cortex"]
+    assert data["project"]["scripts"] == {"cortex": "cortex.cli:main"}
+    assert data["project"]["name"] == "cortex"
 
 
-def test_the_texts_name_the_new_command() -> None:
-    """Wer 'scoutr setup' liest, tippt 'scoutr setup' -- also muss es stimmen."""
+#: Der frühere Name. Zusammengesetzt, damit dieser Test nicht selbst zu dem
+#: Fund wird, den er verhindern soll.
+FORMER_NAME = "sco" + "utr"
+
+
+def test_the_former_name_appears_nowhere() -> None:
+    """Umbenannt heisst umbenannt -- in jeder Datei, die ausgeliefert wird.
+
+    Der Test liest das Verzeichnis selbst und nicht eine gepflegte Liste:
+    eine Liste haette genau die Datei vergessen, die man uebersieht.
+    """
     from pathlib import Path
 
-    for name in ("scoutr/cli.py", "scoutr/web.py", "scoutr/search.py", "scoutr/config.py"):
-        text = Path(name).read_text(encoding="utf-8")
-        for command in ("setup", "web", "install-model", "notes", "export", "lan"):
-            assert f"scoutr {command}" not in text, f"{name}: 'scoutr {command}'"
+    root = Path(__file__).resolve().parent.parent
+    skip = {".git", ".venv", "__pycache__", ".ruff_cache", ".pytest_cache", "exports"}
+    found: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or any(part in skip for part in path.parts):
+            continue
+        if FORMER_NAME in path.name.lower():
+            found.append(str(path.relative_to(root)))
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # Binaerdatei -- kein Text zum Pruefen
+        if FORMER_NAME in text.lower():
+            found.append(str(path.relative_to(root)))
+    assert found == [], f"alter Name noch enthalten in: {found}"
 
 
 def test_every_subcommand_is_recognised_as_one() -> None:

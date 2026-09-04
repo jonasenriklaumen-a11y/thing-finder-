@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 
-from scoutr.models import SearchResult, domain_of
+from cortex.models import SearchResult, domain_of
 
 #: Die uebliche Konstante aus der RRF-Veroeffentlichung. Sie daempft den
 #: Vorsprung der ersten Plaetze -- ohne sie wuerde Platz 1 alles erschlagen.
@@ -104,7 +104,7 @@ def quoted_phrase(query: str) -> str:
     Substantive grossgeschrieben, ein grossgeschriebenes Wortpaar ist also
     kein Hinweis auf einen Namen. Aus "beste Kaffeemuehle unter 200 Euro Test"
     wurde so das sinnlose Zitat `"Euro Test"`, das die Suche verengt statt sie
-    zu verbessern. Deshalb raet scoutr nicht mehr -- Anfuehrungszeichen setzt,
+    zu verbessern. Deshalb raet cortex nicht mehr -- Anfuehrungszeichen setzt,
     wer sie meint: das Modell oder der Mensch. Geschriebene bleiben erhalten.
     """
     return ""
@@ -115,7 +115,7 @@ def variants(query: str, extra: int = 2) -> list[str]:
 
     Die erste bleibt immer das Original -- das Modell hat sich etwas dabei
     gedacht, und manchmal ist der ganze Satz genau richtig. Dazu kommt die
-    Stichwortfassung. Mehr raet scoutr nicht: weitere Formulierungen kommen
+    Stichwortfassung. Mehr raet cortex nicht: weitere Formulierungen kommen
     vom Modell selbst, das dafuer mehrere Anfragen auf einmal stellen kann --
     Semantik kann es, Wortlisten sind Handarbeit.
     """

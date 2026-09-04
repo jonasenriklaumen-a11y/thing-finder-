@@ -1,4 +1,4 @@
-"""Kommandozeile von scoutr: Chat-Loop, Slash-Befehle, Setup."""
+"""Kommandozeile von cortex: Chat-Loop, Slash-Befehle, Setup."""
 
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from scoutr import __version__
-from scoutr.cache import Cache
-from scoutr.config import (
+from cortex import __version__
+from cortex.cache import Cache
+from cortex.config import (
     DEFAULT_ENV_PATH,
     SEARCH_BACKEND_KEYS,
     Settings,
@@ -30,8 +30,8 @@ from scoutr.config import (
     reset_settings_cache,
     write_env_file,
 )
-from scoutr.probe import check_llm, check_search
-from scoutr.search import OPEN_ENGINES
+from cortex.probe import check_llm, check_search
+from cortex.search import OPEN_ENGINES
 
 app = typer.Typer(
     add_completion=False,
@@ -63,7 +63,7 @@ TOOL_CALL_WARNING = (
 # ---------------------------------------------------------------------------
 # setup
 # ---------------------------------------------------------------------------
-# Die Testanfragen selbst stehen in scoutr/probe.py -- die Web-Einstellungen
+# Die Testanfragen selbst stehen in cortex/probe.py -- die Web-Einstellungen
 # pruefen mit demselben Code, und zwei Fassungen desselben Tests waeren eine
 # zu viel.
 _probe_llm = check_llm
@@ -73,7 +73,7 @@ _probe_search = check_search
 @app.command("setup")
 def setup_command(
     env_file: Path | None = typer.Option(
-        None, "--env-file", help="Zieldatei fuer die .env (Default: ~/.config/scoutr/.env)."
+        None, "--env-file", help="Zieldatei fuer die .env (Default: ~/.config/cortex/.env)."
     ),
     no_probe: bool = typer.Option(False, "--no-probe", help="Keine Testanfragen schicken."),
 ) -> None:
@@ -110,7 +110,7 @@ def setup_command(
         if not local_id:
             console.print("[yellow]Lokale Einrichtung abgebrochen.[/yellow]")
             raise typer.Exit(code=1)
-        from scoutr.local_model import DEFAULT_OLLAMA_URL
+        from cortex.local_model import DEFAULT_OLLAMA_URL
 
         model = local_id
         local_api_base = DEFAULT_OLLAMA_URL
@@ -119,7 +119,7 @@ def setup_command(
             model = MODEL_PRESETS[int(choice) - 1][0]
         except (ValueError, IndexError):
             model = MODEL_PRESETS[0][0]
-    from scoutr.web import fix_model_id
+    from cortex.web import fix_model_id
 
     corrected = fix_model_id(model)
     if corrected != model:
@@ -191,7 +191,7 @@ def setup_command(
             "`json` stehen.[/dim]"
         )
         searxng_url = typer.prompt(
-            "  Adresse der Instanz", default=os.environ.get("SCOUTR_SEARXNG_URL", "")
+            "  Adresse der Instanz", default=os.environ.get("CORTEX_SEARXNG_URL", "")
             or "http://localhost:8080"
         ).strip()
     elif backend_key_name:
@@ -241,23 +241,23 @@ def setup_command(
 
     # -- Schreiben ---------------------------------------------------------
     values: dict[str, str] = {
-        "SCOUTR_MODEL": model,
-        "SCOUTR_SEARCH_BACKEND": backend,
-        "SCOUTR_LOCATION": location,
-        "SCOUTR_LANG": lang,
-        "SCOUTR_COUNTRY": country,
-        "SCOUTR_SUBAGENTS_AUTO": "true" if subagents_on else "false",
+        "CORTEX_MODEL": model,
+        "CORTEX_SEARCH_BACKEND": backend,
+        "CORTEX_LOCATION": location,
+        "CORTEX_LANG": lang,
+        "CORTEX_COUNTRY": country,
+        "CORTEX_SUBAGENTS_AUTO": "true" if subagents_on else "false",
     }
     if key_name and api_key:
         values[key_name] = api_key
     if backend_key_name and backend_key:
         values[backend_key_name] = backend_key
     if engines:
-        values["SCOUTR_SEARCH_ENGINES"] = engines
+        values["CORTEX_SEARCH_ENGINES"] = engines
     if searxng_url:
-        values["SCOUTR_SEARXNG_URL"] = searxng_url
+        values["CORTEX_SEARXNG_URL"] = searxng_url
     if api_base:
-        values["SCOUTR_API_BASE"] = api_base
+        values["CORTEX_API_BASE"] = api_base
 
     written = write_env_file(values, target)
     reset_settings_cache()
@@ -265,7 +265,7 @@ def setup_command(
         Panel.fit(
             f"Gespeichert in [cyan]{written}[/cyan]\n\n"
             "Jetzt loslegen:\n"
-            '  [bold]scoutr[/bold]                     Chat starten\n'
+            '  [bold]cortex[/bold]                     Chat starten\n'
             '  [bold]cortex web[/bold]                 Oberflaeche im Browser\n'
             '  [bold]cortex "deine Frage"[/bold]       einmalige Recherche',
             title="fertig",
@@ -299,7 +299,7 @@ def _key_hint(key_name: str) -> str:
 def config_command() -> None:
     """Zeigt die aktive Konfiguration und meldet fehlende Angaben."""
     settings = get_settings()
-    table = Table(title="scoutr-Konfiguration", show_header=False, title_justify="left")
+    table = Table(title="cortex-Konfiguration", show_header=False, title_justify="left")
     table.add_column(style="cyan", no_wrap=True)
     table.add_column()
     table.add_row(".env", str(settings.env_path or "(keine gefunden)"))
@@ -348,7 +348,7 @@ def search_command(
     no_cache: bool = typer.Option(False, "--no-cache", help="Cache umgehen."),
 ) -> None:
     """Fuehrt `web_search` einmal direkt aus -- zum Testen ohne LLM."""
-    from scoutr.tools import Toolbox
+    from cortex.tools import Toolbox
 
     settings = get_settings()
     cache = None if no_cache else Cache(settings.db_path, settings.cache_ttl_hours)
@@ -383,7 +383,7 @@ def fetch_command(
     products: bool = typer.Option(True, "--products/--no-products", help="Produktdaten ziehen."),
 ) -> None:
     """Fuehrt `fetch_page` einmal direkt aus -- zum Testen ohne LLM."""
-    from scoutr.tools import Toolbox
+    from cortex.tools import Toolbox
 
     settings = get_settings()
     cache = None if no_cache else Cache(settings.db_path, settings.cache_ttl_hours)
@@ -515,11 +515,11 @@ def web_command(
 ) -> None:
     """Startet die Weboberflaeche -- derselbe Agent, nur im Browser.
 
-    Ohne Argumente hoert scoutr nur auf dem eigenen Rechner. `--lan` macht ihn
+    Ohne Argumente hoert cortex nur auf dem eigenen Rechner. `--lan` macht ihn
     fuer andere Geraete erreichbar -- im heimischen Netz und ueber Tailscale.
     Es genuegt dann Adresse und Port, mehr wird nicht abgefragt.
     """
-    from scoutr.web import addresses_for, is_public_host, serve, token_problem
+    from cortex.web import addresses_for, is_public_host, serve, token_problem
 
     bind = host or ("0.0.0.0" if lan else "127.0.0.1")
     public = is_public_host(bind)
@@ -556,7 +556,7 @@ def web_command(
     except OSError as exc:
         console.print(f"[red]Start fehlgeschlagen:[/red] {exc}")
         console.print(
-            f"[dim]Laeuft scoutr schon? Sonst anderen Port: --port {port + 1}[/dim]"
+            f"[dim]Laeuft cortex schon? Sonst anderen Port: --port {port + 1}[/dim]"
         )
         raise typer.Exit(code=1) from exc
     console.print("[dim]Beendet.[/dim]")
@@ -578,8 +578,8 @@ def google_command(
     load_env()
     settings = get_settings()
 
-    from scoutr.google import GoogleError, TokenStore, code_from, consent_url, exchange_code
-    from scoutr.web import DEFAULT_PORT, google_client
+    from cortex.google import GoogleError, TokenStore, code_from, consent_url, exchange_code
+    from cortex.web import DEFAULT_PORT, google_client
 
     if disconnect:
         client = google_client(settings)
@@ -646,7 +646,7 @@ def google_command(
         raise typer.Exit(code=1) from exc
 
     store = TokenStore(settings.data_dir, settings.memory_key)
-    from scoutr.google import Google
+    from cortex.google import Google
 
     connection = Google(client_id, client_secret, store)
     try:
@@ -658,7 +658,7 @@ def google_command(
     target = env_file or find_env_file() or DEFAULT_ENV_PATH
     written = write_env_file(
         {
-            "SCOUTR_GOOGLE": "true",
+            "CORTEX_GOOGLE": "true",
             "GOOGLE_CLIENT_ID": client_id,
             "GOOGLE_CLIENT_SECRET": client_secret,
         },
@@ -682,12 +682,12 @@ def connect_ha_command(
     token: str = typer.Option("", "--token", help="Langlebiges Zugriffstoken."),
     env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
 ) -> None:
-    """Verbindet scoutr mit Home Assistant -- sucht die Instanz selbst.
+    """Verbindet cortex mit Home Assistant -- sucht die Instanz selbst.
 
-    Danach kann scoutr Fragen ueber das eigene Haus beantworten: Temperaturen,
+    Danach kann cortex Fragen ueber das eigene Haus beantworten: Temperaturen,
     Lichter, Fenster, Anwesenheit.
     """
-    from scoutr.homeassistant import HomeAssistant, HomeAssistantError, discover, normalize_url
+    from cortex.homeassistant import HomeAssistant, HomeAssistantError, discover, normalize_url
 
     load_env()
     console.print(
@@ -712,7 +712,7 @@ def connect_ha_command(
             else:
                 url = choice
         else:
-            from scoutr.lan import container_hint
+            from cortex.lan import container_hint
 
             console.print(
                 "\n[yellow]Nichts gefunden.[/yellow] "
@@ -766,7 +766,7 @@ def connect_ha_command(
     )
     control = typer.confirm("  Schalten erlauben?", default=False)
 
-    values = {"SCOUTR_HA_URL": url, "HA_TOKEN": token, "SCOUTR_HA_CONTROL": str(control).lower()}
+    values = {"CORTEX_HA_URL": url, "HA_TOKEN": token, "CORTEX_HA_CONTROL": str(control).lower()}
     target = env_file or find_env_file() or DEFAULT_ENV_PATH
     written = write_env_file(values, target)
     load_env(written, override=True)
@@ -777,7 +777,7 @@ def connect_ha_command(
             "Probier es aus:\n"
             '  [bold]cortex "wie warm ist es im Wohnzimmer"[/bold]\n'
             '  [bold]cortex "welche Lichter sind gerade an"[/bold]'
-            + ("\n  [bold]scoutr \"mach das Licht im Flur aus\"[/bold]" if control else ""),
+            + ("\n  [bold]cortex \"mach das Licht im Flur aus\"[/bold]" if control else ""),
             title="fertig",
             border_style="green",
         )
@@ -790,7 +790,7 @@ def lan_command(
     thorough: bool = typer.Option(False, "--thorough", help="Alle bekannten Ports pruefen."),
 ) -> None:
     """Zeigt, welche Geraete im eigenen Netz erreichbar sind."""
-    from scoutr.lan import NotPrivate, own_subnet, scan
+    from cortex.lan import NotPrivate, own_subnet, scan
 
     settings = get_settings()
     target = subnet or settings.lan_subnet or own_subnet()
@@ -808,7 +808,7 @@ def lan_command(
         raise typer.Exit(code=1) from exc
 
     if not devices:
-        from scoutr.lan import container_hint
+        from cortex.lan import container_hint
 
         console.print("[yellow]Nichts gefunden.[/yellow]")
         hint = container_hint(target)
@@ -839,8 +839,8 @@ def install_browser_command() -> None:
         import playwright  # noqa: F401
     except ImportError:
         console.print("[yellow]Playwright fehlt.[/yellow] Installiere es mit:")
-        console.print('  [bold]uv tool install --with playwright scoutr[/bold]')
-        console.print("  [dim]oder: pip install \'scoutr[browser]\'[/dim]")
+        console.print('  [bold]uv tool install --with playwright cortex[/bold]')
+        console.print("  [dim]oder: pip install \'cortex[browser]\'[/dim]")
         raise typer.Exit(code=1) from None
 
     console.print("Lade Chromium herunter ...")
@@ -864,7 +864,7 @@ def _ensure_ollama(assume_yes: bool = False) -> bool:
     Der Installationsbefehl wird immer angezeigt und muss bestaetigt werden --
     hier laedt nichts ungefragt etwas aus dem Netz und fuehrt es aus.
     """
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     # -- 1. Ollama ---------------------------------------------------------
     if lm.ollama_binary() is None:
@@ -955,7 +955,7 @@ def _note_size(name: str, budget: float | None) -> None:
     Modell laeuft notfalls auch teilweise auf der CPU, das ist langsam,
     aber nicht verboten.
     """
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     warning = lm.too_big(name, budget)
     if warning:
@@ -965,7 +965,7 @@ def _note_size(name: str, budget: float | None) -> None:
 
 def _pull_if_needed(name: str, already: set[str]) -> bool:
     """Laedt *name*, falls noch nicht vorhanden. `False` bei Fehler."""
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     if name in already:
         console.print(f"  [green]{name} ist bereits geladen.[/green]")
@@ -993,7 +993,7 @@ def _run_subagent_setup(model_name: str = "", assume_yes: bool = False) -> str:
     Sie bearbeiten eng umrissene Teilfragen -- dafuer reicht ein kleines
     Modell, und es laeuft neben dem Hauptmodell im Speicher.
     """
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     console.print("\n[bold]6. Modell fuer die Subagenten[/bold] [dim](optional)[/dim]")
     console.print(
@@ -1051,9 +1051,9 @@ def _run_vision_setup(
     Vision-Modelle brauchen kein Tool-Calling -- sie beschreiben nur, was auf
     dem Bild zu sehen ist. Die Recherche danach macht das Hauptmodell.
     """
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
-    console.print("\n[bold]5. Vision-Modell[/bold] [dim](fuer scoutr --image und /image)[/dim]")
+    console.print("\n[bold]5. Vision-Modell[/bold] [dim](fuer cortex --image und /image)[/dim]")
     if main_can_see:
         console.print(
             "  [green]Das Hauptmodell kann selbst Bilder ansehen[/green] -- "
@@ -1124,7 +1124,7 @@ def _run_local_setup(model_name: str = "", assume_yes: bool = False) -> str:
     Der Ablauf: Ollama finden oder installieren, Server starten, Modell laden,
     Tool-Calling an einem echten Aufruf pruefen.
     """
-    from scoutr import local_model as lm
+    from cortex import local_model as lm
 
     console.print(
         Panel.fit(
@@ -1213,7 +1213,7 @@ def install_model_command(
     env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
 ) -> None:
     """Installiert lokale Modelle und traegt sie ein -- ohne API-Key."""
-    from scoutr.local_model import DEFAULT_OLLAMA_URL, env_values, vision_env_values
+    from cortex.local_model import DEFAULT_OLLAMA_URL, env_values, vision_env_values
 
     values: dict[str, str] = {}
 
@@ -1235,7 +1235,7 @@ def install_model_command(
         # herunterzuladen waere nicht in Ordnung.
         # Kann das Hauptmodell selbst sehen, sparen wir das zweite Modell --
         # auf knappen Karten macht das den Unterschied.
-        from scoutr.local_model import DUAL_MODELS
+        from cortex.local_model import DUAL_MODELS
 
         bare = model_id.split("/", 1)[-1]
         main_can_see = any(candidate.name == bare for candidate in DUAL_MODELS)
@@ -1254,25 +1254,25 @@ def install_model_command(
         if subagent_model or (subagents and not yes):
             helper = _run_subagent_setup(subagent_model, assume_yes=yes)
             if helper:
-                values["SCOUTR_SUBAGENT_MODEL"] = helper
+                values["CORTEX_SUBAGENT_MODEL"] = helper
 
     target = env_file or find_env_file() or DEFAULT_ENV_PATH
     written = write_env_file(values, target)
     reset_settings_cache()
 
-    lines = [f"{key.removeprefix('SCOUTR_')}: [bold cyan]{value}[/bold cyan]"
+    lines = [f"{key.removeprefix('CORTEX_')}: [bold cyan]{value}[/bold cyan]"
              for key, value in values.items() if key.endswith("MODEL")]
     console.print(
         Panel.fit(
             "\n".join(lines)
             + f"\nEingetragen in [cyan]{written}[/cyan]\n\n"
             "Loslegen:\n"
-            "  [bold]scoutr[/bold]                     Chat\n"
+            "  [bold]cortex[/bold]                     Chat\n"
             "  [bold]cortex web[/bold]                 Oberflaeche im Browser\n"
             '  [bold]cortex "deine Frage"[/bold]       einmalige Recherche\n'
             + (
-                "  [bold]scoutr --image foto.jpg[/bold]  Bild als Ausgangspunkt"
-                if "SCOUTR_VISION_MODEL" in values
+                "  [bold]cortex --image foto.jpg[/bold]  Bild als Ausgangspunkt"
+                if "CORTEX_VISION_MODEL" in values
                 else ""
             ),
             title="fertig",
@@ -1334,7 +1334,7 @@ def _warn_if_unconfigured(settings: Settings) -> None:
         console.print(
             Panel.fit(
                 "\n".join(problems)
-                + "\n\nRichte scoutr mit [bold]cortex setup[/bold] ein."
+                + "\n\nRichte cortex mit [bold]cortex setup[/bold] ein."
                 + "\n[dim]Keinen API-Key? [bold]cortex install-model[/bold] richtet ein "
                 "lokales Modell ein -- laeuft ohne Key und ohne Konto.[/dim]",
                 title="Konfiguration unvollstaendig",
@@ -1345,7 +1345,7 @@ def _warn_if_unconfigured(settings: Settings) -> None:
 
 
 def _record_turn(turns: list, question: str, result) -> None:
-    from scoutr.export import Turn
+    from cortex.export import Turn
 
     turns.append(
         Turn(
@@ -1360,7 +1360,7 @@ def _record_turn(turns: list, question: str, result) -> None:
 
 
 def _do_export(turns: list, fmt: str, settings: Settings) -> None:
-    from scoutr.export import export
+    from cortex.export import export
 
     try:
         path = export(
@@ -1386,7 +1386,7 @@ def _run_turn(agent, renderer, question: str, stream: bool, show_images: bool) -
         console.print(f"[red]Fehler:[/red] {result.error}")
         return result
     if result.products:
-        from scoutr.render import print_products
+        from cortex.render import print_products
 
         print_products(console, result.products, show_images=show_images)
     console.print()
@@ -1413,8 +1413,8 @@ def chat_command(
     ),
 ) -> None:
     """Startet den Chat -- oder beantwortet mit Argument eine einzelne Frage."""
-    from scoutr.agent import Agent
-    from scoutr.render import ChatRenderer
+    from cortex.agent import Agent
+    from cortex.render import ChatRenderer
 
     settings = get_settings()
     _apply_overrides(settings, location, lang, country, model, max_calls)
@@ -1479,7 +1479,7 @@ def chat_command(
         agent.close()
 
 
-#: Was scoutr als Bild akzeptiert.
+#: Was cortex als Bild akzeptiert.
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif")
 
 
@@ -1496,7 +1496,7 @@ def _images_in(directory: Path) -> list[Path]:
 def _resolve_image(path: Path) -> Path | None:
     """Loest eine Bildangabe auf -- Datei oder Ordner.
 
-    Zeigt *path* auf einen Ordner, sucht scoutr darin nach Bildern: bei genau
+    Zeigt *path* auf einen Ordner, sucht cortex darin nach Bildern: bei genau
     einem nimmt er es, bei mehreren fragt er nach (neueste zuerst).
     """
     target = path.expanduser()
@@ -1590,7 +1590,7 @@ def _handle_slash(
         if not argument:
             console.print(f"Aktuelles Modell: [bold]{settings.model}[/bold]")
         else:
-            from scoutr.web import fix_model_id
+            from cortex.web import fix_model_id
 
             # Fehlt nur das Anbieter-Kuerzel, ergaenzen wir es, statt den
             # Nutzer mit einer Fehlermeldung stehenzulassen.
@@ -1636,7 +1636,7 @@ def _handle_slash(
 
 def _open_memory(settings: Settings):
     """Den Langzeitspeicher oeffnen."""
-    from scoutr.memory import Memory
+    from cortex.memory import Memory
 
     return Memory(settings.db_path, settings.data_dir, settings.memory_key)
 
@@ -1645,9 +1645,9 @@ def _show_memory(settings: Settings) -> None:
     """Zeigt, was im Langzeitspeicher liegt."""
     if not settings.memory_enabled:
         console.print("[yellow]Der Speicher ist ausgeschaltet.[/yellow]")
-        console.print("[dim]Einschalten mit SCOUTR_MEMORY=true in der .env.[/dim]")
+        console.print("[dim]Einschalten mit CORTEX_MEMORY=true in der .env.[/dim]")
         return
-    from scoutr.memory import human_size
+    from cortex.memory import human_size
 
     store = _open_memory(settings)
     usage = store.usage()
@@ -1683,7 +1683,7 @@ def _clear_memory(settings: Settings) -> None:
 
 def _show_uploads(settings: Settings, argument: str) -> None:
     """Zeigt Hochgeladenes oder loescht es."""
-    from scoutr.memory import human_size
+    from cortex.memory import human_size
 
     store = _open_memory(settings)
     if argument.strip().lower() in ("clear", "loeschen", "löschen", "weg"):
@@ -1746,7 +1746,7 @@ def export_command(
     out: Path | None = typer.Option(None, "--out", "-o", help="Zieldatei."),
 ) -> None:
     """Exportiert die letzten Recherchen aus dem Verlauf."""
-    from scoutr.export import Turn, export
+    from cortex.export import Turn, export
 
     settings = get_settings()
     entries = Cache(settings.db_path, settings.cache_ttl_hours).recent_history(limit=limit)
@@ -1816,7 +1816,7 @@ def _unknown_command(name: str) -> None:
 def main() -> None:
     """Einstiegspunkt: `cortex` und `cortex "Frage"` landen im Chat.
 
-    Der Befehl heisst cortex; `scoutr` bleibt als zweiter Name bestehen,
+    Der Befehl heisst cortex; `cortex` bleibt als zweiter Name bestehen,
     damit bestehende Skripte und Dienste weiterlaufen.
     """
     argv = sys.argv[1:]

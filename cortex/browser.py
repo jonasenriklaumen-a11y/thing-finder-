@@ -1,6 +1,6 @@
 """Stufe 3: Playwright-Fallback fuer Seiten, die ohne JavaScript nichts liefern.
 
-Optionale Abhaengigkeit -- Installation ueber `scoutr install-browser`.
+Optionale Abhaengigkeit -- Installation ueber `cortex install-browser`.
 
 Datenschutz-Voreinstellungen dieses Moduls:
 
@@ -22,7 +22,7 @@ import os
 import re
 from typing import Any, Protocol
 
-from scoutr.fetch import SiteRules, load_rules
+from cortex.fetch import SiteRules, load_rules
 
 #: Wie lange warten wir maximal auf Netzruhe?
 NETWORK_IDLE_TIMEOUT_MS = 6_000
@@ -161,10 +161,10 @@ def dismiss_consent(page: Any, rules: SiteRules | None = None) -> str:
 def launch_args() -> list[str]:
     """Zusaetzliche Chromium-Argumente aus der Umgebung.
 
-    `SCOUTR_BROWSER_NO_SANDBOX=1` schaltet die Browser-eigene Sandbox ab --
+    `CORTEX_BROWSER_NO_SANDBOX=1` schaltet die Browser-eigene Sandbox ab --
     im Container-Image ist das gesetzt, auf dem blanken System nicht.
     """
-    flag = os.environ.get("SCOUTR_BROWSER_NO_SANDBOX", "").strip().lower()
+    flag = os.environ.get("CORTEX_BROWSER_NO_SANDBOX", "").strip().lower()
     return list(CONTAINER_ARGS) if flag in {"1", "true", "yes", "on", "ja"} else []
 
 

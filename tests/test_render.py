@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from scoutr.models import Product
-from scoutr.render import ChatRenderer, comparison_table, print_products, product_card
+from cortex.models import Product
+from cortex.render import ChatRenderer, comparison_table, print_products, product_card
 
 
 def _console() -> Console:
@@ -103,7 +103,7 @@ def test_print_products_is_silent_without_products() -> None:
 
 
 def test_shorten_cuts_at_word_boundaries() -> None:
-    from scoutr.render import shorten
+    from cortex.render import shorten
 
     long = "Welche Cafés in Mönchengladbach haben kostenloses WLAN und Steckdosen?"
     short = shorten(long, 40)
@@ -115,13 +115,13 @@ def test_shorten_cuts_at_word_boundaries() -> None:
 
 
 def test_shorten_leaves_short_text_alone() -> None:
-    from scoutr.render import shorten
+    from cortex.render import shorten
 
     assert shorten("kurz", 40) == "kurz"
 
 
 def test_shorten_normalises_whitespace() -> None:
-    from scoutr.render import shorten
+    from cortex.render import shorten
 
     assert shorten("a   b\n c", 40) == "a b c"
 

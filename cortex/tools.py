@@ -11,13 +11,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from scoutr.cache import Cache, cache_key
-from scoutr.config import Settings
-from scoutr.extract import extract_product, has_spec_heading
-from scoutr.fetch import Fetcher, load_rules
-from scoutr.models import PageResult, Product, SearchResult, domain_of
-from scoutr.queries import MAX_VARIANTS, variants
-from scoutr.search import (
+from cortex.cache import Cache, cache_key
+from cortex.config import Settings
+from cortex.extract import extract_product, has_spec_heading
+from cortex.fetch import Fetcher, load_rules
+from cortex.models import PageResult, Product, SearchResult, domain_of
+from cortex.queries import MAX_VARIANTS, variants
+from cortex.search import (
     OPEN_BACKEND_NAMES,
     SearchError,
     search_broadly,
@@ -789,7 +789,7 @@ class Toolbox:
     # -- Werkzeug: Gmail und Kalender -------------------------------------
     def _google(self) -> Any:
         """Der Zugriff auf das verbundene Konto, einmal je Toolbox aufgebaut."""
-        from scoutr.google import Google, TokenStore
+        from cortex.google import Google, TokenStore
 
         if self._google_client is None:
             self._google_client = Google(
@@ -822,7 +822,7 @@ class Toolbox:
         self, days: int = 7, query: str = "", count: int = 10
     ) -> dict[str, Any]:
         """Liest Termine aus dem Google Kalender."""
-        from scoutr.google import GoogleError
+        from cortex.google import GoogleError
 
         problem = self._google_ready()
         if problem:
@@ -849,7 +849,7 @@ class Toolbox:
 
     def mail_search(self, query: str = "", count: int = 8) -> dict[str, Any]:
         """Sucht in den Mails des Nutzers -- Kopfzeilen, kein Volltext."""
-        from scoutr.google import GoogleError
+        from cortex.google import GoogleError
 
         problem = self._google_ready()
         if problem:
@@ -871,7 +871,7 @@ class Toolbox:
 
     def mail_read(self, message_id: str) -> dict[str, Any]:
         """Liest eine einzelne Mail."""
-        from scoutr.google import GoogleError
+        from cortex.google import GoogleError
 
         problem = self._google_ready()
         if problem:
@@ -1005,7 +1005,7 @@ class Toolbox:
     # -- Werkzeug 4: Rechner ----------------------------------------------
     def calculate(self, expression: str) -> dict[str, Any]:
         """Exakte Arithmetik -- damit das Modell nie selbst rechnen muss."""
-        from scoutr.calc import CalcError, calculate_pretty
+        from cortex.calc import CalcError, calculate_pretty
 
         self.stats.calculations += 1
         self._emit("calculate", expression=expression)
@@ -1033,7 +1033,7 @@ class Toolbox:
         if not self.settings.memory_enabled:
             return None
         if self._memory_store is None:
-            from scoutr.memory import Memory
+            from cortex.memory import Memory
 
             self._memory_store = Memory(
                 self.settings.db_path, self.settings.data_dir, self.settings.memory_key
@@ -1042,7 +1042,7 @@ class Toolbox:
 
     def save_memory(self, text: str, topic: str = "") -> dict[str, Any]:
         """Legt eine Textnotiz im Langzeitspeicher ab."""
-        from scoutr.memory import MemoryFull
+        from cortex.memory import MemoryFull
 
         store = self._memory()
         if store is None:
@@ -1091,10 +1091,10 @@ class Toolbox:
     # -- Werkzeug: das eigene Netz ----------------------------------------
     def lan_scan(self, subnet: str = "", thorough: bool = False) -> dict[str, Any]:
         """Sieht nach, welche Geraete im Heimnetz erreichbar sind."""
-        from scoutr.lan import NotPrivate, scan
+        from cortex.lan import NotPrivate, scan
 
         if not self.settings.lan_enabled:
-            return {"error": "Der Netzzugriff ist abgeschaltet (SCOUTR_LAN_ENABLED=false)."}
+            return {"error": "Der Netzzugriff ist abgeschaltet (CORTEX_LAN_ENABLED=false)."}
         target = (subnet or self.settings.lan_subnet or "").strip()
         self._emit("lan_scan", subnet=target or "eigenes Netz")
         try:
@@ -1104,13 +1104,13 @@ class Toolbox:
         except ValueError as exc:
             return {
                 "error": (
-                    f"{exc} Trag dein Netz unter SCOUTR_LAN_SUBNET ein, z.B. 192.168.1.0/24."
+                    f"{exc} Trag dein Netz unter CORTEX_LAN_SUBNET ein, z.B. 192.168.1.0/24."
                 )
             }
         except OSError as exc:
             return {"error": f"Netzdurchlauf fehlgeschlagen: {exc}"}
 
-        from scoutr.lan import container_hint
+        from cortex.lan import container_hint
 
         self.stats.lan_scans += 1
         self._emit("lan_done", found=len(devices))
@@ -1130,10 +1130,10 @@ class Toolbox:
         """Prueft ein einzelnes Geraet im Netz."""
         import socket
 
-        from scoutr.lan import FULL_PORTS, check_host
+        from cortex.lan import FULL_PORTS, check_host
 
         if not self.settings.lan_enabled:
-            return {"error": "Der Netzzugriff ist abgeschaltet (SCOUTR_LAN_ENABLED=false)."}
+            return {"error": "Der Netzzugriff ist abgeschaltet (CORTEX_LAN_ENABLED=false)."}
         host = (host or "").strip()
         if not host:
             return {"error": "Keine Adresse angegeben."}
@@ -1144,7 +1144,7 @@ class Toolbox:
 
         import ipaddress
 
-        from scoutr.lan import is_private_net
+        from cortex.lan import is_private_net
 
         try:
             network = ipaddress.ip_network(f"{address}/32")
@@ -1173,17 +1173,17 @@ class Toolbox:
     # -- Werkzeug: Home Assistant -----------------------------------------
     def ha_states(self, search: str = "", domain: str = "") -> dict[str, Any]:
         """Liest Zustaende aus Home Assistant."""
-        from scoutr.homeassistant import MAX_ENTITIES, HomeAssistantError, from_settings
+        from cortex.homeassistant import MAX_ENTITIES, HomeAssistantError, from_settings
 
         client = from_settings(self.settings)
         if not client.configured:
-            from scoutr.lan import container_hint
+            from cortex.lan import container_hint
 
             hint = container_hint()
             return {
                 "error": (
                     "Home Assistant ist nicht verbunden. Der Nutzer richtet das mit "
-                    "`scoutr connect-ha` ein -- das dauert eine Minute."
+                    "`cortex connect-ha` ein -- das dauert eine Minute."
                     + (f" Hinweis: {hint}" if hint else "")
                 )
             }
@@ -1218,7 +1218,7 @@ class Toolbox:
         self, domain: str, service: str, entity_id: str = "", data: Any = None
     ) -> dict[str, Any]:
         """Schaltet etwas in Home Assistant -- mit mehreren Sicherungen."""
-        from scoutr.homeassistant import (
+        from cortex.homeassistant import (
             ALLOWED_DOMAINS,
             PROTECTED_DOMAINS,
             HomeAssistantError,
@@ -1227,12 +1227,12 @@ class Toolbox:
 
         client = from_settings(self.settings)
         if not client.configured:
-            return {"error": "Home Assistant ist nicht verbunden (`scoutr connect-ha`)."}
+            return {"error": "Home Assistant ist nicht verbunden (`cortex connect-ha`)."}
         if not self.settings.ha_control:
             return {
                 "error": (
                     "Cortex AI darf nur nachsehen, nicht schalten. Der Nutzer schaltet das "
-                    "in den Einstellungen frei (SCOUTR_HA_CONTROL=true). Sag ihm das, "
+                    "in den Einstellungen frei (CORTEX_HA_CONTROL=true). Sag ihm das, "
                     "statt es zu umgehen."
                 )
             }

@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# scoutr im Container: isoliert vom System, aber mit vollem Netzzugang.
+# cortex im Container: isoliert vom System, aber mit vollem Netzzugang.
 #
-#   docker build -t scoutr .                     # mit Browser-Fallback (Default)
-#   docker build -t scoutr --target slim .       # ohne Browser, ~700 MB kleiner
+#   docker build -t cortex .                     # mit Browser-Fallback (Default)
+#   docker build -t cortex --target slim .       # ohne Browser, ~700 MB kleiner
 #
-# Der Container schraenkt das Netz bewusst NICHT ein -- scoutr muss frei
+# Der Container schraenkt das Netz bewusst NICHT ein -- cortex muss frei
 # suchen und Seiten lesen koennen. Isoliert wird das Dateisystem: der
 # Container sieht nur /data (Cache und Verlauf) und /work (Exporte).
 
@@ -16,7 +16,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    SCOUTR_DATA_DIR=/data \
+    CORTEX_DATA_DIR=/data \
     PLAYWRIGHT_BROWSERS_PATH=/browsers \
     TERM=xterm-256color \
     HOME=/tmp
@@ -29,23 +29,23 @@ RUN apt-get update \
 # /data und /work sind fuer jede UID beschreibbar. Das erlaubt es,
 # den Container unter der UID des Host-Nutzers laufen zu lassen -- sonst
 # gehoerten die Exporte unter Linux dem falschen Benutzer.
-RUN useradd --create-home --uid 1000 scoutr \
+RUN useradd --create-home --uid 1000 cortex \
     && mkdir -p /data /work /browsers \
-    && chown -R scoutr:scoutr /data /work /browsers \
+    && chown -R cortex:cortex /data /work /browsers \
     && chmod 0777 /data /work
 
 WORKDIR /app
 COPY pyproject.toml README.md ./
-COPY scoutr ./scoutr
+COPY cortex ./cortex
 RUN pip install --no-cache-dir .
 
 # ---------------------------------------------------------------------------
 # Ohne Browser -- Cookie-Stufen 1 und 2 reichen fuer die allermeisten Seiten.
 FROM base AS slim
 
-USER scoutr
+USER cortex
 WORKDIR /work
-ENTRYPOINT ["/usr/bin/tini", "--", "scoutr"]
+ENTRYPOINT ["/usr/bin/tini", "--", "cortex"]
 CMD []
 
 # ---------------------------------------------------------------------------
@@ -60,10 +60,10 @@ RUN pip install --no-cache-dir playwright \
 # Im Container uebernimmt der Container die Isolation, deshalb laeuft
 # Chromium hier ohne seine eigene Sandbox (die im Container ohnehin
 # zusaetzliche Rechte braeuchte). Ausserhalb bleibt sie aktiv.
-ENV SCOUTR_BROWSER_NO_SANDBOX=1 \
-    SCOUTR_ENABLE_PLAYWRIGHT=true
+ENV CORTEX_BROWSER_NO_SANDBOX=1 \
+    CORTEX_ENABLE_PLAYWRIGHT=true
 
-USER scoutr
+USER cortex
 WORKDIR /work
-ENTRYPOINT ["/usr/bin/tini", "--", "scoutr"]
+ENTRYPOINT ["/usr/bin/tini", "--", "cortex"]
 CMD []

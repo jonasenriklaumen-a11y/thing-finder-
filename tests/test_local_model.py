@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from scoutr import local_model as lm
+from cortex import local_model as lm
 
 TAGS = {
     "models": [
@@ -53,24 +53,24 @@ def test_recommendation_without_memory_info() -> None:
 
 def test_env_values() -> None:
     values = lm.env_values(lm.LOCAL_MODELS[0])
-    assert values["SCOUTR_MODEL"] == lm.LOCAL_MODELS[0].model_id
-    assert values["SCOUTR_MODEL"].startswith("ollama_chat/")
-    assert values["SCOUTR_API_BASE"] == "http://localhost:11434"
+    assert values["CORTEX_MODEL"] == lm.LOCAL_MODELS[0].model_id
+    assert values["CORTEX_MODEL"].startswith("ollama_chat/")
+    assert values["CORTEX_API_BASE"] == "http://localhost:11434"
 
 
 def test_env_values_adds_the_prefix_to_a_bare_name() -> None:
-    assert lm.env_values("qwen2.5:14b")["SCOUTR_MODEL"] == "ollama_chat/qwen2.5:14b"
+    assert lm.env_values("qwen2.5:14b")["CORTEX_MODEL"] == "ollama_chat/qwen2.5:14b"
 
 
 def test_env_values_keeps_a_full_id() -> None:
-    assert lm.env_values("ollama_chat/eigenes:tag")["SCOUTR_MODEL"] == "ollama_chat/eigenes:tag"
+    assert lm.env_values("ollama_chat/eigenes:tag")["CORTEX_MODEL"] == "ollama_chat/eigenes:tag"
 
 
 def test_env_model_id_resolves_in_litellm() -> None:
     """Die erzeugte ID muss LiteLLM auch wirklich zuordenbar sein."""
-    from scoutr.config import resolve_model
+    from cortex.config import resolve_model
 
-    assert resolve_model(lm.env_values(lm.LOCAL_MODELS[0])["SCOUTR_MODEL"]) == "ollama_chat"
+    assert resolve_model(lm.env_values(lm.LOCAL_MODELS[0])["CORTEX_MODEL"]) == "ollama_chat"
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ def test_verify_accepts_a_model_that_calls_tools(monkeypatch: pytest.MonkeyPatch
 
 
 def test_verify_rejects_a_model_that_only_talks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Genau der Fall, der scoutr unbrauchbar macht: Antwort ohne Werkzeugaufruf."""
+    """Genau der Fall, der cortex unbrauchbar macht: Antwort ohne Werkzeugaufruf."""
     monkeypatch.setattr(
         "litellm.completion", lambda **kwargs: _reply(content="In Berlin ist es sonnig.")
     )
@@ -330,8 +330,8 @@ def test_without_nvidia_smi_there_is_no_vram(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_vision_env_values() -> None:
-    assert lm.vision_env_values("llava:7b") == {"SCOUTR_VISION_MODEL": "ollama_chat/llava:7b"}
-    assert lm.vision_env_values(lm.VISION_MODELS[0])["SCOUTR_VISION_MODEL"].startswith(
+    assert lm.vision_env_values("llava:7b") == {"CORTEX_VISION_MODEL": "ollama_chat/llava:7b"}
+    assert lm.vision_env_values(lm.VISION_MODELS[0])["CORTEX_VISION_MODEL"].startswith(
         "ollama_chat/"
     )
 

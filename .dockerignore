@@ -8,7 +8,7 @@ __pycache__
 dist
 build
 *.egg-info
-.scoutr
+.cortex
 exports
 data
 .env

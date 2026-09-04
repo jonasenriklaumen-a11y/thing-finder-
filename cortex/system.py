@@ -215,8 +215,8 @@ def available_models(settings: Any) -> list[dict[str, str]]:
     die ein Schluessel hinterlegt ist. Was keinen Schluessel hat, taucht nicht
     auf -- eine Auswahl, die beim Anklicken scheitert, hilft niemandem.
     """
-    from scoutr.config import provider_of
-    from scoutr.local_model import DEFAULT_OLLAMA_URL, installed_models, known_model
+    from cortex.config import provider_of
+    from cortex.local_model import DEFAULT_OLLAMA_URL, installed_models, known_model
 
     found: list[dict[str, str]] = []
     base = getattr(settings, "api_base", "") or DEFAULT_OLLAMA_URL

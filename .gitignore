@@ -8,7 +8,7 @@ dist/
 .env
 .pytest_cache/
 .ruff_cache/
-.scoutr/
+.cortex/
 sessions/
 exports/*
 !exports/.gitkeep

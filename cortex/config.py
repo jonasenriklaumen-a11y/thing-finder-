@@ -1,7 +1,7 @@
-"""Konfiguration von scoutr.
+"""Konfiguration von cortex.
 
 Alle Einstellungen kommen aus Umgebungsvariablen bzw. der `.env` im
-Arbeitsverzeichnis oder unter `~/.config/scoutr/.env`.
+Arbeitsverzeichnis oder unter `~/.config/cortex/.env`.
 """
 
 from __future__ import annotations
@@ -14,15 +14,17 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from cortex import __version__
+
 #: Reihenfolge, in der nach einer `.env` gesucht wird (erste gewinnt).
 ENV_CANDIDATES: tuple[Path, ...] = (
     Path.cwd() / ".env",
-    Path.home() / ".config" / "scoutr" / ".env",
-    Path.home() / ".scoutr" / ".env",
+    Path.home() / ".config" / "cortex" / ".env",
+    Path.home() / ".cortex" / ".env",
 )
 
 #: Ort, an den `cortex setup` schreibt, wenn noch keine `.env` existiert.
-DEFAULT_ENV_PATH = Path.home() / ".config" / "scoutr" / ".env"
+DEFAULT_ENV_PATH = Path.home() / ".config" / "cortex" / ".env"
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
 
@@ -105,8 +107,8 @@ def provider_of(model: str) -> str:
 
 #: Fuer Anbieter, die in PROVIDER_KEYS nicht stehen. LiteLLM kennt weit mehr
 #: Provider, als hier sinnvoll aufzuzaehlen sind -- damit laesst sich jeder
-#: davon nutzen, ohne dass scoutr angepasst werden muss.
-GENERIC_KEY_NAME = "SCOUTR_API_KEY"
+#: davon nutzen, ohne dass cortex angepasst werden muss.
+GENERIC_KEY_NAME = "CORTEX_API_KEY"
 
 
 def api_key_name_for(model: str) -> str:
@@ -186,7 +188,7 @@ def base_fits(url: str, model: str) -> bool:
     """Passt die eigene Adresse zu diesem Modell?
 
     Wer von Ollama auf einen Cloud-Anbieter wechselt, laesst leicht
-    `SCOUTR_API_BASE=http://localhost:11434` stehen. LiteLLM schickt die
+    `CORTEX_API_BASE=http://localhost:11434` stehen. LiteLLM schickt die
     Anfrage dann brav dorthin, und Ollama antwortet mit "404 page not found"
     -- was wie ein Fehler des Anbieters aussieht, aber keiner ist.
 
@@ -243,7 +245,7 @@ class Settings:
     keep_full_results: int = 4
     #: Obergrenze fuer parallele Subagenten.
     max_subagents: int = 12
-    #: Zerlegt scoutr jede Frage von sich aus in Teilaufgaben?
+    #: Zerlegt cortex jede Frage von sich aus in Teilaufgaben?
     subagents_auto: bool = True
     #: Zeitlimit fuer die Chat-oder-Recherche-Vorpruefung in Sekunden.
     triage_timeout: float = 5.0
@@ -267,7 +269,7 @@ class Settings:
     ha_url: str = ""
     #: Langlebiges Zugriffstoken aus dem Home-Assistant-Profil.
     ha_token: str = ""
-    #: Darf scoutr im Haus auch SCHALTEN, oder nur nachsehen? Aus gutem Grund
+    #: Darf cortex im Haus auch SCHALTEN, oder nur nachsehen? Aus gutem Grund
     #: standardmaessig aus: eine missverstandene Nebenbemerkung soll nicht das
     #: Licht ausmachen.
     ha_control: bool = False
@@ -278,12 +280,12 @@ class Settings:
     #: nirgends auf der Platte.
     memory_key: str = ""
     #: Darf Cortex AI Gmail und den Google Kalender lesen? Aus, bis es jemand
-    #: einschaltet -- und selbst dann nur lesend (siehe scoutr/google.py).
+    #: einschaltet -- und selbst dann nur lesend (siehe cortex/google.py).
     google_enabled: bool = False
     #: Zugangsdaten der eigenen Google-Cloud-Anwendung (Typ "Desktop").
     google_client_id: str = ""
     google_client_secret: str = ""
-    #: Darf scoutr das eigene Netz durchsuchen?
+    #: Darf cortex das eigene Netz durchsuchen?
     lan_enabled: bool = True
     #: Netz, das dabei durchsucht wird. Leer = das eigene automatisch erkennen.
     lan_subnet: str = ""
@@ -294,20 +296,25 @@ class Settings:
     #: einzige findet nur, was zufaellig genau so im Netz steht; zwei bis drei
     #: decken deutlich mehr ab. Ab der vierten wird es beliebig. 1 = aus.
     search_variants: int = 3
-    user_agent: str = (
-        "scoutr/0.1 (+https://github.com/jonasenriklaumen-a11y/thing-finder-; "
-        "research agent; contact via repository issues)"
+    #: Womit sich Cortex bei Webseiten meldet. Ehrlich und mit Kontaktweg --
+    #: die Version kommt aus dem Paket, damit hier nicht jahrelang eine
+    #: falsche Nummer steht.
+    user_agent: str = field(
+        default_factory=lambda: (
+            f"cortex/{__version__} (+https://github.com/jonasenriklaumen-a11y/thing-finder-; "
+            "research agent; contact via repository issues)"
+        )
     )
     request_delay_seconds: float = 1.0
     enable_playwright: bool = True
     download_images: bool = False
-    data_dir: Path = field(default_factory=lambda: Path.home() / ".scoutr")
+    data_dir: Path = field(default_factory=lambda: Path.home() / ".cortex")
     env_path: Path | None = None
 
     # -- Ableitungen ------------------------------------------------------
     @property
     def db_path(self) -> Path:
-        return self.data_dir / "scoutr.sqlite3"
+        return self.data_dir / "cortex.sqlite3"
 
     @property
     def effective_vision_model(self) -> str:
@@ -395,6 +402,15 @@ class Settings:
         if provider_of(model) in ("ollama", "ollama_chat"):
             kwargs["num_ctx"] = 2048
             kwargs["reasoning_effort"] = "disable"
+            return kwargs
+        # In der Cloud dasselbe Problem, nur teurer: ein Denk-Modell ueberlegt
+        # sekundenlang, bevor drei Stichworte kommen -- und diese Sekunden
+        # liegen vor JEDER Anfrage. `drop_params` laesst LiteLLM den Wunsch
+        # stillschweigend weglassen, wenn der Anbieter ihn nicht kennt; das
+        # ist hier gefahrlos, weil diese Aufrufe keine Werkzeuge mitschicken,
+        # die dabei verlorengehen koennten.
+        kwargs["reasoning_effort"] = "low"
+        kwargs["drop_params"] = True
         return kwargs
 
     def missing_requirements(self) -> list[str]:
@@ -410,7 +426,7 @@ class Settings:
         if backend_key and not _env_str(backend_key):
             problems.append(f"{backend_key} fehlt (fuer Suchmaschine {self.search_backend})")
         if self.search_backend == "searxng" and not self.searxng_url:
-            problems.append("SCOUTR_SEARXNG_URL fehlt (fuer Suchmaschine searxng)")
+            problems.append("CORTEX_SEARXNG_URL fehlt (fuer Suchmaschine searxng)")
         return problems
 
 
@@ -418,43 +434,43 @@ class Settings:
 def get_settings() -> Settings:
     """Settings aus der Umgebung lesen (Ergebnis wird gecacht)."""
     env_path = load_env()
-    data_dir = Path(_env_str("SCOUTR_DATA_DIR") or str(Path.home() / ".scoutr"))
+    data_dir = Path(_env_str("CORTEX_DATA_DIR") or str(Path.home() / ".cortex"))
     settings = Settings(
-        model=_env_str("SCOUTR_MODEL", DEFAULT_MODEL),
-        vision_model=_env_str("SCOUTR_VISION_MODEL"),
-        api_base=_env_str("SCOUTR_API_BASE"),
-        search_backend=_env_str("SCOUTR_SEARCH_BACKEND", "duckduckgo").lower(),
-        search_engines=_env_str("SCOUTR_SEARCH_ENGINES"),
-        searxng_url=_env_str("SCOUTR_SEARXNG_URL"),
-        location=_env_str("SCOUTR_LOCATION"),
-        lang=_env_str("SCOUTR_LANG", "de"),
-        country=_env_str("SCOUTR_COUNTRY", "de"),
-        max_tool_calls=_env_int("SCOUTR_MAX_TOOL_CALLS", 20),
-        llm_retries=_env_int("SCOUTR_LLM_RETRIES", 3),
-        max_tool_chars=_env_int("SCOUTR_MAX_TOOL_CHARS", 8000),
-        keep_full_results=_env_int("SCOUTR_KEEP_FULL_RESULTS", 4),
-        max_subagents=_env_int("SCOUTR_MAX_SUBAGENTS", 12),
-        subagents_auto=_env_bool("SCOUTR_SUBAGENTS_AUTO", True),
-        triage_timeout=float(_env_int("SCOUTR_TRIAGE_TIMEOUT", 5)),
-        planner_timeout=float(_env_int("SCOUTR_PLANNER_TIMEOUT", 20)),
-        context_tokens=_env_int("SCOUTR_CONTEXT_TOKENS", 16384),
-        subagent_model=_env_str("SCOUTR_SUBAGENT_MODEL"),
-        subagent_budget=_env_int("SCOUTR_SUBAGENT_BUDGET", 6),
-        subagent_parallel=_env_int("SCOUTR_SUBAGENT_PARALLEL", 0),
-        ha_url=_env_str("SCOUTR_HA_URL"),
-        ha_token=_env_str("HA_TOKEN") or _env_str("SCOUTR_HA_TOKEN"),
-        ha_control=_env_bool("SCOUTR_HA_CONTROL", False),
-        memory_enabled=_env_bool("SCOUTR_MEMORY", True),
-        memory_key=_env_str("SCOUTR_MEMORY_KEY"),
-        lan_enabled=_env_bool("SCOUTR_LAN_ENABLED", True),
-        lan_subnet=_env_str("SCOUTR_LAN_SUBNET"),
-        fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),
-        cache_ttl_hours=_env_int("SCOUTR_CACHE_TTL_HOURS", 24),
-        search_variants=_env_int("SCOUTR_SEARCH_VARIANTS", 3),
-        google_enabled=_env_bool("SCOUTR_GOOGLE", False),
+        model=_env_str("CORTEX_MODEL", DEFAULT_MODEL),
+        vision_model=_env_str("CORTEX_VISION_MODEL"),
+        api_base=_env_str("CORTEX_API_BASE"),
+        search_backend=_env_str("CORTEX_SEARCH_BACKEND", "duckduckgo").lower(),
+        search_engines=_env_str("CORTEX_SEARCH_ENGINES"),
+        searxng_url=_env_str("CORTEX_SEARXNG_URL"),
+        location=_env_str("CORTEX_LOCATION"),
+        lang=_env_str("CORTEX_LANG", "de"),
+        country=_env_str("CORTEX_COUNTRY", "de"),
+        max_tool_calls=_env_int("CORTEX_MAX_TOOL_CALLS", 20),
+        llm_retries=_env_int("CORTEX_LLM_RETRIES", 3),
+        max_tool_chars=_env_int("CORTEX_MAX_TOOL_CHARS", 8000),
+        keep_full_results=_env_int("CORTEX_KEEP_FULL_RESULTS", 4),
+        max_subagents=_env_int("CORTEX_MAX_SUBAGENTS", 12),
+        subagents_auto=_env_bool("CORTEX_SUBAGENTS_AUTO", True),
+        triage_timeout=float(_env_int("CORTEX_TRIAGE_TIMEOUT", 5)),
+        planner_timeout=float(_env_int("CORTEX_PLANNER_TIMEOUT", 20)),
+        context_tokens=_env_int("CORTEX_CONTEXT_TOKENS", 16384),
+        subagent_model=_env_str("CORTEX_SUBAGENT_MODEL"),
+        subagent_budget=_env_int("CORTEX_SUBAGENT_BUDGET", 6),
+        subagent_parallel=_env_int("CORTEX_SUBAGENT_PARALLEL", 0),
+        ha_url=_env_str("CORTEX_HA_URL"),
+        ha_token=_env_str("HA_TOKEN") or _env_str("CORTEX_HA_TOKEN"),
+        ha_control=_env_bool("CORTEX_HA_CONTROL", False),
+        memory_enabled=_env_bool("CORTEX_MEMORY", True),
+        memory_key=_env_str("CORTEX_MEMORY_KEY"),
+        lan_enabled=_env_bool("CORTEX_LAN_ENABLED", True),
+        lan_subnet=_env_str("CORTEX_LAN_SUBNET"),
+        fetch_timeout=float(_env_int("CORTEX_FETCH_TIMEOUT", 15)),
+        cache_ttl_hours=_env_int("CORTEX_CACHE_TTL_HOURS", 24),
+        search_variants=_env_int("CORTEX_SEARCH_VARIANTS", 3),
+        google_enabled=_env_bool("CORTEX_GOOGLE", False),
         google_client_id=_env_str("GOOGLE_CLIENT_ID"),
         google_client_secret=_env_str("GOOGLE_CLIENT_SECRET"),
-        enable_playwright=_env_bool("SCOUTR_ENABLE_PLAYWRIGHT", True),
+        enable_playwright=_env_bool("CORTEX_ENABLE_PLAYWRIGHT", True),
         data_dir=data_dir,
         env_path=env_path,
     )

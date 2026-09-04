@@ -449,20 +449,20 @@ input:focus,select:focus{border-color:var(--accent)}
 <div class="overlay" id="overlay">
   <div class="sheet">
     <h2>Einstellungen</h2>
-    <p class="lead">Alles, was du auch bei <code>scoutr setup</code> festlegst. Landet in
+    <p class="lead">Alles, was du auch bei <code>cortex setup</code> festlegst. Landet in
       deiner <code>.env</code> und gilt sofort.</p>
     <form id="settings">
       <fieldset><legend>Modell</legend>
         <label><span class="lbl">Hauptmodell <span class="why">Anbieter und Name, z.B. openai/gpt-4o</span></span>
-          <input type="text" name="SCOUTR_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
+          <input type="text" name="CORTEX_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
         <div class="row">
           <label><span class="lbl">Vision-Modell (leer = Hauptmodell)</span>
-            <input type="text" name="SCOUTR_VISION_MODEL"></label>
+            <input type="text" name="CORTEX_VISION_MODEL"></label>
           <label><span class="lbl">Subagenten-Modell (leer = Hauptmodell)</span>
-            <input type="text" name="SCOUTR_SUBAGENT_MODEL"></label>
+            <input type="text" name="CORTEX_SUBAGENT_MODEL"></label>
         </div>
         <label><span class="lbl">Eigene Adresse <span class="why">Nur nötig, wenn das Modell nicht beim Anbieter selbst liegt</span></span>
-          <input type="text" name="SCOUTR_API_BASE" placeholder="http://localhost:11434"></label>
+          <input type="text" name="CORTEX_API_BASE" placeholder="http://localhost:11434"></label>
         <div class="row">
           <label><span class="lbl">Anbieter</span>
             <select id="provider">
@@ -481,7 +481,7 @@ input:focus,select:focus{border-color:var(--accent)}
 
       <fieldset><legend>Speicher</legend>
         <div class="check">
-          <input type="checkbox" id="memon" name="SCOUTR_MEMORY">
+          <input type="checkbox" id="memon" name="CORTEX_MEMORY">
           <label for="memon" style="margin:0">Cortex AI darf sich Dinge merken
             <span class="why">Legt an, was länger gilt — Wohnort, Vorlieben, laufende
               Vorhaben — und findet es im nächsten Gespräch wieder. Nur Text, nie Bilder.
@@ -518,7 +518,7 @@ input:focus,select:focus{border-color:var(--accent)}
 
       <fieldset><legend>Gmail &amp; Kalender</legend>
         <div class="check">
-          <input type="checkbox" name="SCOUTR_GOOGLE" id="google-on">
+          <input type="checkbox" name="CORTEX_GOOGLE" id="google-on">
           <label for="google-on" style="margin:0">Termine und Mails lesen dürfen
             <span class="why">Cortex AI kann dann Fragen zu Terminen und E-Mails
               beantworten und die Angaben für die Recherche nutzen. Nur lesen —
@@ -575,7 +575,7 @@ input:focus,select:focus{border-color:var(--accent)}
       <fieldset><legend>Zuhause &amp; Netz</legend>
         <div class="inline">
           <label><span class="lbl">Home Assistant</span>
-            <input type="text" name="SCOUTR_HA_URL" placeholder="192.168.1.5:8123"></label>
+            <input type="text" name="CORTEX_HA_URL" placeholder="192.168.1.5:8123"></label>
           <button type="button" class="btn" id="ha-find">Suchen</button>
         </div>
         <div class="inline">
@@ -586,35 +586,35 @@ input:focus,select:focus{border-color:var(--accent)}
         </div>
         <div class="note" id="ha-note"></div>
         <div class="check">
-          <input type="checkbox" id="hactl" name="SCOUTR_HA_CONTROL">
+          <input type="checkbox" id="hactl" name="CORTEX_HA_CONTROL">
           <label for="hactl" style="margin:0">Cortex AI darf auch schalten
             <span class="why">Ohne Haken sieht er nur nach. Schlösser, Alarm, Tore und
               Heizung fragen auch mit Haken jedes Mal nach.</span></label>
         </div>
         <div class="check">
-          <input type="checkbox" id="lanon" name="SCOUTR_LAN_ENABLED">
+          <input type="checkbox" id="lanon" name="CORTEX_LAN_ENABLED">
           <label for="lanon" style="margin:0">Ins eigene Netz sehen dürfen
             <span class="why">Für Fragen wie „welche Geräte hängen hier" oder „läuft mein
               Drucker". Nur private Netze, nur die Frage ob etwas antwortet.</span></label>
         </div>
         <label><span class="lbl">Netz (leer = automatisch erkennen)</span>
-          <input type="text" name="SCOUTR_LAN_SUBNET" placeholder="192.168.1.0/24"></label>
+          <input type="text" name="CORTEX_LAN_SUBNET" placeholder="192.168.1.0/24"></label>
       </fieldset>
 
       <fieldset><legend>Suche</legend>
         <div class="row">
           <label><span class="lbl">Suchmaschine</span>
-            <select name="SCOUTR_SEARCH_BACKEND">
+            <select name="CORTEX_SEARCH_BACKEND">
               <option value="duckduckgo">Offene Metasuche (kein Key)</option>
               <option value="searxng">SearXNG (eigene Instanz)</option>
               <option value="brave">Brave Search (Key)</option>
               <option value="tavily">Tavily (Key)</option>
             </select></label>
           <label><span class="lbl">Suchdienste <span class="why">Leer lassen nutzt alle</span></span>
-            <input type="text" name="SCOUTR_SEARCH_ENGINES" placeholder="duckduckgo,mojeek"></label>
+            <input type="text" name="CORTEX_SEARCH_ENGINES" placeholder="duckduckgo,mojeek"></label>
         </div>
         <label><span class="lbl">SearXNG-Adresse</span>
-          <input type="text" name="SCOUTR_SEARXNG_URL" placeholder="http://localhost:8080"></label>
+          <input type="text" name="CORTEX_SEARXNG_URL" placeholder="http://localhost:8080"></label>
         <div class="row">
           <label><span class="lbl">Schlüssel der Suchmaschine
             <span class="why" id="search-keyname">nur bei Brave und Tavily nötig</span></span>
@@ -623,7 +623,7 @@ input:focus,select:focus{border-color:var(--accent)}
           <label><span class="lbl">Formulierungen je Suche
             <span class="why">Dieselbe Frage anders gestellt findet mehr. 2 bis 3 ist
               das Maß, 1 schaltet es ab.</span></span>
-            <input type="number" name="SCOUTR_SEARCH_VARIANTS" min="1" max="3"></label>
+            <input type="number" name="CORTEX_SEARCH_VARIANTS" min="1" max="3"></label>
         </div>
         <div class="inline">
           <button type="button" class="btn" id="probe">Verbindung testen</button>
@@ -634,45 +634,45 @@ input:focus,select:focus{border-color:var(--accent)}
       <fieldset><legend>Ort &amp; Sprache</legend>
         <div class="row">
           <label><span class="lbl">Standard-Ort</span>
-            <input type="text" name="SCOUTR_LOCATION" placeholder="Mönchengladbach"></label>
+            <input type="text" name="CORTEX_LOCATION" placeholder="Mönchengladbach"></label>
           <label><span class="lbl">Sprache / Land</span>
             <div class="row">
-              <input type="text" name="SCOUTR_LANG" placeholder="de">
-              <input type="text" name="SCOUTR_COUNTRY" placeholder="de">
+              <input type="text" name="CORTEX_LANG" placeholder="de">
+              <input type="text" name="CORTEX_COUNTRY" placeholder="de">
             </div></label>
         </div>
       </fieldset>
 
       <fieldset><legend>Subagenten &amp; Limits</legend>
         <div class="check">
-          <input type="checkbox" id="auto" name="SCOUTR_SUBAGENTS_AUTO">
+          <input type="checkbox" id="auto" name="CORTEX_SUBAGENTS_AUTO">
           <label for="auto" style="margin:0">Fragen automatisch aufteilen
             <span class="why">Große Fragen werden in Teilfragen zerlegt und parallel
               recherchiert. Das dauert kürzer, kostet aber mehr Aufrufe.</span></label>
         </div>
         <div class="row">
           <label><span class="lbl">Helfer je Anfrage <span class="why">Wie viele Teilfragen gleichzeitig bearbeitet werden. 0 schaltet sie ab</span></span>
-            <input type="text" name="SCOUTR_MAX_SUBAGENTS"></label>
+            <input type="text" name="CORTEX_MAX_SUBAGENTS"></label>
           <label><span class="lbl">Suchen je Helfer <span class="why">Wie oft ein Helfer suchen oder eine Seite lesen darf</span></span>
-            <input type="text" name="SCOUTR_SUBAGENT_BUDGET"></label>
+            <input type="text" name="CORTEX_SUBAGENT_BUDGET"></label>
         </div>
         <div class="row">
           <label><span class="lbl">Suchen je Anfrage <span class="why">Obergrenze für Suchen und Seitenaufrufe zusammen</span></span>
-            <input type="text" name="SCOUTR_MAX_TOOL_CALLS"></label>
+            <input type="text" name="CORTEX_MAX_TOOL_CALLS"></label>
           <label><span class="lbl">Gedächtnis im Gespräch <span class="why">Wie viel vom Gespräch das Modell überblickt. Gilt nur für lokale Modelle</span></span>
-            <input type="text" name="SCOUTR_CONTEXT_TOKENS"></label>
+            <input type="text" name="CORTEX_CONTEXT_TOKENS"></label>
         </div>
         <div class="row">
           <label><span class="lbl">Zeit fürs Planen <span class="why">Sekunden, die das Zerlegen einer Frage dauern darf</span></span>
-            <input type="text" name="SCOUTR_PLANNER_TIMEOUT"></label>
+            <input type="text" name="CORTEX_PLANNER_TIMEOUT"></label>
           <label><span class="lbl">Gleichzeitig <span class="why">Wie viele Helfer parallel laufen. 0 überlässt es Cortex AI</span></span>
-            <input type="text" name="SCOUTR_SUBAGENT_PARALLEL"></label>
+            <input type="text" name="CORTEX_SUBAGENT_PARALLEL"></label>
         </div>
         <div class="check">
-          <input type="checkbox" id="pw" name="SCOUTR_ENABLE_PLAYWRIGHT">
+          <input type="checkbox" id="pw" name="CORTEX_ENABLE_PLAYWRIGHT">
           <label for="pw" style="margin:0">Seiten mit echtem Browser laden
             <span class="why">Für Seiten, die ihren Inhalt erst nachladen. Braucht
-              einmalig <code>scoutr install-browser</code>.</span></label>
+              einmalig <code>cortex install-browser</code>.</span></label>
         </div>
       </fieldset>
 
@@ -698,14 +698,14 @@ let currentModel = "";
    damit es nicht in jedem Screenshot mitfaehrt. */
 let token = new URLSearchParams(location.search).get("token") || "";
 try {
-  if (token) localStorage.setItem("scoutr-token", token);
-  else token = localStorage.getItem("scoutr-token") || "";
+  if (token) localStorage.setItem("cortex-token", token);
+  else token = localStorage.getItem("cortex-token") || "";
 } catch {}
 if (location.search) history.replaceState(null, "", location.pathname);
 
 function api(path, options = {}){
   const headers = Object.assign({}, options.headers);
-  if (token) headers["X-Scoutr-Token"] = token;
+  if (token) headers["X-Cortex-Token"] = token;
   return fetch(path, Object.assign({}, options, { headers }));
 }
 
@@ -988,6 +988,9 @@ async function ask(text){
       buf += dec.decode(value, { stream:true });
       const parts = buf.split("\n\n"); buf = parts.pop();
       for (const part of parts){
+        // Zeilen mit Doppelpunkt am Anfang sind Kommentare -- damit haelt
+        // der Server die Leitung warm, waehrend das Modell nachdenkt.
+        if (part.trimStart().startsWith(":")) continue;
         const line = part.replace(/^data: ?/, "").trim();
         if (!line) continue;
         let ev; try { ev = JSON.parse(line); } catch { continue; }
@@ -995,7 +998,22 @@ async function ask(text){
       }
     }
   } catch (err){
-    step(steps, "[Fehler]", String(err), "err");
+    // Ein abgerissener Strom ist etwas anderes als ein Programmfehler: die
+    // Recherche laeuft auf dem Rechner weiter, nur die Leitung ist weg.
+    // "TypeError: network error" waere hier eine nutzlose Auskunft.
+    const broken = err instanceof TypeError
+      || /network|fetch|load failed|abgebrochen/i.test(String(err.message || err));
+    if (broken){
+      step(steps, "[Verbindung]",
+        answer
+          ? "Die Verbindung ist mittendrin abgerissen. Oben steht, was bis dahin ankam."
+          : "Keine Verbindung zu Cortex. Läuft das Programm noch? "
+            + "Bei einem Modell aus der Cloud kann die erste Antwort etwas dauern.",
+        "warn");
+    } else {
+      step(steps, "[Fehler]", String(err), "err");
+    }
+    if (answer) bubble.innerHTML = md(answer);
   }
 
   // Denkschritte kommen tokenweise. Jedes Token als eigene Zeile waere
@@ -1128,15 +1146,15 @@ $("#btn-notes").addEventListener("click", () => {
 });
 $("#btn-home").addEventListener("click", () => {
   $("#btn-settings").click();
-  setTimeout(() => document.querySelector('[name="SCOUTR_HA_URL"]')?.focus(), 120);
+  setTimeout(() => document.querySelector('[name="CORTEX_HA_URL"]')?.focus(), 120);
 });
 $("#btn-theme").addEventListener("click", () => {
   const light = document.documentElement.getAttribute("data-theme") !== "dark";
   document.documentElement.setAttribute("data-theme", light ? "dark" : "light");
-  try { localStorage.setItem("scoutr-theme", light ? "dark" : "light"); } catch {}
+  try { localStorage.setItem("cortex-theme", light ? "dark" : "light"); } catch {}
 });
 try {
-  const saved = localStorage.getItem("scoutr-theme");
+  const saved = localStorage.getItem("cortex-theme");
   if (saved) document.documentElement.setAttribute("data-theme", saved);
   else if (matchMedia("(prefers-color-scheme: dark)").matches)
     document.documentElement.setAttribute("data-theme", "dark");
@@ -1219,7 +1237,7 @@ async function openPicker(){
   if (!models.length){
     list.innerHTML = '<div class="picker-foot">Kein Modell gefunden. '
       + 'Trag unter Einstellungen einen Anbieter samt Schlüssel ein, '
-      + 'oder installiere eins mit <code>scoutr install-model</code>.</div>';
+      + 'oder installiere eins mit <code>cortex install-model</code>.</div>';
     return;
   }
   list.innerHTML = "";
@@ -1242,7 +1260,7 @@ async function chooseModel(model){
   $("#model-name").textContent = model.label;
   const res = await api("/api/config", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ SCOUTR_MODEL: model.id })
+    body: JSON.stringify({ CORTEX_MODEL: model.id })
   });
   const data = await res.json();
   if (data.ok){ currentModel = model.id; refreshHeader(); }
@@ -1286,7 +1304,7 @@ $("#btn-settings").addEventListener("click", async () => {
   api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
   $("#showtrace").checked = document.body.classList.contains("tracing");
   let wanted = false;
-  try { wanted = localStorage.getItem("scoutr-showload") === "1"; } catch {}
+  try { wanted = localStorage.getItem("cortex-showload") === "1"; } catch {}
   $("#showload").checked = wanted;
   if (wanted) $("#showload").dispatchEvent(new Event("change"));
   $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
@@ -1346,7 +1364,7 @@ function fillProviders(){
     const found = PROVIDERS.find(entry => entry[0] === select.value);
     if (!found) return;
     const [, label, keyName, example, shape] = found;
-    const model = form.elements["SCOUTR_MODEL"];
+    const model = form.elements["CORTEX_MODEL"];
     if (!model.value.startsWith(select.value + "/")) model.value = example;
     const key = form.elements["__API_KEY__"];
     key.placeholder = shape ? `${shape}  (leer lassen = unverändert)` : "leer lassen = unverändert";
@@ -1359,8 +1377,8 @@ function fillProviders(){
 }
 
 // Nur die Felder aus dem Modell-Abschnitt speichern, nicht das ganze Formular.
-const MODEL_FIELDS = ["SCOUTR_MODEL", "SCOUTR_VISION_MODEL", "SCOUTR_SUBAGENT_MODEL",
-                      "SCOUTR_API_BASE"];
+const MODEL_FIELDS = ["CORTEX_MODEL", "CORTEX_VISION_MODEL", "CORTEX_SUBAGENT_MODEL",
+                      "CORTEX_API_BASE"];
 
 $("#save-model").addEventListener("click", async () => {
   const note = $("#model-note");
@@ -1387,10 +1405,10 @@ $("#save-model").addEventListener("click", async () => {
   note.className = "note ok";
   // Der Server ergaenzt ein fehlendes Anbieter-Praefix -- das soll man sehen.
   const fresh = await (await api("/api/config")).json();
-  const saved = fresh.values.SCOUTR_MODEL;
-  form.elements["SCOUTR_MODEL"].value = saved;
+  const saved = fresh.values.CORTEX_MODEL;
+  form.elements["CORTEX_MODEL"].value = saved;
   form.elements["__API_KEY__"].value = "";
-  note.textContent = saved !== values.SCOUTR_MODEL
+  note.textContent = saved !== values.CORTEX_MODEL
     ? `Gespeichert als ${saved} — das Anbieter-Kürzel hat gefehlt.`
     : `${saved} ist jetzt aktiv.`;
   refreshHeader();
@@ -1403,11 +1421,11 @@ $("#save-model").addEventListener("click", async () => {
 function setTracing(on){
   document.body.classList.toggle("tracing", on);
   try {
-    if (on) localStorage.setItem("scoutr-trace", "1");
-    else localStorage.removeItem("scoutr-trace");
+    if (on) localStorage.setItem("cortex-trace", "1");
+    else localStorage.removeItem("cortex-trace");
   } catch {}
 }
-try { if (localStorage.getItem("scoutr-trace") === "1") document.body.classList.add("tracing"); }
+try { if (localStorage.getItem("cortex-trace") === "1") document.body.classList.add("tracing"); }
 catch {}
 $("#showtrace").addEventListener("change", (e) => setTracing(e.target.checked));
 
@@ -1433,8 +1451,8 @@ $("#showload").addEventListener("change", (e) => {
   stopLoad();
   const on = e.target.checked;
   try {
-    if (on) localStorage.setItem("scoutr-showload", "1");
-    else localStorage.removeItem("scoutr-showload");
+    if (on) localStorage.setItem("cortex-showload", "1");
+    else localStorage.removeItem("cortex-showload");
   } catch {}
   if (!on){ $("#usage-note").innerHTML = ""; return; }
   showLoad();
@@ -1513,7 +1531,7 @@ $("#ha-find").addEventListener("click", async () => {
       + "wenn du Home Assistant offen hast.";
     return;
   }
-  form.elements["SCOUTR_HA_URL"].value = data.found[0];
+  form.elements["CORTEX_HA_URL"].value = data.found[0];
   note.className = "note ok";
   note.textContent = data.found.length === 1
     ? `Gefunden: ${data.found[0]}`
@@ -1521,7 +1539,7 @@ $("#ha-find").addEventListener("click", async () => {
 });
 $("#ha-test").addEventListener("click", async () => {
   const data = await haCall({
-    url: form.elements["SCOUTR_HA_URL"].value.trim(),
+    url: form.elements["CORTEX_HA_URL"].value.trim(),
     token: form.elements["__HA_TOKEN__"].value.trim(),
   });
   if (!data) return;
@@ -1609,11 +1627,11 @@ $("#probe").addEventListener("click", async () => {
   note.className = "note"; note.textContent = "Teste Modell und Suche …";
   button.disabled = true;
   const body = {
-    SCOUTR_MODEL: form.elements["SCOUTR_MODEL"].value.trim(),
-    SCOUTR_API_BASE: form.elements["SCOUTR_API_BASE"].value.trim(),
-    SCOUTR_SEARCH_BACKEND: form.elements["SCOUTR_SEARCH_BACKEND"].value,
-    SCOUTR_SEARCH_ENGINES: form.elements["SCOUTR_SEARCH_ENGINES"].value.trim(),
-    SCOUTR_SEARXNG_URL: form.elements["SCOUTR_SEARXNG_URL"].value.trim(),
+    CORTEX_MODEL: form.elements["CORTEX_MODEL"].value.trim(),
+    CORTEX_API_BASE: form.elements["CORTEX_API_BASE"].value.trim(),
+    CORTEX_SEARCH_BACKEND: form.elements["CORTEX_SEARCH_BACKEND"].value,
+    CORTEX_SEARCH_ENGINES: form.elements["CORTEX_SEARCH_ENGINES"].value.trim(),
+    CORTEX_SEARXNG_URL: form.elements["CORTEX_SEARXNG_URL"].value.trim(),
     __API_KEY__: form.elements["__API_KEY__"].value.trim(),
     __SEARCH_KEY__: form.elements["__SEARCH_KEY__"].value.trim(),
   };
@@ -1634,11 +1652,11 @@ Suche (${data.search.backend}): ${mark(data.search)}`;
 // Der Hinweis am Schluesselfeld richtet sich nach der gewaehlten Suchmaschine.
 function searchKeyHint(){
   const names = { brave: "BRAVE_API_KEY", tavily: "TAVILY_API_KEY" };
-  const name = names[form.elements["SCOUTR_SEARCH_BACKEND"].value] || "";
+  const name = names[form.elements["CORTEX_SEARCH_BACKEND"].value] || "";
   $("#search-keyname").textContent = name
     ? `(${name})` : "nur bei Brave und Tavily nötig";
 }
-form.elements["SCOUTR_SEARCH_BACKEND"].addEventListener("change", searchKeyHint);
+form.elements["CORTEX_SEARCH_BACKEND"].addEventListener("change", searchKeyHint);
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -1675,13 +1693,13 @@ async function refreshHeader(){
     const cfg = await (await api("/api/config")).json();
     $("#version").textContent = "v" + cfg.version;
     document.title = `Cortex AI ${cfg.version}`;
-    currentModel = cfg.values.SCOUTR_MODEL || "";
+    currentModel = cfg.values.CORTEX_MODEL || "";
     $("#model-name").textContent = currentModel.split("/").pop() || "Modell wählen";
     // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
     // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.
-    const bits = [cfg.values.SCOUTR_LOCATION || "kein Ortsfilter"];
+    const bits = [cfg.values.CORTEX_LOCATION || "kein Ortsfilter"];
     if (cfg.ha_connected) bits.push("Zuhause verbunden");
-    if (cfg.values.SCOUTR_MEMORY === "true") bits.push("Speicher an");
+    if (cfg.values.CORTEX_MEMORY === "true") bits.push("Speicher an");
     $("#status").textContent = bits.join(" · ");
     $("#status").title = cfg.problems?.length ? cfg.problems.join("; ") : "";
     $("#home-dot").className = "dot" + (cfg.ha_connected ? " on" : "");

@@ -15,7 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from scoutr.models import Product
+from cortex.models import Product
 
 SKIP_LABELS: dict[str, str] = {
     "blocked": "blockiert",
@@ -43,7 +43,7 @@ def shorten(text: str, limit: int = 70) -> str:
 
 
 def _domain(url: str) -> str:
-    from scoutr.models import domain_of
+    from cortex.models import domain_of
 
     return domain_of(url) or url
 

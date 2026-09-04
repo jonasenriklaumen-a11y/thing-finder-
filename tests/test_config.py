@@ -6,19 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from scoutr import config
+from cortex import config
 
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in (
-        "SCOUTR_MODEL",
-        "SCOUTR_SEARCH_BACKEND",
-        "SCOUTR_LOCATION",
-        "SCOUTR_LANG",
-        "SCOUTR_COUNTRY",
-        "SCOUTR_MAX_TOOL_CALLS",
-        "SCOUTR_DATA_DIR",
+        "CORTEX_MODEL",
+        "CORTEX_SEARCH_BACKEND",
+        "CORTEX_LOCATION",
+        "CORTEX_LANG",
+        "CORTEX_COUNTRY",
+        "CORTEX_MAX_TOOL_CALLS",
+        "CORTEX_DATA_DIR",
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "BRAVE_API_KEY",
@@ -36,7 +36,7 @@ def test_provider_and_key_name() -> None:
 
 
 def test_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
     settings = config.get_settings()
     assert settings.model == config.DEFAULT_MODEL
     assert settings.search_backend == "duckduckgo"
@@ -45,9 +45,9 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("SCOUTR_MODEL", "openai/gpt-4o")
-    monkeypatch.setenv("SCOUTR_MAX_TOOL_CALLS", "5")
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_MODEL", "openai/gpt-4o")
+    monkeypatch.setenv("CORTEX_MAX_TOOL_CALLS", "5")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-1234")
     settings = config.get_settings()
     assert settings.model == "openai/gpt-4o"
@@ -57,23 +57,23 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_missing_requirements_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
     settings = config.get_settings()
     assert any("ANTHROPIC_API_KEY" in problem for problem in settings.missing_requirements())
 
 
 def test_write_env_file_preserves_comments(tmp_path: Path) -> None:
     target = tmp_path / ".env"
-    target.write_text("# Kommentar\nSCOUTR_MODEL=alt\nFREMD=behalten\n", encoding="utf-8")
+    target.write_text("# Kommentar\nCORTEX_MODEL=alt\nFREMD=behalten\n", encoding="utf-8")
 
-    config.write_env_file({"SCOUTR_MODEL": "neu", "SCOUTR_LANG": "en"}, target)
+    config.write_env_file({"CORTEX_MODEL": "neu", "CORTEX_LANG": "en"}, target)
 
     content = target.read_text(encoding="utf-8")
     assert "# Kommentar" in content
-    assert "SCOUTR_MODEL=neu" in content
+    assert "CORTEX_MODEL=neu" in content
     assert "FREMD=behalten" in content
-    assert "SCOUTR_LANG=en" in content
-    assert "SCOUTR_MODEL=alt" not in content
+    assert "CORTEX_LANG=en" in content
+    assert "CORTEX_MODEL=alt" not in content
 
 
 # ---------------------------------------------------------------------------
@@ -91,8 +91,8 @@ def test_nvidia_nim_key_is_recognised() -> None:
 def test_nvidia_settings_are_complete_with_the_key(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("SCOUTR_MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-test-1234")
     settings = config.get_settings()
     assert settings.missing_requirements() == []
@@ -102,8 +102,8 @@ def test_nvidia_settings_are_complete_with_the_key(
 def test_nvidia_without_key_is_reported(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("SCOUTR_MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
     monkeypatch.delenv("NVIDIA_NIM_API_KEY", raising=False)
     problems = config.get_settings().missing_requirements()
     assert any("NVIDIA_NIM_API_KEY" in problem for problem in problems)
@@ -123,18 +123,18 @@ def test_further_providers(model: str, key_name: str) -> None:
 
 
 def test_generic_key_covers_unlisted_providers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Jeder LiteLLM-Anbieter laesst sich ueber SCOUTR_API_KEY nutzen."""
-    monkeypatch.delenv("SCOUTR_API_KEY", raising=False)
+    """Jeder LiteLLM-Anbieter laesst sich ueber CORTEX_API_KEY nutzen."""
+    monkeypatch.delenv("CORTEX_API_KEY", raising=False)
     assert config.api_key_name_for("exotisch/modell") == ""
 
-    monkeypatch.setenv("SCOUTR_API_KEY", "geheim")
-    assert config.api_key_name_for("exotisch/modell") == "SCOUTR_API_KEY"
+    monkeypatch.setenv("CORTEX_API_KEY", "geheim")
+    assert config.api_key_name_for("exotisch/modell") == "CORTEX_API_KEY"
 
 
 def test_generic_key_does_not_override_known_providers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SCOUTR_API_KEY", "geheim")
+    monkeypatch.setenv("CORTEX_API_KEY", "geheim")
     assert config.api_key_name_for("anthropic/claude-sonnet-4-6") == "ANTHROPIC_API_KEY"
     # Ollama braucht weiterhin keinen Key.
     assert config.api_key_name_for("ollama/llama3.1") == ""
@@ -172,8 +172,8 @@ def test_suggestion_only_when_the_prefix_matches() -> None:
 def test_broken_model_shows_up_in_missing_requirements(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("SCOUTR_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
     problems = config.get_settings().missing_requirements()
     assert any("nvidia_nim/nvidia/" in problem for problem in problems)
 
@@ -247,9 +247,9 @@ def test_cloud_models_never_get_num_ctx(monkeypatch: pytest.MonkeyPatch) -> None
 def test_context_tokens_is_configurable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("SCOUTR_MODEL", "ollama_chat/gemma4:12b")
-    monkeypatch.setenv("SCOUTR_CONTEXT_TOKENS", "32768")
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CORTEX_MODEL", "ollama_chat/gemma4:12b")
+    monkeypatch.setenv("CORTEX_CONTEXT_TOKENS", "32768")
     assert config.get_settings().llm_kwargs()["num_ctx"] == 32768
 
 

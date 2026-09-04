@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from scoutr import memory as mem
-from scoutr.memory import Memory, MemoryFull, human_size
+from cortex import memory as mem
+from cortex.memory import Memory, MemoryFull, human_size
 
 
 @pytest.fixture
 def store(tmp_path: Path) -> Memory:
-    return Memory(tmp_path / "scoutr.sqlite3", tmp_path)
+    return Memory(tmp_path / "cortex.sqlite3", tmp_path)
 
 
 # -- Ablegen und Wiederfinden ---------------------------------------------
@@ -64,7 +64,7 @@ def test_the_database_holds_no_plain_text(store: Memory, tmp_path: Path) -> None
     """Wer die Datei kopiert, soll nichts lesen koennen."""
     secret = "Der Nutzer wohnt in der Musterstrasse 5."
     store.remember(secret, topic="Wohnort")
-    raw = (tmp_path / "scoutr.sqlite3").read_bytes()
+    raw = (tmp_path / "cortex.sqlite3").read_bytes()
     assert secret.encode() not in raw
     assert b"Musterstrasse" not in raw
     assert b"Wohnort" not in raw
@@ -75,8 +75,8 @@ def test_a_stolen_database_stays_unreadable(store: Memory, tmp_path: Path) -> No
     store.remember(secret)
     thief_dir = tmp_path / "dieb"
     thief_dir.mkdir()
-    (thief_dir / "scoutr.sqlite3").write_bytes((tmp_path / "scoutr.sqlite3").read_bytes())
-    thief = Memory(thief_dir / "scoutr.sqlite3", thief_dir)  # eigener Schluessel
+    (thief_dir / "cortex.sqlite3").write_bytes((tmp_path / "cortex.sqlite3").read_bytes())
+    thief = Memory(thief_dir / "cortex.sqlite3", thief_dir)  # eigener Schluessel
     assert secret not in thief.all_entries()[0].text
 
 
@@ -91,28 +91,28 @@ def test_the_key_file_is_private(store: Memory, tmp_path: Path) -> None:
 
 def test_the_same_key_reads_the_old_notes(tmp_path: Path) -> None:
     """Neustart darf den Speicher nicht entwerten."""
-    first = Memory(tmp_path / "scoutr.sqlite3", tmp_path)
+    first = Memory(tmp_path / "cortex.sqlite3", tmp_path)
     first.remember("bleibt lesbar", topic="Probe")
-    again = Memory(tmp_path / "scoutr.sqlite3", tmp_path)
+    again = Memory(tmp_path / "cortex.sqlite3", tmp_path)
     assert again.recall("bleibt")[0].text == "bleibt lesbar"
 
 
 def test_a_passphrase_needs_no_key_file(tmp_path: Path) -> None:
     """Mit Passphrase liegt gar kein Schluessel auf der Platte."""
-    store = Memory(tmp_path / "scoutr.sqlite3", tmp_path, passphrase="ein gutes Passwort")
+    store = Memory(tmp_path / "cortex.sqlite3", tmp_path, passphrase="ein gutes Passwort")
     store.remember("nur mit Passwort lesbar")
     assert not (tmp_path / mem.KEY_FILE).exists()
 
-    same = Memory(tmp_path / "scoutr.sqlite3", tmp_path, passphrase="ein gutes Passwort")
+    same = Memory(tmp_path / "cortex.sqlite3", tmp_path, passphrase="ein gutes Passwort")
     assert same.recall("Passwort")[0].text == "nur mit Passwort lesbar"
 
-    wrong = Memory(tmp_path / "scoutr.sqlite3", tmp_path, passphrase="falsches Passwort")
+    wrong = Memory(tmp_path / "cortex.sqlite3", tmp_path, passphrase="falsches Passwort")
     assert "nur mit Passwort lesbar" not in wrong.all_entries()[0].text
 
 
 def test_plain_text_from_older_versions_still_reads(store: Memory, tmp_path: Path) -> None:
     """Ein Absturz mitten im Gespraech waere schlimmer als eine alte Notiz."""
-    with sqlite3.connect(tmp_path / "scoutr.sqlite3") as conn:
+    with sqlite3.connect(tmp_path / "cortex.sqlite3") as conn:
         conn.execute("INSERT INTO memory (topic, text) VALUES (?, ?)", ("alt", "Klartext"))
     assert store.all_entries()[0].text == "Klartext"
 

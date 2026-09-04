@@ -47,7 +47,7 @@ def check_search(
 ) -> tuple[bool, str]:
     """Schickt eine Testsuche an das gewaehlte Backend."""
     try:
-        from scoutr.search import search_web
+        from cortex.search import search_web
 
         results = search_web(
             PROBE_SEARCH,

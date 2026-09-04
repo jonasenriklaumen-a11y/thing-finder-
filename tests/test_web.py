@@ -8,14 +8,15 @@ import time
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from scoutr import web
-from scoutr.agent import AgentResult
-from scoutr.cache import Cache
-from scoutr.config import Settings
+from cortex import web
+from cortex.agent import AgentResult
+from cortex.cache import Cache
+from cortex.config import Settings
 
 
 class FakeToolbox:
@@ -116,9 +117,9 @@ def sse_events(raw: bytes) -> list[dict[str, Any]]:
 def test_current_values_covers_every_setting_key(session: web.ChatSession) -> None:
     values = web.current_values()
     assert set(values) == set(web.SETTING_KEYS)
-    assert values["SCOUTR_MODEL"] == "openai/gpt-4o"
-    assert values["SCOUTR_LOCATION"] == "Bremen"
-    assert values["SCOUTR_SUBAGENTS_AUTO"] == "false"
+    assert values["CORTEX_MODEL"] == "openai/gpt-4o"
+    assert values["CORTEX_LOCATION"] == "Bremen"
+    assert values["CORTEX_SUBAGENTS_AUTO"] == "false"
 
 
 def test_current_values_are_all_strings(session: web.ChatSession) -> None:
@@ -132,12 +133,12 @@ def test_save_values_writes_env_and_reloads(
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     written = web.save_values(
-        {"SCOUTR_MODEL": "anthropic/claude-sonnet-4", "SCOUTR_LOCATION": "Hamburg"}
+        {"CORTEX_MODEL": "anthropic/claude-sonnet-4", "CORTEX_LOCATION": "Hamburg"}
     )
     assert written == target
     text = target.read_text()
-    assert "SCOUTR_MODEL=anthropic/claude-sonnet-4" in text
-    assert "SCOUTR_LOCATION=Hamburg" in text
+    assert "CORTEX_MODEL=anthropic/claude-sonnet-4" in text
+    assert "CORTEX_LOCATION=Hamburg" in text
     # reload() wirft Agent und Einstellungen weg, damit die neuen greifen.
     assert session._settings is None
     assert session._agent is None
@@ -149,7 +150,7 @@ def test_api_key_is_stored_under_the_provider_name(
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     web.save_values(
-        {"SCOUTR_MODEL": "anthropic/claude-sonnet-4", web.API_KEY_FIELD: "sk-ant-neu"}
+        {"CORTEX_MODEL": "anthropic/claude-sonnet-4", web.API_KEY_FIELD: "sk-ant-neu"}
     )
     assert "ANTHROPIC_API_KEY=sk-ant-neu" in target.read_text()
 
@@ -160,7 +161,7 @@ def test_empty_api_key_never_deletes_the_stored_one(
     target = tmp_path / ".env"
     target.write_text("OPENAI_API_KEY=sk-alt\n")
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"SCOUTR_MODEL": "openai/gpt-4o", web.API_KEY_FIELD: "   "})
+    web.save_values({"CORTEX_MODEL": "openai/gpt-4o", web.API_KEY_FIELD: "   "})
     assert "OPENAI_API_KEY=sk-alt" in target.read_text()
 
 
@@ -169,7 +170,7 @@ def test_unknown_keys_are_ignored(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"SCOUTR_MODEL": "openai/gpt-4o", "PATH": "/boese"})
+    web.save_values({"CORTEX_MODEL": "openai/gpt-4o", "PATH": "/boese"})
     assert "PATH=/boese" not in target.read_text()
 
 
@@ -177,7 +178,7 @@ def test_unknown_keys_are_ignored(
 def test_index_serves_the_ui(client) -> None:
     status, body = client("GET", "/")
     assert status == 200
-    assert b"scoutr" in body
+    assert b"cortex" in body
     assert b"id=\"version\"" in body
 
 
@@ -273,10 +274,10 @@ def test_config_post_saves_and_answers(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    status, body = client("POST", "/api/config", {"SCOUTR_LOCATION": "Kiel"})
+    status, body = client("POST", "/api/config", {"CORTEX_LOCATION": "Kiel"})
     assert status == 200
     assert json.loads(body)["ok"] is True
-    assert "SCOUTR_LOCATION=Kiel" in target.read_text()
+    assert "CORTEX_LOCATION=Kiel" in target.read_text()
 
 
 def test_config_post_reports_failures(
@@ -286,7 +287,7 @@ def test_config_post_reports_failures(
         raise OSError("Platte voll")
 
     monkeypatch.setattr(web, "write_env_file", boom)
-    status, body = client("POST", "/api/config", {"SCOUTR_LOCATION": "Kiel"})
+    status, body = client("POST", "/api/config", {"CORTEX_LOCATION": "Kiel"})
     assert status == 500
     assert "Platte voll" in json.loads(body)["error"]
 
@@ -316,7 +317,7 @@ def test_location_command_changes_the_filter(client, session: web.ChatSession) -
     status, body = client("POST", "/api/command", {"line": "/location Kiel"})
     assert status == 200
     assert json.loads(body)["reload"] is True
-    assert web.current_values()["SCOUTR_LOCATION"] == "Kiel"
+    assert web.current_values()["CORTEX_LOCATION"] == "Kiel"
 
 
 def test_model_command_rejects_a_model_without_provider(client, session: web.ChatSession) -> None:
@@ -407,21 +408,21 @@ def test_saved_settings_take_effect_without_a_restart(
     Ohne override laege die neue Einstellung nur in der Datei -- die
     Oberflaeche meldet aber "sofort aktiv".
     """
-    from scoutr.config import reset_settings_cache
+    from cortex.config import reset_settings_cache
 
     env = tmp_path / ".env"
-    env.write_text("SCOUTR_MODEL=openai/gpt-4o\nSCOUTR_LOCATION=Bremen\n")
-    monkeypatch.setattr("scoutr.config.ENV_CANDIDATES", (env,))
-    monkeypatch.setenv("SCOUTR_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.delenv("SCOUTR_LOCATION", raising=False)
-    monkeypatch.delenv("SCOUTR_MODEL", raising=False)
+    env.write_text("CORTEX_MODEL=openai/gpt-4o\nCORTEX_LOCATION=Bremen\n")
+    monkeypatch.setattr("cortex.config.ENV_CANDIDATES", (env,))
+    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("CORTEX_LOCATION", raising=False)
+    monkeypatch.delenv("CORTEX_MODEL", raising=False)
     reset_settings_cache()
 
     fresh = web.ChatSession()
     monkeypatch.setattr(web, "SESSION", fresh)
     assert fresh.settings().location == "Bremen"
 
-    web.save_values({"SCOUTR_MODEL": "openai/gpt-4o", "SCOUTR_LOCATION": "Hamburg"})
+    web.save_values({"CORTEX_MODEL": "openai/gpt-4o", "CORTEX_LOCATION": "Hamburg"})
     assert fresh.settings().location == "Hamburg"
     reset_settings_cache()
 
@@ -429,7 +430,7 @@ def test_saved_settings_take_effect_without_a_restart(
 # -- Netzbetrieb ----------------------------------------------------------
 @pytest.fixture
 def guarded(monkeypatch: pytest.MonkeyPatch) -> str:
-    """Setzt ein Zugangswort, wie es `scoutr web --lan` tut."""
+    """Setzt ein Zugangswort, wie es `cortex web --lan` tut."""
     monkeypatch.setattr(web, "TOKEN", "geheim123")
     return "geheim123"
 
@@ -479,13 +480,13 @@ def test_token_in_the_address_opens_the_door(port: int, guarded: str) -> None:
 def test_token_as_cookie_or_header_works(port: int, guarded: str) -> None:
     assert raw_request(port, "GET", "/api/config",
                        {"Cookie": f"{web.TOKEN_COOKIE}={guarded}"})[0] == 200
-    assert raw_request(port, "GET", "/api/config", {"X-Scoutr-Token": guarded})[0] == 200
+    assert raw_request(port, "GET", "/api/config", {"X-Cortex-Token": guarded})[0] == 200
 
 
 def test_a_wrong_token_is_refused(port: int, guarded: str) -> None:
     assert raw_request(port, "GET", f"/?token={guarded}x")[0] == 401
-    assert raw_request(port, "GET", "/api/config", {"X-Scoutr-Token": "falsch"})[0] == 401
-    assert raw_request(port, "POST", "/api/chat", {"X-Scoutr-Token": ""})[0] == 401
+    assert raw_request(port, "GET", "/api/config", {"X-Cortex-Token": "falsch"})[0] == 401
+    assert raw_request(port, "POST", "/api/chat", {"X-Cortex-Token": ""})[0] == 401
 
 
 def test_query_string_does_not_break_routing(port: int) -> None:
@@ -607,7 +608,7 @@ def test_every_request_carries_the_token() -> None:
     """Keine rohen fetch-Aufrufe -- die kaemen im Netzbetrieb ohne Zugangswort."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'fetch("/api' not in html
-    assert 'X-Scoutr-Token' in html
+    assert 'X-Cortex-Token' in html
 
 
 # -- Zugangswort mit Sonderzeichen ---------------------------------------
@@ -628,8 +629,8 @@ def test_a_non_ascii_token_never_crashes_the_server(port: int,
                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(web, "TOKEN", "grün")
     assert raw_request(port, "GET", "/")[0] == 401
-    assert raw_request(port, "GET", "/", {"X-Scoutr-Token": "falsch"})[0] == 401
-    assert raw_request(port, "GET", "/", {"X-Scoutr-Token": "grün"})[0] == 200
+    assert raw_request(port, "GET", "/", {"X-Cortex-Token": "falsch"})[0] == 401
+    assert raw_request(port, "GET", "/", {"X-Cortex-Token": "grün"})[0] == 200
 
 
 def test_token_problem_names_the_bad_character() -> None:
@@ -770,7 +771,7 @@ def tiny_pdf(text: str) -> bytes:
 
 
 def tiny_png() -> bytes:
-    from scoutr.local_model import solid_png
+    from cortex.local_model import solid_png
 
     return solid_png()
 
@@ -949,12 +950,12 @@ def test_the_token_never_goes_to_the_browser(client, session: web.ChatSession) -
     payload = json.loads(body)
     assert payload["ha_connected"] is True
     assert "streng-geheim" not in body.decode()
-    assert "SCOUTR_HA_URL" in payload["values"]
+    assert "CORTEX_HA_URL" in payload["values"]
     assert not any("geheim" in str(value) for value in payload["values"].values())
 
 
 def test_ha_discovery_reports_what_it_found(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("scoutr.homeassistant.discover", lambda: ["http://192.168.1.5:8123"])
+    monkeypatch.setattr("cortex.homeassistant.discover", lambda: ["http://192.168.1.5:8123"])
     status, body = client("POST", "/api/ha", {"action": "discover"})
     assert status == 200
     assert json.loads(body) == {"ok": True, "found": ["http://192.168.1.5:8123"]}
@@ -967,9 +968,9 @@ def test_ha_test_needs_both_pieces(client) -> None:
 
 
 def test_ha_test_reports_success(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("scoutr.homeassistant.HomeAssistant.ping", lambda self: "Zuhause 2026.8")
+    monkeypatch.setattr("cortex.homeassistant.HomeAssistant.ping", lambda self: "Zuhause 2026.8")
     monkeypatch.setattr(
-        "scoutr.homeassistant.HomeAssistant.domains", lambda self: {"light": 4, "sensor": 9}
+        "cortex.homeassistant.HomeAssistant.domains", lambda self: {"light": 4, "sensor": 9}
     )
     _, body = client("POST", "/api/ha", {"url": "192.168.1.5", "token": "t"})
     payload = json.loads(body)
@@ -980,12 +981,12 @@ def test_ha_test_reports_success(client, monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_ha_test_passes_the_error_through(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    from scoutr.homeassistant import HomeAssistantError
+    from cortex.homeassistant import HomeAssistantError
 
     def boom(self):
         raise HomeAssistantError("Token abgelehnt")
 
-    monkeypatch.setattr("scoutr.homeassistant.HomeAssistant.ping", boom)
+    monkeypatch.setattr("cortex.homeassistant.HomeAssistant.ping", boom)
     _, body = client("POST", "/api/ha", {"url": "192.168.1.5", "token": "falsch"})
     assert json.loads(body) == {"ok": False, "error": "Token abgelehnt"}
 
@@ -996,7 +997,7 @@ def test_an_empty_ha_token_keeps_the_stored_one(
     target = tmp_path / ".env"
     target.write_text("HA_TOKEN=alt-und-gut\n")
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"SCOUTR_HA_URL": "http://192.168.1.5:8123", web.HA_TOKEN_FIELD: "   "})
+    web.save_values({"CORTEX_HA_URL": "http://192.168.1.5:8123", web.HA_TOKEN_FIELD: "   "})
     assert "HA_TOKEN=alt-und-gut" in target.read_text()
 
 
@@ -1066,7 +1067,7 @@ def test_the_model_list_offers_what_actually_works(
     client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Eine Auswahl, die beim Anklicken scheitert, hilft niemandem."""
-    monkeypatch.setattr("scoutr.local_model.installed_models", lambda base: ["gemma4:12b"])
+    monkeypatch.setattr("cortex.local_model.installed_models", lambda base: ["gemma4:12b"])
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     status, body = client("GET", "/api/models")
@@ -1083,7 +1084,7 @@ def test_the_model_list_offers_what_actually_works(
 def test_every_model_says_where_it_runs(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("scoutr.local_model.installed_models", lambda base: ["qwen3:8b"])
+    monkeypatch.setattr("cortex.local_model.installed_models", lambda base: ["qwen3:8b"])
     _, body = client("GET", "/api/models")
     local = [m for m in json.loads(body)["models"] if m["id"].startswith("ollama_chat/")]
     assert local and local[0]["kind"] == "lokal"
@@ -1187,7 +1188,7 @@ def test_the_ui_offers_the_model_picker_and_load_button() -> None:
     assert "/api/models" in html
     assert 'id="showload"' in html and "/api/system" in html
     assert 'id="provider"' in html, "Anbieter zum Auswaehlen"
-    assert 'name="SCOUTR_MEMORY"' in html
+    assert 'name="CORTEX_MEMORY"' in html
 
 
 def test_the_ui_offers_reading_along() -> None:
@@ -1245,8 +1246,8 @@ def test_saving_corrects_the_model_id(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"SCOUTR_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
-    assert "SCOUTR_MODEL=nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in target.read_text()
+    web.save_values({"CORTEX_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
+    assert "CORTEX_MODEL=nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in target.read_text()
 
 
 def test_the_key_lands_under_the_corrected_provider(
@@ -1257,7 +1258,7 @@ def test_the_key_lands_under_the_corrected_provider(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     web.save_values(
         {
-            "SCOUTR_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
+            "CORTEX_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
             web.API_KEY_FIELD: "nvapi-Spf8beispiel",
         }
     )
@@ -1269,8 +1270,8 @@ def test_vision_and_helper_models_are_corrected_too(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"SCOUTR_VISION_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
-    assert "SCOUTR_VISION_MODEL=nvidia_nim/nvidia/" in target.read_text()
+    web.save_values({"CORTEX_VISION_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
+    assert "CORTEX_VISION_MODEL=nvidia_nim/nvidia/" in target.read_text()
 
 
 def test_the_ui_has_its_own_save_button_for_the_model() -> None:
@@ -1327,7 +1328,7 @@ def test_opening_a_chat_restores_the_context(session: web.ChatSession) -> None:
                       meta={})
     session._agent = FakeAgent()
 
-    from scoutr.agent import Agent
+    from cortex.agent import Agent
 
     real = Agent(session.settings())
     session._agent = real
@@ -1351,7 +1352,7 @@ def test_opening_needs_a_chat_id(client) -> None:
 
 def test_a_new_chat_starts_a_new_entry(client, session: web.ChatSession) -> None:
     """Neuer Chat heisst: die naechste Frage benennt einen neuen Eintrag."""
-    from scoutr.agent import Agent
+    from cortex.agent import Agent
 
     session._agent = Agent(session.settings())
     before = session.chat_id()
@@ -1364,7 +1365,7 @@ def test_a_new_chat_starts_a_new_entry(client, session: web.ChatSession) -> None
 def test_an_ollama_address_never_reaches_the_cloud() -> None:
     """Ollama antwortet mit "404 page not found" -- das sieht aus wie ein
     Fehler des Anbieters, ist aber nur die falsche Adresse."""
-    from scoutr.config import Settings as S
+    from cortex.config import Settings as S
 
     settings = S(model="nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b",
                  api_base="http://localhost:11434")
@@ -1372,7 +1373,7 @@ def test_an_ollama_address_never_reaches_the_cloud() -> None:
 
 
 def test_a_local_model_keeps_its_address() -> None:
-    from scoutr.config import Settings as S
+    from cortex.config import Settings as S
 
     settings = S(model="ollama_chat/gemma4:12b", api_base="http://localhost:11434")
     assert settings.llm_kwargs_for(settings.model)["api_base"] == "http://localhost:11434"
@@ -1380,7 +1381,7 @@ def test_a_local_model_keeps_its_address() -> None:
 
 def test_a_proxy_is_not_mistaken_for_ollama() -> None:
     """Ein LiteLLM-Proxy im Heimnetz ist ein berechtigter Weg zur Cloud."""
-    from scoutr.config import base_fits
+    from cortex.config import base_fits
 
     assert base_fits("http://192.168.1.9:4000", "nvidia_nim/meta/llama")
     assert base_fits("http://localhost:4000", "openai/gpt-4o")
@@ -1399,10 +1400,10 @@ def test_everything_setup_asks_for_is_in_the_web_form() -> None:
     import inspect
     import re
 
-    from scoutr import cli
+    from cortex import cli
 
     source = inspect.getsource(cli.setup_command)
-    asked = set(re.findall(r'"(SCOUTR_[A-Z_]+)"', source))
+    asked = set(re.findall(r'"(CORTEX_[A-Z_]+)"', source))
     html = web.UI_FILE.read_text(encoding="utf-8")
     for key in asked:
         assert f'name="{key}"' in html, f"{key} wird im Terminal gefragt, fehlt aber im Formular"
@@ -1422,7 +1423,7 @@ def test_saving_stores_the_search_key_under_the_right_name(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     monkeypatch.setattr(web.SESSION, "reload", lambda: None)
 
-    web.save_values({"SCOUTR_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "bsa-xyz"})
+    web.save_values({"CORTEX_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "bsa-xyz"})
     assert "BRAVE_API_KEY=bsa-xyz" in target.read_text(encoding="utf-8")
 
 
@@ -1434,7 +1435,7 @@ def test_an_empty_search_key_means_unchanged(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     monkeypatch.setattr(web.SESSION, "reload", lambda: None)
 
-    web.save_values({"SCOUTR_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "   "})
+    web.save_values({"CORTEX_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "   "})
     assert "BRAVE_API_KEY=alt" in target.read_text(encoding="utf-8")
 
 
@@ -1447,7 +1448,7 @@ def test_the_open_metasearch_needs_no_key(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     monkeypatch.setattr(web.SESSION, "reload", lambda: None)
 
-    web.save_values({"SCOUTR_SEARCH_BACKEND": "duckduckgo", web.SEARCH_KEY_FIELD: "egal"})
+    web.save_values({"CORTEX_SEARCH_BACKEND": "duckduckgo", web.SEARCH_KEY_FIELD: "egal"})
     content = target.read_text(encoding="utf-8")
     assert "egal" not in content
 
@@ -1465,15 +1466,15 @@ def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.Mo
         seen["backend"] = backend
         return True, "3 Treffer"
 
-    monkeypatch.setattr("scoutr.probe.check_llm", fake_llm)
-    monkeypatch.setattr("scoutr.probe.check_search", fake_search)
+    monkeypatch.setattr("cortex.probe.check_llm", fake_llm)
+    monkeypatch.setattr("cortex.probe.check_search", fake_search)
 
     status, body = client(
         "POST",
         "/api/probe",
         {
-            "SCOUTR_MODEL": "openai/gpt-4o",
-            "SCOUTR_SEARCH_BACKEND": "brave",
+            "CORTEX_MODEL": "openai/gpt-4o",
+            "CORTEX_SEARCH_BACKEND": "brave",
             web.API_KEY_FIELD: "sk-neu",
         },
     )
@@ -1486,9 +1487,9 @@ def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.Mo
 def test_the_probe_reports_a_failure_without_crashing(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("scoutr.probe.check_llm", lambda *a, **k: (False, "401 Unauthorized"))
-    monkeypatch.setattr("scoutr.probe.check_search", lambda *a, **k: (True, "3 Treffer"))
-    status, body = client("POST", "/api/probe", {"SCOUTR_MODEL": "openai/gpt-4o"})
+    monkeypatch.setattr("cortex.probe.check_llm", lambda *a, **k: (False, "401 Unauthorized"))
+    monkeypatch.setattr("cortex.probe.check_search", lambda *a, **k: (True, "3 Treffer"))
+    status, body = client("POST", "/api/probe", {"CORTEX_MODEL": "openai/gpt-4o"})
     data = json.loads(body)
     assert status == 200
     assert data["ok"] is False
@@ -1502,14 +1503,14 @@ def test_a_leftover_ollama_base_is_ignored_in_the_probe(
     """Sonst testet man Ollama und bekommt gruenes Licht fuer NVIDIA."""
     seen: dict[str, Any] = {}
     monkeypatch.setattr(
-        "scoutr.probe.check_llm",
+        "cortex.probe.check_llm",
         lambda model, api_key="", api_base="": (seen.update(base=api_base), (True, "ok"))[1],
     )
-    monkeypatch.setattr("scoutr.probe.check_search", lambda *a, **k: (True, "ok"))
+    monkeypatch.setattr("cortex.probe.check_search", lambda *a, **k: (True, "ok"))
     client(
         "POST",
         "/api/probe",
-        {"SCOUTR_MODEL": "openai/gpt-4o", "SCOUTR_API_BASE": "http://localhost:11434"},
+        {"CORTEX_MODEL": "openai/gpt-4o", "CORTEX_API_BASE": "http://localhost:11434"},
     )
     assert seen["base"] == ""
 
@@ -1520,7 +1521,7 @@ def test_a_leftover_ollama_base_is_ignored_in_the_probe(
 def test_the_settings_have_their_own_google_section() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "Gmail &amp; Kalender" in html, "eigene Sparte"
-    assert 'name="SCOUTR_GOOGLE"' in html, "an- und ausschaltbar"
+    assert 'name="CORTEX_GOOGLE"' in html, "an- und ausschaltbar"
     assert f'name="{web.GOOGLE_ID_FIELD}"' in html
     assert f'name="{web.GOOGLE_SECRET_FIELD}"' in html
     assert "console.cloud.google.com" in html, "die Anleitung steht dabei"
@@ -1552,7 +1553,7 @@ def test_saving_stores_the_google_credentials(
 
     web.save_values(
         {
-            "SCOUTR_GOOGLE": "true",
+            "CORTEX_GOOGLE": "true",
             web.GOOGLE_ID_FIELD: "id-1.apps.googleusercontent.com",
             web.GOOGLE_SECRET_FIELD: "s3cret",
         }
@@ -1560,7 +1561,7 @@ def test_saving_stores_the_google_credentials(
     content = target.read_text(encoding="utf-8")
     assert "GOOGLE_CLIENT_ID=id-1.apps.googleusercontent.com" in content
     assert "GOOGLE_CLIENT_SECRET=s3cret" in content
-    assert "SCOUTR_GOOGLE=true" in content
+    assert "CORTEX_GOOGLE=true" in content
 
 
 def test_an_empty_google_secret_means_unchanged(
@@ -1611,16 +1612,16 @@ def test_the_return_from_google_finishes_the_connection(
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "s3cret")
     web.SESSION.reload()
 
-    from scoutr.google import Tokens
+    from cortex.google import Tokens
 
     monkeypatch.setattr(
-        "scoutr.google.exchange_code",
+        "cortex.google.exchange_code",
         lambda cid, secret, code, redirect: Tokens(
             access_token="at", refresh_token="rt", expires_at=time.time() + 3600
         ),
     )
-    monkeypatch.setattr("scoutr.google.Google.remember", lambda self, tokens: None)
-    monkeypatch.setattr("scoutr.google.Google.account", lambda self: "jemand@example.com")
+    monkeypatch.setattr("cortex.google.Google.remember", lambda self, tokens: None)
+    monkeypatch.setattr("cortex.google.Google.account", lambda self: "jemand@example.com")
 
     status, body = client("GET", "/google?code=4/0AX")
     assert status == 200
@@ -1637,3 +1638,65 @@ def test_a_return_without_a_code_says_so(client) -> None:
     status, body = client("GET", "/google")
     assert status == 200
     assert b"keinen Code" in body
+
+
+# ---------------------------------------------------------------------------
+# Der Strom darf nicht abreissen, waehrend das Modell nachdenkt
+# ---------------------------------------------------------------------------
+def test_the_stream_starts_with_a_sign_of_life(client, session: web.ChatSession) -> None:
+    """Erst mit dem ersten Byte steht die Verbindung fuer den Browser wirklich."""
+    _, raw = client("POST", "/api/chat", {"message": "hallo"})
+    assert raw.startswith(b": los")
+
+
+def test_a_silent_model_does_not_kill_the_connection(
+    client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Cloud-Modell schweigt zwischen zwei Schritten gern eine halbe Minute.
+
+    Ohne ein Byte in der Leitung legt irgendwer in der Kette auf, und die
+    Oberflaeche meldete "TypeError: network error", obwohl die Recherche noch
+    lief. Der Herzschlag haelt sie warm.
+    """
+    monkeypatch.setattr(web, "HEARTBEAT_SECONDS", 0.05)
+
+    class Slow:
+        on_event = None
+        toolbox = None
+
+        def set_ask_handler(self, handler):
+            pass
+
+        def ask(self, message, stream=True):
+            time.sleep(0.4)
+            self.on_event("answer_chunk", {"text": "Da bin ich."})
+            self.on_event("done", {"tool_calls": 0, "hit_limit": False})
+            return SimpleNamespace(answer="Da bin ich.")
+
+    slow = Slow()
+    slow.toolbox = slow
+    monkeypatch.setattr(session, "agent", lambda: slow)
+
+    _, raw = client("POST", "/api/chat", {"message": "dauert"})
+    assert raw.count(b": warte") >= 2, "waehrend der Stille geht regelmaessig ein Byte raus"
+    assert [event["type"] for event in sse_events(raw)] == ["chunk", "done"]
+
+
+def test_heartbeats_are_not_mistaken_for_events(client, session: web.ChatSession) -> None:
+    """Kommentarzeilen duerfen nie als Ereignis durchgehen."""
+    _, raw = client("POST", "/api/chat", {"message": "hallo"})
+    for event in sse_events(raw):
+        assert event["type"] != "warte"
+
+
+def test_the_ui_ignores_stream_comments() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'part.trimStart().startsWith(":")' in html
+
+
+def test_a_broken_stream_is_explained_in_plain_words() -> None:
+    """"TypeError: network error" ist keine Auskunft, mit der jemand etwas anfangen kann."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "Die Verbindung ist mittendrin abgerissen" in html
+    assert "Keine Verbindung zu Cortex" in html
+    assert "err instanceof TypeError" in html

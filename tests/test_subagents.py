@@ -11,17 +11,17 @@ from typing import Any
 import httpx
 import pytest
 
-from scoutr.config import Settings
-from scoutr.fetch import Fetcher, RobotsPolicy
-from scoutr.models import SearchResult
-from scoutr.subagents import SubagentResult, run_subagents
-from scoutr.tools import Toolbox
+from cortex.config import Settings
+from cortex.fetch import Fetcher, RobotsPolicy
+from cortex.models import SearchResult
+from cortex.subagents import SubagentResult, run_subagents
+from cortex.tools import Toolbox
 
 
 @pytest.fixture(autouse=True)
 def _stub_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "scoutr.tools.search_web",
+        "cortex.tools.search_web",
         lambda query, **kwargs: [SearchResult(title="T", url="https://a.de/", snippet="S")],
     )
 
@@ -34,9 +34,9 @@ def _toolbox(settings: Settings, fixture_html) -> Toolbox:
             200, text=fixture_html("plain_article.html"), headers={"content-type": "text/html"}
         )
 
-    fetcher = Fetcher("scoutr-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
+    fetcher = Fetcher("cortex-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "scoutr-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
     return Toolbox(settings, cache=None, fetcher=fetcher)
 
 
@@ -79,7 +79,7 @@ def test_subagent_uses_its_tools(
         return _reply(content="Ein Café gefunden. Quelle: a.de")
 
     monkeypatch.setattr("litellm.completion", completion)
-    from scoutr.subagents import _run_one
+    from cortex.subagents import _run_one
 
     result = _run_one("Finde Cafés", settings, None, None, toolbox=_toolbox(settings, fixture_html))
     assert result.tool_calls == 1
@@ -200,7 +200,7 @@ def test_result_serialisation() -> None:
 def test_planner_returns_the_task_list(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from scoutr.subagents import plan_subtasks
+    from cortex.subagents import plan_subtasks
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -210,7 +210,7 @@ def test_planner_returns_the_task_list(
 
 
 def test_planner_respects_the_limit(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    from scoutr.subagents import plan_subtasks
+    from cortex.subagents import plan_subtasks
 
     monkeypatch.setattr(
         "litellm.completion", lambda **kwargs: _reply(content='["a","b","c","d","e","f"]')
@@ -222,7 +222,7 @@ def test_planner_falls_back_to_the_question(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     """Unbrauchbare Planung darf den Ablauf nicht aendern."""
-    from scoutr.subagents import plan_subtasks
+    from cortex.subagents import plan_subtasks
 
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="keine Ahnung"))
     assert plan_subtasks("Meine Frage", settings) == ["Meine Frage"]
@@ -231,7 +231,7 @@ def test_planner_falls_back_to_the_question(
 def test_planner_survives_a_dead_model(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from scoutr.subagents import plan_subtasks
+    from cortex.subagents import plan_subtasks
 
     def failing(**kwargs: Any):
         raise RuntimeError("weg")
@@ -241,7 +241,7 @@ def test_planner_survives_a_dead_model(
 
 
 def test_planner_gets_the_context(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    from scoutr.subagents import plan_subtasks
+    from cortex.subagents import plan_subtasks
 
     captured: dict[str, Any] = {}
 
@@ -322,14 +322,14 @@ def test_subagents_share_one_fetcher(
 ) -> None:
     """Die Drossel (1 Request/s je Domain) muss ueber alle Subagenten gelten."""
     created: list[Any] = []
-    from scoutr.fetch import Fetcher as RealFetcher
+    from cortex.fetch import Fetcher as RealFetcher
 
     class SpyFetcher(RealFetcher):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             created.append(self)
 
-    monkeypatch.setattr("scoutr.fetch.Fetcher", SpyFetcher)
+    monkeypatch.setattr("cortex.fetch.Fetcher", SpyFetcher)
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="ok"))
     run_subagents(["a", "b", "c"], settings, parallel=2)
     assert len(created) == 1
@@ -383,7 +383,7 @@ def test_dead_main_model_stays_dead(
 def test_plan_request_returns_decision_and_tasks(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from scoutr.subagents import plan_request
+    from cortex.subagents import plan_request
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -393,7 +393,7 @@ def test_plan_request_returns_decision_and_tasks(
 
 
 def test_plan_request_detects_chat(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    from scoutr.subagents import plan_request
+    from cortex.subagents import plan_request
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -407,7 +407,7 @@ def test_plan_request_uses_the_small_model_without_thinking(
 ) -> None:
     """Der Planer lief frueher auf dem grossen Modell -- auf einer knappen
     Karte kostete allein der Modellwechsel mehr als der Aufruf."""
-    from scoutr.subagents import plan_request
+    from cortex.subagents import plan_request
 
     settings.model = "ollama_chat/gemma4:12b"
     settings.subagent_model = "ollama_chat/qwen3:1.7b"
@@ -432,7 +432,7 @@ def test_plan_request_uses_the_small_model_without_thinking(
 def test_plan_request_survives_garbage(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from scoutr.subagents import plan_request
+    from cortex.subagents import plan_request
 
     for answer in ("kein JSON", "", '{"kaputt":'):
         monkeypatch.setattr(
@@ -448,7 +448,7 @@ def test_plan_request_accepts_a_bare_array(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     """Manche Modelle ignorieren das Schema und liefern nur die Liste."""
-    from scoutr.subagents import plan_request
+    from cortex.subagents import plan_request
 
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content='["A", "B"]'))
     assert plan_request("Frage", settings) == (True, ["A", "B"])
@@ -457,7 +457,7 @@ def test_plan_request_accepts_a_bare_array(
 def test_plan_request_respects_the_limit(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from scoutr.subagents import plan_request
+    from cortex.subagents import plan_request
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -490,7 +490,7 @@ def test_subagents_run_without_thinking_mode(
 
 def test_subagent_prompt_asks_for_detail() -> None:
     """Was der Subagent weglaesst, ist fuer den Hauptagenten verloren."""
-    from scoutr.subagents import SUBAGENT_PROMPT
+    from cortex.subagents import SUBAGENT_PROMPT
 
     assert "ausfuehrlich" in SUBAGENT_PROMPT.lower()
     assert "400 Woerter" in SUBAGENT_PROMPT

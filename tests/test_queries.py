@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from scoutr import queries
-from scoutr.models import SearchResult
+from cortex import queries
+from cortex.models import SearchResult
 
 
 def hit(url: str, title: str = "T", snippet: str = "S") -> SearchResult:

@@ -1,12 +1,12 @@
-# Minimale SearXNG-Konfiguration fuer scoutr.
+# Minimale SearXNG-Konfiguration fuer cortex.
 #
 # Entscheidend ist der Eintrag `json` unter `search.formats` -- ohne den
-# antwortet SearXNG nur mit HTML und scoutr kann nichts damit anfangen.
+# antwortet SearXNG nur mit HTML und cortex kann nichts damit anfangen.
 
 use_default_settings: true
 
 general:
-  instance_name: "scoutr"
+  instance_name: "cortex"
   # Keine Nutzungsstatistik nach draussen.
   donation_url: false
   contact_url: false

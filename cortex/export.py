@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 
-from scoutr.models import Product
+from cortex.models import Product
 
 FORMATS = ("html", "md", "csv")
 
@@ -38,7 +38,7 @@ def default_path(turns: list[Turn], fmt: str, directory: Path) -> Path:
     """Baut einen Dateinamen aus Zeitstempel und erster Frage."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     topic = _slug(turns[0].question) if turns else "recherche"
-    return directory / f"scoutr-{stamp}-{topic}.{fmt}"
+    return directory / f"cortex-{stamp}-{topic}.{fmt}"
 
 
 def download_images(turns: list[Turn], directory: Path, timeout: float = 15.0) -> dict[str, str]:
@@ -75,7 +75,7 @@ def download_images(turns: list[Turn], directory: Path, timeout: float = 15.0) -
 def to_markdown(turns: list[Turn], image_map: dict[str, str] | None = None) -> str:
     """Markdown mit Bild-Links."""
     image_map = image_map or {}
-    lines: list[str] = ["# scoutr-Recherche", ""]
+    lines: list[str] = ["# cortex-Recherche", ""]
     lines.append(f"_{datetime.now().strftime('%d.%m.%Y %H:%M')}_")
     lines.append("")
 
@@ -178,9 +178,9 @@ def to_html(turns: list[Turn], image_map: dict[str, str] | None = None) -> str:
         "<!doctype html>",
         '<html lang="de"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
-        "<title>scoutr-Recherche</title>",
+        "<title>cortex-Recherche</title>",
         f"<style>{HTML_STYLE}</style></head><body>",
-        "<h1>scoutr-Recherche</h1>",
+        "<h1>cortex-Recherche</h1>",
         f'<p class="meta">{_e(datetime.now().strftime("%d.%m.%Y %H:%M"))}</p>',
     ]
 

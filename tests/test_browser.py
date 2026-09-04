@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from scoutr.browser import (
+from cortex.browser import (
     click_known_reject_button,
     click_reject_by_text,
     dismiss_consent,
@@ -14,7 +14,7 @@ from scoutr.browser import (
     remove_overlays,
     render_page,
 )
-from scoutr.fetch import load_rules
+from cortex.fetch import load_rules
 
 
 class FakeElement:
@@ -192,14 +192,14 @@ def test_render_page_without_playwright(monkeypatch: pytest.MonkeyPatch) -> None
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    assert render_page("https://example.de/", "scoutr/0.1") is None
+    assert render_page("https://example.de/", "cortex/0.1") is None
 
 
 def test_fetcher_uses_browser_only_for_consent_walls(fixture_html, monkeypatch) -> None:
     """Stufe 2 entscheidet, ob Stufe 3 ueberhaupt loslaeuft."""
     import httpx
 
-    from scoutr.fetch import Fetcher, RobotsPolicy
+    from cortex.fetch import Fetcher, RobotsPolicy
 
     rendered = fixture_html("plain_article.html")
     calls: list[str] = []
@@ -208,7 +208,7 @@ def test_fetcher_uses_browser_only_for_consent_walls(fixture_html, monkeypatch) 
         calls.append(url)
         return rendered
 
-    monkeypatch.setattr("scoutr.browser.render_page", fake_render)
+    monkeypatch.setattr("cortex.browser.render_page", fake_render)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
@@ -217,9 +217,9 @@ def test_fetcher_uses_browser_only_for_consent_walls(fixture_html, monkeypatch) 
             200, text=fixture_html("consent_wall.html"), headers={"content-type": "text/html"}
         )
 
-    fetcher = Fetcher("scoutr-test/0.1", timeout=5, delay_seconds=0, enable_browser=True)
+    fetcher = Fetcher("cortex-test/0.1", timeout=5, delay_seconds=0, enable_browser=True)
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "scoutr-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
 
     page = fetcher.fetch("https://zeitung.example/artikel")
     assert calls == ["https://zeitung.example/artikel"]
@@ -232,11 +232,11 @@ def test_paywalls_never_trigger_the_browser(fixture_html, monkeypatch) -> None:
     """Eine Bezahlschranke wird nicht mit dem Browser aufgebrochen."""
     import httpx
 
-    from scoutr.fetch import Fetcher, RobotsPolicy
+    from cortex.fetch import Fetcher, RobotsPolicy
 
     calls: list[str] = []
     monkeypatch.setattr(
-        "scoutr.browser.render_page", lambda url, **kwargs: calls.append(url) or ""
+        "cortex.browser.render_page", lambda url, **kwargs: calls.append(url) or ""
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -246,9 +246,9 @@ def test_paywalls_never_trigger_the_browser(fixture_html, monkeypatch) -> None:
             200, text=fixture_html("paywall_article.html"), headers={"content-type": "text/html"}
         )
 
-    fetcher = Fetcher("scoutr-test/0.1", timeout=5, delay_seconds=0, enable_browser=True)
+    fetcher = Fetcher("cortex-test/0.1", timeout=5, delay_seconds=0, enable_browser=True)
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "scoutr-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
 
     page = fetcher.fetch("https://zeitung.example/artikel")
     assert calls == []
@@ -260,7 +260,7 @@ def test_paywalls_never_trigger_the_browser(fixture_html, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 def test_browser_sandbox_stays_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Auf dem blanken System behaelt Chromium seine eigene Sandbox."""
-    monkeypatch.delenv("SCOUTR_BROWSER_NO_SANDBOX", raising=False)
+    monkeypatch.delenv("CORTEX_BROWSER_NO_SANDBOX", raising=False)
     assert launch_args() == []
 
 
@@ -269,10 +269,10 @@ def test_container_flag_disables_the_browser_sandbox(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
     """Im Container uebernimmt der Container die Isolation."""
-    monkeypatch.setenv("SCOUTR_BROWSER_NO_SANDBOX", value)
+    monkeypatch.setenv("CORTEX_BROWSER_NO_SANDBOX", value)
     assert launch_args() == ["--no-sandbox", "--disable-dev-shm-usage"]
 
 
 def test_unset_like_values_keep_the_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SCOUTR_BROWSER_NO_SANDBOX", "0")
+    monkeypatch.setenv("CORTEX_BROWSER_NO_SANDBOX", "0")
     assert launch_args() == []

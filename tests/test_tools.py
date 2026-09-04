@@ -8,19 +8,19 @@ from typing import Any
 import httpx
 import pytest
 
-from scoutr.cache import Cache
-from scoutr.config import Settings
-from scoutr.fetch import Fetcher, RobotsPolicy
-from scoutr.models import SearchResult
-from scoutr.tools import TOOL_SCHEMAS, Toolbox
+from cortex.cache import Cache
+from cortex.config import Settings
+from cortex.fetch import Fetcher, RobotsPolicy
+from cortex.models import SearchResult
+from cortex.tools import TOOL_SCHEMAS, Toolbox
 
 
 def _mock_fetcher(handler) -> Fetcher:
     fetcher = Fetcher(
-        user_agent="scoutr-test/0.1", timeout=5, delay_seconds=0, enable_browser=False
+        user_agent="cortex-test/0.1", timeout=5, delay_seconds=0, enable_browser=False
     )
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "scoutr-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
     return fetcher
 
 
@@ -47,7 +47,7 @@ def test_web_search_uses_settings_defaults(
         captured.update(query=query, **kwargs)
         return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     settings.country = "at"
     settings.lang = "de"
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
@@ -68,7 +68,7 @@ def test_web_search_result_is_cached(
         calls.append(query)
         return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     cache = Cache(tmp_path / "c.sqlite3")
     box = Toolbox(settings, cache=cache, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     box.web_search("gleiche frage")
@@ -79,12 +79,12 @@ def test_web_search_result_is_cached(
 def test_search_error_is_reported_not_raised(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from scoutr.search import SearchError
+    from cortex.search import SearchError
 
     def failing(*args, **kwargs):
         raise SearchError("keine Verbindung")
 
-    monkeypatch.setattr("scoutr.tools.search_web", failing)
+    monkeypatch.setattr("cortex.tools.search_web", failing)
     box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     result = box.web_search("egal")
     assert result["results"] == []
@@ -192,7 +192,7 @@ def test_events_are_emitted(
 ) -> None:
     events: list[tuple[str, dict[str, Any]]] = []
     monkeypatch.setattr(
-        "scoutr.tools.search_web",
+        "cortex.tools.search_web",
         lambda *args, **kwargs: [SearchResult(title="T", url="https://a.de/")],
     )
     box = Toolbox(
@@ -214,7 +214,7 @@ def test_transient_fetch_failures_are_not_cached(
     settings: Settings, tmp_path: Path
 ) -> None:
     """Ein Timeout von jetzt darf nicht 24 Stunden lang festgeschrieben sein."""
-    from scoutr.cache import Cache
+    from cortex.cache import Cache
 
     attempts = {"n": 0}
 
@@ -242,7 +242,7 @@ def test_transient_fetch_failures_are_not_cached(
 
 def test_stable_failures_stay_cached(settings: Settings, tmp_path: Path) -> None:
     """blocked dagegen ist stabil und darf liegen bleiben."""
-    from scoutr.cache import Cache
+    from cortex.cache import Cache
 
     attempts = {"n": 0}
 
@@ -266,7 +266,7 @@ def test_search_news_carries_date_and_source(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     monkeypatch.setattr(
-        "scoutr.tools.search_news",
+        "cortex.tools.search_news",
         lambda query, **kwargs: [
             SearchResult(
                 title="Neuer Laptop vorgestellt",
@@ -286,14 +286,14 @@ def test_news_falls_back_to_web_search(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     """Faellt die News-Vertikale aus, gibt es normale Treffer statt keiner."""
-    from scoutr.search import SearchError
+    from cortex.search import SearchError
 
     def failing_news(query, **kwargs):
         raise SearchError("News tot")
 
-    monkeypatch.setattr("scoutr.tools.search_news", failing_news)
+    monkeypatch.setattr("cortex.tools.search_news", failing_news)
     monkeypatch.setattr(
-        "scoutr.tools.search_web",
+        "cortex.tools.search_web",
         lambda query, **kwargs: [SearchResult(title="Web-Treffer", url="https://a.de/")],
     )
     events: list[str] = []
@@ -311,7 +311,7 @@ def test_web_search_falls_back_to_open_metasearch(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     """SearXNG down -> die offene Metasuche uebernimmt."""
-    from scoutr.search import SearchError
+    from cortex.search import SearchError
 
     settings.search_backend = "searxng"
     calls: list[str] = []
@@ -322,7 +322,7 @@ def test_web_search_falls_back_to_open_metasearch(
             raise SearchError("Instanz nicht erreichbar")
         return [SearchResult(title="Metasuche-Treffer", url="https://b.de/")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", routing)
+    monkeypatch.setattr("cortex.tools.search_web", routing)
     box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     payload = box.web_search("frage")
     assert payload["results"][0]["title"] == "Metasuche-Treffer"
@@ -332,7 +332,7 @@ def test_web_search_falls_back_to_open_metasearch(
 def test_open_metasearch_has_no_further_fallback(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from scoutr.search import SearchError
+    from cortex.search import SearchError
 
     settings.search_backend = "duckduckgo"
     calls: list[str] = []
@@ -341,7 +341,7 @@ def test_open_metasearch_has_no_further_fallback(
         calls.append(backend)
         raise SearchError("alles tot")
 
-    monkeypatch.setattr("scoutr.tools.search_web", failing)
+    monkeypatch.setattr("cortex.tools.search_web", failing)
     box = Toolbox(settings, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     assert "error" in box.web_search("frage")
     assert calls == ["duckduckgo"]
@@ -355,7 +355,7 @@ def test_calculate_tool(settings: Settings) -> None:
 
 
 def test_remember_tool_persists_notes(settings: Settings, tmp_path: Path) -> None:
-    from scoutr.cache import Cache
+    from cortex.cache import Cache
 
     cache = Cache(tmp_path / "c.sqlite3")
     box = Toolbox(settings, cache=cache, fetcher=_mock_fetcher(_html_handler("<html></html>")))
@@ -461,7 +461,7 @@ def test_lan_scan_can_be_switched_off(settings: Settings) -> None:
 
 
 def test_lan_scan_refuses_public_networks(settings: Settings) -> None:
-    """Fremde Netze durchsucht scoutr nicht."""
+    """Fremde Netze durchsucht cortex nicht."""
     result = Toolbox(settings).lan_scan("8.8.8.0/24")
     assert "kein privates Netz" in result["error"]
 
@@ -469,16 +469,16 @@ def test_lan_scan_refuses_public_networks(settings: Settings) -> None:
 def test_lan_scan_without_a_known_network_says_what_to_do(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("scoutr.lan.own_subnet", lambda: "")
+    monkeypatch.setattr("cortex.lan.own_subnet", lambda: "")
     result = Toolbox(settings).lan_scan()
-    assert "SCOUTR_LAN_SUBNET" in result["error"]
+    assert "CORTEX_LAN_SUBNET" in result["error"]
 
 
 def test_lan_scan_reports_devices(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
-    from scoutr.lan import Device
+    from cortex.lan import Device
 
     monkeypatch.setattr(
-        "scoutr.lan.scan",
+        "cortex.lan.scan",
         lambda subnet, quick=True: [
             Device(address="192.168.1.5", name="ha.local", ports=[8123],
                    services=["Home Assistant"], title="Home Assistant")
@@ -508,7 +508,7 @@ def test_lan_check_says_silent_not_absent(settings: Settings,
                                           monkeypatch: pytest.MonkeyPatch) -> None:
     """Ein stilles Geraet kann schlafen -- das ist kein Beweis fuer 'weg'."""
     monkeypatch.setattr("socket.gethostbyname", lambda host: "192.168.1.99")
-    monkeypatch.setattr("scoutr.lan.check_host", lambda address, ports, **kw: None)
+    monkeypatch.setattr("cortex.lan.check_host", lambda address, ports, **kw: None)
     result = Toolbox(settings).lan_check("192.168.1.99")
     assert result["reachable"] is False
     assert "Ruhezustand" in result["note"]
@@ -531,7 +531,7 @@ def test_ha_states_gives_an_overview_first(settings: Settings,
                                            monkeypatch: pytest.MonkeyPatch) -> None:
     """Bei tausend Entitaeten ist die Uebersicht der einzige brauchbare Einstieg."""
     monkeypatch.setattr(
-        "scoutr.homeassistant.HomeAssistant.domains", lambda self: {"light": 12, "sensor": 40}
+        "cortex.homeassistant.HomeAssistant.domains", lambda self: {"light": 12, "sensor": 40}
     )
     result = Toolbox(_ha_settings(settings)).ha_states()
     assert result["overview"] == {"light": 12, "sensor": 40}
@@ -539,10 +539,10 @@ def test_ha_states_gives_an_overview_first(settings: Settings,
 
 
 def test_ha_states_finds_entities(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
-    from scoutr.homeassistant import Entity
+    from cortex.homeassistant import Entity
 
     monkeypatch.setattr(
-        "scoutr.homeassistant.HomeAssistant.find",
+        "cortex.homeassistant.HomeAssistant.find",
         lambda self, search="", domain="", limit=60: [
             Entity(entity_id="light.kueche", state="on", name="Kueche")
         ],
@@ -555,20 +555,20 @@ def test_ha_states_finds_entities(settings: Settings, monkeypatch: pytest.Monkey
 
 def test_ha_errors_reach_the_model_as_text(settings: Settings,
                                            monkeypatch: pytest.MonkeyPatch) -> None:
-    from scoutr.homeassistant import HomeAssistantError
+    from cortex.homeassistant import HomeAssistantError
 
     def boom(self, search="", domain="", limit=60):
         raise HomeAssistantError("Token abgelehnt")
 
-    monkeypatch.setattr("scoutr.homeassistant.HomeAssistant.find", boom)
+    monkeypatch.setattr("cortex.homeassistant.HomeAssistant.find", boom)
     assert Toolbox(_ha_settings(settings)).ha_states(search="x")["error"] == "Token abgelehnt"
 
 
 def test_switching_is_off_unless_allowed(settings: Settings) -> None:
-    """Standardmaessig sieht scoutr nur nach."""
+    """Standardmaessig sieht cortex nur nach."""
     result = Toolbox(_ha_settings(settings)).ha_call("light", "turn_on", "light.kueche")
     assert "nur nachsehen" in result["error"]
-    assert "SCOUTR_HA_CONTROL" in result["error"]
+    assert "CORTEX_HA_CONTROL" in result["error"]
 
 
 def test_unknown_domains_are_refused(settings: Settings) -> None:
@@ -580,7 +580,7 @@ def test_a_lock_needs_a_confirmation(settings: Settings, monkeypatch: pytest.Mon
     """Ein missverstandener Satz darf nicht die Haustuer aufschliessen."""
     called: list[tuple] = []
     monkeypatch.setattr(
-        "scoutr.homeassistant.HomeAssistant.call",
+        "cortex.homeassistant.HomeAssistant.call",
         lambda self, d, s, e="", data=None: called.append((d, s, e)) or [],
     )
     box = Toolbox(_ha_settings(settings, control=True))
@@ -594,7 +594,7 @@ def test_a_confirmed_lock_is_actually_opened(settings: Settings,
                                              monkeypatch: pytest.MonkeyPatch) -> None:
     called: list[tuple] = []
     monkeypatch.setattr(
-        "scoutr.homeassistant.HomeAssistant.call",
+        "cortex.homeassistant.HomeAssistant.call",
         lambda self, d, s, e="", data=None: called.append((d, s, e)) or [{"x": 1}],
     )
     box = Toolbox(_ha_settings(settings, control=True))
@@ -608,7 +608,7 @@ def test_without_anyone_to_confirm_the_lock_stays_shut(settings: Settings,
                                                        monkeypatch: pytest.MonkeyPatch) -> None:
     called: list = []
     monkeypatch.setattr(
-        "scoutr.homeassistant.HomeAssistant.call",
+        "cortex.homeassistant.HomeAssistant.call",
         lambda self, d, s, e="", data=None: called.append(1) or [],
     )
     box = Toolbox(_ha_settings(settings, control=True))  # kein ask_handler
@@ -621,7 +621,7 @@ def test_a_light_needs_no_confirmation(settings: Settings, monkeypatch: pytest.M
     """Licht anmachen ist umkehrbar -- danach zu fragen waere nur laestig."""
     asked: list = []
     monkeypatch.setattr(
-        "scoutr.homeassistant.HomeAssistant.call", lambda self, d, s, e="", data=None: [{"x": 1}]
+        "cortex.homeassistant.HomeAssistant.call", lambda self, d, s, e="", data=None: [{"x": 1}]
     )
     box = Toolbox(_ha_settings(settings, control=True))
     box.ask_handler = lambda question, options: asked.append(question) or "ja"
@@ -638,7 +638,7 @@ def test_ha_call_needs_domain_and_service(settings: Settings) -> None:
 
 def test_the_home_tools_are_reachable_through_call(settings: Settings,
                                                    monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("scoutr.lan.scan", lambda subnet, quick=True: [])
+    monkeypatch.setattr("cortex.lan.scan", lambda subnet, quick=True: [])
     box = Toolbox(settings)
     assert box.call("lan_scan", {"subnet": "192.168.1.0/24"})["count"] == 0
     assert "connect-ha" in box.call("ha_states", {})["error"]
@@ -657,7 +657,7 @@ def test_one_call_searches_several_phrasings(
         asked.append(query)
         return [SearchResult(title="T", url=f"https://{len(asked)}.de/", snippet="S")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     result = box.web_search("Wie viel kostet ein gebrauchtes Lastenrad in Bremen?")
 
@@ -676,7 +676,7 @@ def test_the_model_may_send_its_own_phrasings(
         asked.append(query)
         return [SearchResult(title="T", url=f"https://{len(asked)}.de/", snippet="S")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     box.call(
         "web_search",
@@ -694,7 +694,7 @@ def test_duplicate_phrasings_are_searched_once(
         asked.append(query)
         return [SearchResult(title="T", url="https://a.de/", snippet="S")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     box.call("web_search", {"query": "Lastenrad Bremen", "queries": ["lastenrad bremen"]})
     assert asked == ["Lastenrad Bremen"]
@@ -710,7 +710,7 @@ def test_a_query_list_sent_as_a_string_still_works(
         asked.append(query)
         return [SearchResult(title="T", url=f"https://{len(asked)}.de/", snippet="S")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     box.call("web_search", {"query": "Lastenrad", "queries": "Cargobike"})
     assert asked == ["Lastenrad", "Cargobike"]
@@ -725,7 +725,7 @@ def test_the_fan_out_can_be_switched_off(
         asked.append(query)
         return [SearchResult(title="T", url="https://a.de/", snippet="S")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     settings.search_variants = 1
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     box.web_search("Wie viel kostet ein Lastenrad in Bremen?")
@@ -746,7 +746,7 @@ def test_a_hit_found_by_two_phrasings_moves_up(
             SearchResult(title="B", url="https://b.de/", snippet="S"),
         ]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     result = box.web_search("Wie viel kostet ein gebrauchtes Lastenrad in Bremen?")
     assert result["results"][0]["url"] == "https://b.de/"
@@ -756,14 +756,14 @@ def test_the_fan_out_survives_a_dead_phrasing(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     """Eine gescheiterte Formulierung darf die Suche nicht mitreissen."""
-    from scoutr.search import SearchError
+    from cortex.search import SearchError
 
     def fake_search(query, **kwargs):
         if not query.startswith("Wie"):
             raise SearchError("Engine weg")
         return [SearchResult(title="A", url="https://a.de/", snippet="S")]
 
-    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     result = box.web_search("Wie viel kostet ein gebrauchtes Lastenrad in Bremen?")
     assert result["results"][0]["url"] == "https://a.de/"
@@ -847,7 +847,7 @@ def test_mail_search_and_read_come_through_the_tool(settings: Settings) -> None:
 
 
 def test_a_google_failure_is_reported_not_raised(settings: Settings) -> None:
-    from scoutr.google import GoogleError
+    from cortex.google import GoogleError
 
     class Broken(FakeGoogle):
         def events(self, days=7, query="", count=10):

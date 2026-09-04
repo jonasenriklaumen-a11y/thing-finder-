@@ -7,9 +7,9 @@ import time
 import httpx
 import pytest
 
-from scoutr import search
-from scoutr.models import SearchResult
-from scoutr.search import (
+from cortex import search
+from cortex.models import SearchResult
+from cortex.search import (
     KEYLESS_BACKENDS,
     OPEN_ENGINES,
     SearchError,
@@ -183,7 +183,7 @@ def test_engine_failure_message_points_to_the_alternatives(
     with pytest.raises(SearchError) as excinfo:
         search_web("q", backend="open")
     message = str(excinfo.value)
-    assert "SCOUTR_SEARCH_ENGINES" in message
+    assert "CORTEX_SEARCH_ENGINES" in message
     assert "searxng" in message
 
 
@@ -220,7 +220,7 @@ def test_searxng_trailing_slash_is_handled(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_searxng_without_url_explains_how_to_get_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SCOUTR_SEARXNG_URL", raising=False)
+    monkeypatch.delenv("CORTEX_SEARXNG_URL", raising=False)
     with pytest.raises(SearchError) as excinfo:
         search_web("q", backend="searxng")
     assert "docker run" in str(excinfo.value)

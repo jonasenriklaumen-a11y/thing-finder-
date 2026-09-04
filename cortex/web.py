@@ -1,4 +1,4 @@
-"""Weboberflaeche fuer scoutr -- derselbe Agent, nur im Browser.
+"""Weboberflaeche fuer cortex -- derselbe Agent, nur im Browser.
 
 Bewusst ohne Webframework: die Standardbibliothek reicht fuer eine lokale
 Ein-Nutzer-Anwendung, und jede zusaetzliche Abhaengigkeit macht die
@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from scoutr import __version__
-from scoutr.cache import Cache
-from scoutr.config import (
+from cortex import __version__
+from cortex.cache import Cache
+from cortex.config import (
     DEFAULT_ENV_PATH,
     SEARCH_BACKEND_KEYS,
     Settings,
@@ -51,33 +51,37 @@ UI_FILE = Path(__file__).with_name("webui.html")
 #: Google-Rueckleitadresse ihn braucht.
 DEFAULT_PORT = 8765
 
+#: So oft geht mindestens ein Byte raus, solange eine Anfrage laeuft.
+#: Kurz genug, dass keine Zwischenstation die stille Leitung kappt.
+HEARTBEAT_SECONDS = 10.0
+
 #: Alles, was sich auch in `cortex setup` einstellen laesst.
 SETTING_KEYS: tuple[str, ...] = (
-    "SCOUTR_MODEL",
-    "SCOUTR_VISION_MODEL",
-    "SCOUTR_SUBAGENT_MODEL",
-    "SCOUTR_API_BASE",
-    "SCOUTR_SEARCH_BACKEND",
-    "SCOUTR_SEARCH_ENGINES",
-    "SCOUTR_SEARCH_VARIANTS",
-    "SCOUTR_SEARXNG_URL",
-    "SCOUTR_LOCATION",
-    "SCOUTR_LANG",
-    "SCOUTR_COUNTRY",
-    "SCOUTR_SUBAGENTS_AUTO",
-    "SCOUTR_MAX_SUBAGENTS",
-    "SCOUTR_SUBAGENT_BUDGET",
-    "SCOUTR_SUBAGENT_PARALLEL",
-    "SCOUTR_MAX_TOOL_CALLS",
-    "SCOUTR_CONTEXT_TOKENS",
-    "SCOUTR_PLANNER_TIMEOUT",
-    "SCOUTR_ENABLE_PLAYWRIGHT",
-    "SCOUTR_HA_URL",
-    "SCOUTR_HA_CONTROL",
-    "SCOUTR_GOOGLE",
-    "SCOUTR_LAN_ENABLED",
-    "SCOUTR_LAN_SUBNET",
-    "SCOUTR_MEMORY",
+    "CORTEX_MODEL",
+    "CORTEX_VISION_MODEL",
+    "CORTEX_SUBAGENT_MODEL",
+    "CORTEX_API_BASE",
+    "CORTEX_SEARCH_BACKEND",
+    "CORTEX_SEARCH_ENGINES",
+    "CORTEX_SEARCH_VARIANTS",
+    "CORTEX_SEARXNG_URL",
+    "CORTEX_LOCATION",
+    "CORTEX_LANG",
+    "CORTEX_COUNTRY",
+    "CORTEX_SUBAGENTS_AUTO",
+    "CORTEX_MAX_SUBAGENTS",
+    "CORTEX_SUBAGENT_BUDGET",
+    "CORTEX_SUBAGENT_PARALLEL",
+    "CORTEX_MAX_TOOL_CALLS",
+    "CORTEX_CONTEXT_TOKENS",
+    "CORTEX_PLANNER_TIMEOUT",
+    "CORTEX_ENABLE_PLAYWRIGHT",
+    "CORTEX_HA_URL",
+    "CORTEX_HA_CONTROL",
+    "CORTEX_GOOGLE",
+    "CORTEX_LAN_ENABLED",
+    "CORTEX_LAN_SUBNET",
+    "CORTEX_MEMORY",
 )
 
 #: Platzhalter im Formular -- ein leeres Key-Feld darf den Key nicht loeschen.
@@ -96,7 +100,7 @@ GOOGLE_ID_FIELD = "__GOOGLE_ID__"
 GOOGLE_SECRET_FIELD = "__GOOGLE_SECRET__"
 
 #: Groesse einer einzelnen hochgeladenen Datei. Passt zu der Grenze, die
-#: scoutr auch fuer heruntergeladene PDFs zieht.
+#: cortex auch fuer heruntergeladene PDFs zieht.
 MAX_UPLOAD_BYTES = 25_000_000
 
 #: So viele Dateien duerfen an einer Nachricht haengen.
@@ -118,7 +122,7 @@ TEXT_TYPES = {".txt", ".md", ".csv", ".json", ".log", ".yaml", ".yml"}
 #: waere der Ordner nach einem Jahr Nutzung voller alter Fotos.
 KEEP_UPLOADS = 50
 
-#: So viel Text uebernimmt scoutr aus einer hochgeladenen Datei. Mehr wuerde
+#: So viel Text uebernimmt cortex aus einer hochgeladenen Datei. Mehr wuerde
 #: das Kontextfenster sprengen, bevor die Recherche ueberhaupt anfaengt.
 MAX_FILE_CHARS = 20_000
 
@@ -127,7 +131,7 @@ MAX_FILE_CHARS = 20_000
 TOKEN: str = ""
 
 #: Name des Cookies, in dem der Browser das Zugangswort behaelt.
-TOKEN_COOKIE = "scoutr_token"
+TOKEN_COOKIE = "cortex_token"
 
 #: Wird gezeigt, wenn jemand ohne gueltiges Zugangswort anklopft.
 DENIED_PAGE = """<!doctype html><html lang="de"><meta charset="utf-8">
@@ -186,7 +190,7 @@ class ChatSession:
         return self._settings
 
     def agent(self) -> Any:
-        from scoutr.agent import Agent
+        from cortex.agent import Agent
 
         if self._agent is None:
             settings = self.settings()
@@ -349,7 +353,7 @@ class ChatSession:
             return f"[Bild {name}] Darauf ist zu sehen:\n{description}"
 
         if suffix == ".pdf":
-            from scoutr.fetch import extract_pdf_text
+            from cortex.fetch import extract_pdf_text
 
             text, title = extract_pdf_text(data)
             if not text:
@@ -395,7 +399,7 @@ class ChatSession:
         `/image` gehoert nicht hierher: das recherchiert und laeuft deshalb
         ueber den normalen Chat-Weg mit Live-Anzeige.
         """
-        from scoutr.config import model_problem
+        from cortex.config import model_problem
 
         command, _, argument = line[1:].partition(" ")
         command = command.lower().strip()
@@ -465,14 +469,14 @@ class ChatSession:
         Nicht `_store` nennen: so heisst schon die Ablage fuer hochgeladene
         Dateien, und die haette diese Methode ueberschrieben.
         """
-        from scoutr.memory import Memory
+        from cortex.memory import Memory
 
         settings = self.settings()
         return Memory(settings.db_path, settings.data_dir, settings.memory_key)
 
     def _memory_overview(self) -> str:
         """Was liegt im Speicher, und wie voll ist er?"""
-        from scoutr.memory import human_size
+        from cortex.memory import human_size
 
         settings = self.settings()
         if not settings.memory_enabled:
@@ -506,7 +510,7 @@ class ChatSession:
 
     def _uploads(self, argument: str) -> str:
         """Hochgeladenes zeigen oder loeschen."""
-        from scoutr.memory import human_size
+        from cortex.memory import human_size
 
         store = self.memory()
         if argument.strip().lower() in ("clear", "loeschen", "löschen", "weg"):
@@ -538,7 +542,7 @@ class ChatSession:
 
     def _export(self, fmt: str) -> str:
         """Exportiert die letzten Recherchen -- wie `cortex export`."""
-        from scoutr.export import Turn, export
+        from cortex.export import Turn, export
 
         entries = self._cache().recent_history(limit=5)
         if not entries:
@@ -563,11 +567,11 @@ class ChatSession:
 def resolve_image(target: Path) -> Path:
     """Datei oder Ordner zu genau einem Bild aufloesen.
 
-    Im Terminal fragt scoutr bei mehreren Bildern nach; hier nimmt er das
+    Im Terminal fragt cortex bei mehreren Bildern nach; hier nimmt er das
     neueste und sagt es dazu -- eine Rueckfrage mitten im Stream waere
     umstaendlicher als ein zweiter `/image`-Aufruf mit genauem Pfad.
     """
-    from scoutr.cli import IMAGE_SUFFIXES, _images_in
+    from cortex.cli import IMAGE_SUFFIXES, _images_in
 
     if target.is_file():
         return target
@@ -588,31 +592,31 @@ def current_values() -> dict[str, str]:
     """Aktuelle Einstellungen als Formularwerte."""
     settings = SESSION.settings()
     return {
-        "SCOUTR_MODEL": settings.model,
-        "SCOUTR_VISION_MODEL": settings.vision_model,
-        "SCOUTR_SUBAGENT_MODEL": settings.subagent_model,
-        "SCOUTR_API_BASE": settings.api_base,
-        "SCOUTR_SEARCH_BACKEND": settings.search_backend,
-        "SCOUTR_SEARCH_ENGINES": settings.search_engines,
-        "SCOUTR_SEARCH_VARIANTS": str(settings.search_variants),
-        "SCOUTR_SEARXNG_URL": settings.searxng_url,
-        "SCOUTR_LOCATION": settings.location,
-        "SCOUTR_LANG": settings.lang,
-        "SCOUTR_COUNTRY": settings.country,
-        "SCOUTR_SUBAGENTS_AUTO": "true" if settings.subagents_auto else "false",
-        "SCOUTR_MAX_SUBAGENTS": str(settings.max_subagents),
-        "SCOUTR_SUBAGENT_BUDGET": str(settings.subagent_budget),
-        "SCOUTR_SUBAGENT_PARALLEL": str(settings.subagent_parallel),
-        "SCOUTR_MAX_TOOL_CALLS": str(settings.max_tool_calls),
-        "SCOUTR_CONTEXT_TOKENS": str(settings.context_tokens),
-        "SCOUTR_PLANNER_TIMEOUT": str(int(settings.planner_timeout)),
-        "SCOUTR_ENABLE_PLAYWRIGHT": "true" if settings.enable_playwright else "false",
-        "SCOUTR_HA_URL": settings.ha_url,
-        "SCOUTR_HA_CONTROL": "true" if settings.ha_control else "false",
-        "SCOUTR_GOOGLE": "true" if settings.google_enabled else "false",
-        "SCOUTR_LAN_ENABLED": "true" if settings.lan_enabled else "false",
-        "SCOUTR_LAN_SUBNET": settings.lan_subnet,
-        "SCOUTR_MEMORY": "true" if settings.memory_enabled else "false",
+        "CORTEX_MODEL": settings.model,
+        "CORTEX_VISION_MODEL": settings.vision_model,
+        "CORTEX_SUBAGENT_MODEL": settings.subagent_model,
+        "CORTEX_API_BASE": settings.api_base,
+        "CORTEX_SEARCH_BACKEND": settings.search_backend,
+        "CORTEX_SEARCH_ENGINES": settings.search_engines,
+        "CORTEX_SEARCH_VARIANTS": str(settings.search_variants),
+        "CORTEX_SEARXNG_URL": settings.searxng_url,
+        "CORTEX_LOCATION": settings.location,
+        "CORTEX_LANG": settings.lang,
+        "CORTEX_COUNTRY": settings.country,
+        "CORTEX_SUBAGENTS_AUTO": "true" if settings.subagents_auto else "false",
+        "CORTEX_MAX_SUBAGENTS": str(settings.max_subagents),
+        "CORTEX_SUBAGENT_BUDGET": str(settings.subagent_budget),
+        "CORTEX_SUBAGENT_PARALLEL": str(settings.subagent_parallel),
+        "CORTEX_MAX_TOOL_CALLS": str(settings.max_tool_calls),
+        "CORTEX_CONTEXT_TOKENS": str(settings.context_tokens),
+        "CORTEX_PLANNER_TIMEOUT": str(int(settings.planner_timeout)),
+        "CORTEX_ENABLE_PLAYWRIGHT": "true" if settings.enable_playwright else "false",
+        "CORTEX_HA_URL": settings.ha_url,
+        "CORTEX_HA_CONTROL": "true" if settings.ha_control else "false",
+        "CORTEX_GOOGLE": "true" if settings.google_enabled else "false",
+        "CORTEX_LAN_ENABLED": "true" if settings.lan_enabled else "false",
+        "CORTEX_LAN_SUBNET": settings.lan_subnet,
+        "CORTEX_MEMORY": "true" if settings.memory_enabled else "false",
     }
 
 
@@ -632,7 +636,7 @@ def fix_model_id(model: str) -> str:
 
 def google_client(settings: Settings) -> Any:
     """Der Google-Zugriff mit den aktuellen Einstellungen."""
-    from scoutr.google import Google, TokenStore
+    from cortex.google import Google, TokenStore
 
     return Google(
         settings.google_client_id,
@@ -683,7 +687,7 @@ def save_values(payload: dict[str, Any]) -> Path:
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
     }
-    for key in ("SCOUTR_MODEL", "SCOUTR_VISION_MODEL", "SCOUTR_SUBAGENT_MODEL"):
+    for key in ("CORTEX_MODEL", "CORTEX_VISION_MODEL", "CORTEX_SUBAGENT_MODEL"):
         if values.get(key):
             values[key] = fix_model_id(values[key])
     ha_token = str(payload.get(HA_TOKEN_FIELD, "")).strip()
@@ -693,7 +697,7 @@ def save_values(payload: dict[str, Any]) -> Path:
     if api_key:
         # Nur setzen, wenn wirklich etwas eingetippt wurde -- ein leeres Feld
         # bedeutet "unveraendert", nicht "loeschen".
-        key_name = api_key_name_for(values.get("SCOUTR_MODEL", "") or SESSION.settings().model)
+        key_name = api_key_name_for(values.get("CORTEX_MODEL", "") or SESSION.settings().model)
         if key_name:
             values[key_name] = api_key
     google_id = str(payload.get(GOOGLE_ID_FIELD, "")).strip()
@@ -704,7 +708,7 @@ def save_values(payload: dict[str, Any]) -> Path:
         values["GOOGLE_CLIENT_SECRET"] = google_secret
     search_key = str(payload.get(SEARCH_KEY_FIELD, "")).strip()
     if search_key:
-        backend = values.get("SCOUTR_SEARCH_BACKEND", "") or SESSION.settings().search_backend
+        backend = values.get("CORTEX_SEARCH_BACKEND", "") or SESSION.settings().search_backend
         backend_key_name = SEARCH_BACKEND_KEYS.get(backend, "")
         if backend_key_name:
             values[backend_key_name] = search_key
@@ -765,7 +769,7 @@ def same_secret(candidate: str, secret: str) -> bool:
 class Handler(BaseHTTPRequestHandler):
     """Sehr kleiner Router -- eine Handvoll Endpunkte."""
 
-    server_version = f"scoutr/{__version__}"
+    server_version = f"cortex/{__version__}"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return  # keine Zugriffsprotokolle in der Konsole
@@ -838,7 +842,7 @@ class Handler(BaseHTTPRequestHandler):
             for candidate in (
                 self._query_token(),
                 self._cookie_token(),
-                self.headers.get("X-Scoutr-Token") or "",
+                self.headers.get("X-Cortex-Token") or "",
             )
         )
 
@@ -909,11 +913,11 @@ class Handler(BaseHTTPRequestHandler):
                 }
             )
         elif route == "/api/models":
-            from scoutr.system import available_models
+            from cortex.system import available_models
 
             self._json({"models": available_models(SESSION.settings())})
         elif route == "/api/system":
-            from scoutr.system import snapshot
+            from cortex.system import snapshot
 
             settings = SESSION.settings()
             payload = snapshot(settings.data_dir)
@@ -994,7 +998,7 @@ class Handler(BaseHTTPRequestHandler):
         """
         from urllib.parse import parse_qs, urlparse
 
-        from scoutr.google import GoogleError, exchange_code
+        from cortex.google import GoogleError, exchange_code
 
         query = parse_qs(urlparse(self.path).query)
         denied = query.get("error", [""])[0]
@@ -1054,7 +1058,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         `start` liefert die Adresse zum Zustimmen, `finish` nimmt den Code
         entgegen, den Google zurueckgibt.
         """
-        from scoutr.google import GoogleError, consent_url, exchange_code
+        from cortex.google import GoogleError, consent_url, exchange_code
 
         action = str(payload.get("action", "state")).strip()
         settings = SESSION.settings()
@@ -1109,27 +1113,27 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         Schluesselfeld heisst weiterhin "unveraendert", also greift dann der
         gespeicherte.
         """
-        from scoutr.probe import check_llm, check_search
+        from cortex.probe import check_llm, check_search
 
         settings = SESSION.settings()
-        model = fix_model_id(str(payload.get("SCOUTR_MODEL", "")).strip()) or settings.model
+        model = fix_model_id(str(payload.get("CORTEX_MODEL", "")).strip()) or settings.model
         api_key = str(payload.get(API_KEY_FIELD, "")).strip()
         if not api_key:
             name = api_key_name_for(model)
             api_key = os.environ.get(name, "") if name else ""
-        api_base = str(payload.get("SCOUTR_API_BASE", settings.api_base) or "").strip()
+        api_base = str(payload.get("CORTEX_API_BASE", settings.api_base) or "").strip()
         if api_base and not base_fits(api_base, model):
             # Dieselbe Regel wie im Betrieb -- sonst testet man etwas anderes,
             # als spaeter laeuft, und der Test luegt.
             api_base = ""
 
-        backend = str(payload.get("SCOUTR_SEARCH_BACKEND", "")).strip() or settings.search_backend
+        backend = str(payload.get("CORTEX_SEARCH_BACKEND", "")).strip() or settings.search_backend
         search_key = str(payload.get(SEARCH_KEY_FIELD, "")).strip()
         if not search_key:
             name = SEARCH_BACKEND_KEYS.get(backend, "")
             search_key = os.environ.get(name, "") if name else ""
-        engines = str(payload.get("SCOUTR_SEARCH_ENGINES", settings.search_engines) or "").strip()
-        instance = str(payload.get("SCOUTR_SEARXNG_URL", settings.searxng_url) or "").strip()
+        engines = str(payload.get("CORTEX_SEARCH_ENGINES", settings.search_engines) or "").strip()
+        instance = str(payload.get("CORTEX_SEARXNG_URL", settings.searxng_url) or "").strip()
 
         llm_ok, llm_msg = check_llm(model, api_key, api_base)
         search_ok, search_msg = check_search(backend, search_key, engines, instance)
@@ -1143,10 +1147,10 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         """Sucht eine Instanz oder testet die eingetragenen Angaben.
 
         Damit klappt die Einrichtung in der Oberflaeche genauso wie mit
-        `scoutr connect-ha`: Knopf druecken, Adresse steht da, Token einfuegen,
+        `cortex connect-ha`: Knopf druecken, Adresse steht da, Token einfuegen,
         Knopf druecken, fertig.
         """
-        from scoutr.homeassistant import HomeAssistant, HomeAssistantError, discover
+        from cortex.homeassistant import HomeAssistant, HomeAssistantError, discover
 
         if payload.get("action") == "discover":
             try:
@@ -1192,6 +1196,21 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         self.end_headers()
         self.wfile.write(body)
 
+    def _sse(self, text: str) -> bool:
+        """Schreibt ein Stueck in den Ereignisstrom. `False` = niemand mehr da.
+
+        Bricht die Verbindung ab, laeuft die Recherche im Hintergrund aus --
+        aber eine offene Rueckfrage wuerde die Sitzung sonst bis zum Zeitlimit
+        besetzt halten, obwohl niemand mehr antworten kann.
+        """
+        try:
+            self.wfile.write(text.encode("utf-8"))
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            SESSION.answer("")
+            return False
+        return True
+
     def _chat(self) -> None:
         """Fuehrt die Anfrage aus und streamt die Ereignisse als SSE."""
         payload = self._read_json()
@@ -1211,6 +1230,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
+        # Ohne das puffert manch ein Zwischenstueck die Antwort und nichts
+        # kommt an, bevor alles fertig ist.
+        self.send_header("Connection", "close")
         self.end_headers()
 
         events: queue.Queue[dict[str, Any] | None] = queue.Queue()
@@ -1240,18 +1262,27 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
 
+        # Sofort ein Lebenszeichen: erst damit steht die Verbindung fuer den
+        # Browser wirklich, und man sieht, dass etwas passiert.
+        self._sse(": los\n\n")
+
         while True:
-            event = events.get()
+            try:
+                event = events.get(timeout=HEARTBEAT_SECONDS)
+            except queue.Empty:
+                # Ein Cloud-Modell schweigt zwischen zwei Schritten gern eine
+                # halbe Minute. Ohne ein Byte in der Leitung legt irgendwer in
+                # der Kette auf -- der Browser, das Handy-Funkmodul, ein Proxy
+                # -- und die Oberflaeche meldet "network error", obwohl die
+                # Recherche noch laeuft. Ein Doppelpunkt ist ein Kommentar im
+                # SSE-Format: er haelt die Leitung warm und wird nicht
+                # angezeigt.
+                if not self._sse(": warte\n\n"):
+                    break
+                continue
             if event is None:
                 break
-            try:
-                self.wfile.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode())
-                self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                # Tab geschlossen. Die Recherche laeuft im Hintergrund aus --
-                # aber eine offene Rueckfrage wuerde die Sitzung sonst bis zum
-                # Zeitlimit besetzt halten, obwohl niemand mehr antworten kann.
-                SESSION.answer("")
+            if not self._sse(f"data: {json.dumps(event, ensure_ascii=False)}\n\n"):
                 break
 
 
@@ -1375,7 +1406,7 @@ def _warm_up() -> None:
     ist. Also erledigen wir das, waehrend er noch den Browser oeffnet.
     """
     with contextlib.suppress(Exception):
-        from scoutr.config import model_problem
+        from cortex.config import model_problem
 
         model_problem(SESSION.settings().model)
 

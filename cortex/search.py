@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from scoutr.models import SearchResult, domain_of
-from scoutr.queries import fuse
+from cortex.models import SearchResult, domain_of
+from cortex.queries import fuse
 
 #: Abstand, mit dem parallele Anfragen losgeschickt werden. Gleichzeitig
 #: abgefeuert quittieren die offenen Engines das gern mit einem Rate-Limit.
@@ -114,8 +114,8 @@ def _search_open(query: str, options: SearchOptions) -> list[SearchResult]:
         raise SearchError(
             f"Suche fehlgeschlagen: {exc}\n"
             f"Alle offenen Engines waren nicht erreichbar. Einzelne lassen sich mit "
-            f"SCOUTR_SEARCH_ENGINES gezielt waehlen (verfuegbar: {', '.join(OPEN_ENGINES)}), "
-            f"oder du nimmst mit SCOUTR_SEARCH_BACKEND=searxng eine eigene Instanz."
+            f"CORTEX_SEARCH_ENGINES gezielt waehlen (verfuegbar: {', '.join(OPEN_ENGINES)}), "
+            f"oder du nimmst mit CORTEX_SEARCH_BACKEND=searxng eine eigene Instanz."
         ) from exc
 
     return [
@@ -135,10 +135,10 @@ def _search_searxng(query: str, options: SearchOptions) -> list[SearchResult]:
     `search.formats` den Eintrag `json` ergaenzen). Bei eigenen Instanzen ist
     das eine Zeile; viele oeffentliche Instanzen haben JSON abgeschaltet.
     """
-    base = (options.instance_url or os.environ.get("SCOUTR_SEARXNG_URL", "")).strip()
+    base = (options.instance_url or os.environ.get("CORTEX_SEARXNG_URL", "")).strip()
     if not base:
         raise SearchError(
-            "SCOUTR_SEARXNG_URL fehlt. Trage die Adresse deiner SearXNG-Instanz ein, "
+            "CORTEX_SEARXNG_URL fehlt. Trage die Adresse deiner SearXNG-Instanz ein, "
             "z.B. http://localhost:8080 -- eine eigene laeuft mit "
             "`docker run -p 8080:8080 searxng/searxng`."
         )

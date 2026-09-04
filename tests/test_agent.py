@@ -9,11 +9,11 @@ from typing import Any
 import httpx
 import pytest
 
-from scoutr.agent import Agent, _parse_spec_json
-from scoutr.config import Settings
-from scoutr.fetch import Fetcher, RobotsPolicy
-from scoutr.models import SearchResult
-from scoutr.tools import Toolbox
+from cortex.agent import Agent, _parse_spec_json
+from cortex.config import Settings
+from cortex.fetch import Fetcher, RobotsPolicy
+from cortex.models import SearchResult
+from cortex.tools import Toolbox
 
 
 # ---------------------------------------------------------------------------
@@ -75,16 +75,16 @@ def toolbox(settings: Settings, fixture_html) -> Toolbox:
             200, text=fixture_html("plain_article.html"), headers={"content-type": "text/html"}
         )
 
-    fetcher = Fetcher("scoutr-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
+    fetcher = Fetcher("cortex-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "scoutr-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
     return Toolbox(settings, cache=None, fetcher=fetcher)
 
 
 @pytest.fixture(autouse=True)
 def _stub_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "scoutr.tools.search_web",
+        "cortex.tools.search_web",
         lambda query, **kwargs: [
             SearchResult(title="Café Sonntag", url="https://cafe-sonntag.de/", snippet="WLAN")
         ],
@@ -313,7 +313,7 @@ def test_clear_resets_history(
 def test_history_is_written_to_the_cache(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
-    from scoutr.cache import Cache
+    from cortex.cache import Cache
 
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Antwort")))
     cache = Cache(tmp_path / "c.sqlite3")
@@ -392,7 +392,7 @@ def test_a_crashed_runner_frees_memory_and_retries(
     monkeypatch.setattr("litellm.completion", crashing)
     monkeypatch.setattr("time.sleep", lambda seconds: None)
     monkeypatch.setattr(
-        "scoutr.local_model.free_memory", lambda *a, **k: freed.append("frei") or ["qwen3:8b"]
+        "cortex.local_model.free_memory", lambda *a, **k: freed.append("frei") or ["qwen3:8b"]
     )
     result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     assert result.answer == "zweiter Versuch"
@@ -419,7 +419,7 @@ def test_old_tool_results_are_trimmed(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Sonst laeuft bei lokalen Modellen der Kontext ueber."""
-    from scoutr.agent import TRIMMED_NOTE
+    from cortex.agent import TRIMMED_NOTE
 
     settings.keep_full_results = 2
     settings.max_tool_calls = 6
@@ -477,10 +477,10 @@ def test_subagent_results_reach_the_parent(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Quellen der Subagenten muessen in der Gesamtbilanz auftauchen."""
-    from scoutr.subagents import SubagentResult
+    from cortex.subagents import SubagentResult
 
     monkeypatch.setattr(
-        "scoutr.subagents.run_subagents",
+        "cortex.subagents.run_subagents",
         lambda tasks, *a, **k: [
             SubagentResult(
                 task=task,
@@ -522,7 +522,7 @@ def _planner_llm(monkeypatch: pytest.MonkeyPatch, tasks: list[str], *answers: st
     """
     import json as _json
 
-    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
     queue = [_message(content=_json.dumps(tasks))] + [
         _message(content=answer) for answer in answers
     ]
@@ -539,7 +539,7 @@ def test_every_question_is_split_automatically(
 
     seen: list[list[str]] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._run_subagents",
+        "cortex.agent.Agent._run_subagents",
         lambda self, tasks: seen.append(tasks) or [{"task": t, "summary": "ok"} for t in tasks],
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -549,7 +549,7 @@ def test_every_question_is_split_automatically(
     assert result.answer == "Endantwort"
     # Die Vorrecherche steht dem Hauptagenten zur Verfuegung -- als Text,
     # nicht als JSON.
-    from scoutr.agent import PRE_RESEARCH_PREFIX
+    from cortex.agent import PRE_RESEARCH_PREFIX
 
     blob = next(
         str(m.get("content", ""))
@@ -567,7 +567,7 @@ def test_auto_research_can_be_switched_off(
     monkeypatch.setattr("litellm.completion", llm)
     called: list[Any] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._run_subagents", lambda self, tasks: called.append(tasks) or []
+        "cortex.agent.Agent._run_subagents", lambda self, tasks: called.append(tasks) or []
     )
     result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     assert called == []
@@ -579,9 +579,9 @@ def test_a_failed_plan_does_not_stop_the_run(
 ) -> None:
     """Scheitert die Planung, macht der Hauptagent einfach selbst weiter."""
     settings.subagents_auto = True
-    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
     monkeypatch.setattr(
-        "scoutr.subagents.plan_subtasks",
+        "cortex.subagents.plan_subtasks",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Planer weg")),
     )
     llm = ScriptedLLM(_message(content="trotzdem geantwortet"))
@@ -595,15 +595,15 @@ def test_follow_up_questions_get_the_conversation_as_context(
 ) -> None:
     """'nur die mit 4+ Sternen' ist ohne Vorgeschichte nicht recherchierbar."""
     settings.subagents_auto = True
-    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
     contexts: list[str] = []
 
     def fake_plan(question, settings_arg, context="", limit=4):
         contexts.append(context)
         return [question]
 
-    monkeypatch.setattr("scoutr.subagents.plan_subtasks", fake_plan)
-    monkeypatch.setattr("scoutr.agent.Agent._run_subagents", lambda self, tasks: [])
+    monkeypatch.setattr("cortex.subagents.plan_subtasks", fake_plan)
+    monkeypatch.setattr("cortex.agent.Agent._run_subagents", lambda self, tasks: [])
     llm = ScriptedLLM(_message(content="erste"), _message(content="zweite"))
     monkeypatch.setattr("litellm.completion", llm)
 
@@ -622,7 +622,7 @@ def test_subagent_calls_count_towards_the_budget(
     settings.max_tool_calls = 10
     _planner_llm(monkeypatch, ["A"], "fertig")
     monkeypatch.setattr(
-        "scoutr.agent.Agent._run_subagents",
+        "cortex.agent.Agent._run_subagents",
         lambda self, tasks: [{"task": "A", "summary": "ok", "tool_calls": 5}],
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -667,7 +667,7 @@ def test_history_stores_the_question_not_the_budget_prompt(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
     """Am Budget-Limit wurde vorher der Budget-Hinweis als Frage gespeichert."""
-    from scoutr.cache import Cache
+    from cortex.cache import Cache
 
     settings.max_tool_calls = 1
     llm = ScriptedLLM(
@@ -685,7 +685,7 @@ def test_planner_sees_the_location_filter(
 ) -> None:
     """Mit --location muessen auch die Teilfragen den Ort kennen."""
     settings.subagents_auto = True
-    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
     settings.location = "Mönchengladbach"
     seen: dict[str, str] = {}
 
@@ -694,8 +694,8 @@ def test_planner_sees_the_location_filter(
         seen["context"] = context
         return [question]
 
-    monkeypatch.setattr("scoutr.subagents.plan_subtasks", spy_plan)
-    monkeypatch.setattr("scoutr.agent.Agent._run_subagents", lambda self, tasks: [])
+    monkeypatch.setattr("cortex.subagents.plan_subtasks", spy_plan)
+    monkeypatch.setattr("cortex.agent.Agent._run_subagents", lambda self, tasks: [])
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="ok")))
     Agent(settings, cache=None, toolbox=toolbox).ask("Cafés mit WLAN", stream=False)
     assert "Mönchengladbach" in seen["context"]
@@ -705,7 +705,7 @@ def test_planner_context_hides_internal_messages(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Vorrecherche-Blob und Budget-Hinweis sind Regie, kein Gespraech."""
-    from scoutr.agent import BUDGET_PROMPT, PRE_RESEARCH_PREFIX
+    from cortex.agent import BUDGET_PROMPT, PRE_RESEARCH_PREFIX
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent.messages += [
@@ -727,7 +727,7 @@ def test_planner_context_hides_internal_messages(
 # Kaputtes Tool-Call-JSON (Ollama/Gemma) -- Regression zu "Extra data"
 # ---------------------------------------------------------------------------
 def test_split_json_objects() -> None:
-    from scoutr.agent import split_json_objects
+    from cortex.agent import split_json_objects
 
     assert split_json_objects('{"a": 1}') == ['{"a": 1}']
     assert split_json_objects('{"a": 1}{"b": 2}') == ['{"a": 1}', '{"b": 2}']
@@ -739,7 +739,7 @@ def test_split_json_objects() -> None:
 
 def test_repair_splits_concatenated_calls() -> None:
     """Zwei zusammengeklebte Objekte werden zwei eigene Aufrufe."""
-    from scoutr.agent import repair_tool_calls
+    from cortex.agent import repair_tool_calls
 
     repaired = repair_tool_calls(
         [
@@ -760,7 +760,7 @@ def test_repair_splits_concatenated_calls() -> None:
 
 
 def test_repair_dedupes_repeated_chunks_and_fixes_garbage() -> None:
-    from scoutr.agent import repair_tool_calls
+    from cortex.agent import repair_tool_calls
 
     repaired = repair_tool_calls(
         [
@@ -835,7 +835,7 @@ def test_poisoned_history_is_healed_before_sending(
 
 
 def test_json_errors_are_not_retried_as_connection_problems() -> None:
-    from scoutr.agent import is_transient
+    from cortex.agent import is_transient
 
     assert not is_transient("APIConnectionError: Extra data: line 1 column 73 (char 72)")
     assert not is_transient("json.decoder.JSONDecodeError: Expecting value")
@@ -911,7 +911,7 @@ def test_system_prompt_carries_todays_date(settings: Settings, toolbox: Toolbox)
 def test_notes_are_injected_into_the_system_prompt(
     settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
-    from scoutr.cache import Cache
+    from cortex.cache import Cache
 
     cache = Cache(tmp_path / "c.sqlite3")
     cache.add_note("Budget fuer den Laptop: 1200 Euro")
@@ -925,7 +925,7 @@ def test_notes_are_injected_into_the_system_prompt(
 def test_memory_tool_is_offered_only_with_a_cache(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
-    from scoutr.cache import Cache
+    from cortex.cache import Cache
 
     llm = ScriptedLLM(_message(content="ok"))
     monkeypatch.setattr("litellm.completion", llm)
@@ -958,7 +958,7 @@ def test_small_talk_skips_planning_without_any_llm_call(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._auto_research",
+        "cortex.agent.Agent._auto_research",
         lambda self, q, b: researched.append(q) or 0,
     )
     result = Agent(settings, cache=None, toolbox=toolbox).ask(greeting, stream=False)
@@ -987,7 +987,7 @@ def test_ambiguous_messages_ask_the_small_model_with_a_time_limit(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask(
         "das zweite klingt gut, oder was meinst du?", stream=False
@@ -1020,7 +1020,7 @@ def test_one_call_covers_triage_and_planning(
     monkeypatch.setattr("litellm.completion", completion)
     seen: list[list[str]] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._run_subagents",
+        "cortex.agent.Agent._run_subagents",
         lambda self, tasks: seen.append(tasks) or [{"task": t, "summary": "ok"} for t in tasks],
     )
     Agent(settings, cache=None, toolbox=toolbox).ask("Zusammengesetzte Frage", stream=False)
@@ -1041,7 +1041,7 @@ def test_research_verdict_starts_the_planner(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask(
         "welche kaffeemuehle bis 150 euro", stream=False
@@ -1064,7 +1064,7 @@ def test_triage_failure_defaults_to_research(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask("irgendeine frage", stream=False)
     assert researched == ["irgendeine frage"]
@@ -1083,7 +1083,7 @@ def test_unclear_triage_answers_default_to_research(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "scoutr.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask("hmm schwierig", stream=False)
     assert researched == ["hmm schwierig"]
@@ -1091,7 +1091,7 @@ def test_unclear_triage_answers_default_to_research(
 
 def test_real_questions_are_never_smalltalk() -> None:
     """Die Heuristik darf keine echten Fragen schlucken."""
-    from scoutr.agent import SMALL_TALK_RE
+    from cortex.agent import SMALL_TALK_RE
 
     for question in (
         "hallo, welche cafés in köln haben wlan?",
@@ -1124,7 +1124,7 @@ def test_agent_requests_the_large_context_from_ollama(
 # Kontext ueber mehrere Turns
 # ---------------------------------------------------------------------------
 def _bare_agent(context_tokens: int) -> Agent:
-    from scoutr.config import Settings as RealSettings
+    from cortex.config import Settings as RealSettings
 
     agent = Agent.__new__(Agent)
     agent.settings = RealSettings(model="ollama_chat/x", context_tokens=context_tokens)
@@ -1138,15 +1138,15 @@ def test_pre_research_blocks_do_not_pile_up(
     """Jeder Turn hinterliess einen Vorrecherche-Block von mehreren Kilobyte,
     der nie gekuerzt wurde -- nach zwei Turns lief jedes kleine Fenster ueber
     und der Anbieter warf den Anfang weg."""
-    from scoutr.agent import PRE_RESEARCH_PREFIX, TRIMMED_RESEARCH
+    from cortex.agent import PRE_RESEARCH_PREFIX, TRIMMED_RESEARCH
 
     settings.subagents_auto = True
-    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
     monkeypatch.setattr(
-        "scoutr.subagents.plan_subtasks", lambda q, s, context="", limit=4: [q]
+        "cortex.subagents.plan_subtasks", lambda q, s, context="", limit=4: [q]
     )
     monkeypatch.setattr(
-        "scoutr.agent.Agent._run_subagents",
+        "cortex.agent.Agent._run_subagents",
         lambda self, tasks: [{"task": tasks[0], "summary": "Ergebnis. " * 200}],
     )
     monkeypatch.setattr(
@@ -1248,7 +1248,7 @@ def test_earlier_questions_survive_a_normal_conversation(
 def test_system_prompt_asks_for_thorough_answers() -> None:
     """Der Prompt hat frueher zur Knappheit gedraengt ("knapp", "hoechstens
     ein Satz") -- genau das machte die Antworten duenn."""
-    from scoutr.agent import SYSTEM_PROMPT
+    from cortex.agent import SYSTEM_PROMPT
 
     assert "ausfuehrlich" in SYSTEM_PROMPT.lower()
     assert "GROSSZUEGIG" in SYSTEM_PROMPT
@@ -1262,7 +1262,7 @@ def test_system_prompt_asks_for_thorough_answers() -> None:
 
 
 def test_budget_prompt_still_wants_everything() -> None:
-    from scoutr.agent import BUDGET_PROMPT
+    from cortex.agent import BUDGET_PROMPT
 
     assert "vollstaendig" in BUDGET_PROMPT
     assert "Nicht gefunden:" in BUDGET_PROMPT
@@ -1271,7 +1271,7 @@ def test_budget_prompt_still_wants_everything() -> None:
 def test_findings_are_plain_text_not_json() -> None:
     """JSON kostet ein Achtel mehr Zeichen und liest sich fuer kleine
     Modelle schlechter."""
-    from scoutr.agent import format_findings
+    from cortex.agent import format_findings
 
     text = format_findings(
         [
@@ -1290,7 +1290,7 @@ def test_findings_are_plain_text_not_json() -> None:
 
 
 def test_findings_report_failed_subtasks() -> None:
-    from scoutr.agent import format_findings
+    from cortex.agent import format_findings
 
     text = format_findings([{"task": "Bewertungen", "error": "Modell weg"}])
     assert "nicht beantwortet" in text and "Modell weg" in text
@@ -1300,12 +1300,12 @@ def test_pre_research_reaches_the_agent_as_text(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     settings.subagents_auto = True
-    monkeypatch.setattr("scoutr.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
     monkeypatch.setattr(
-        "scoutr.subagents.plan_subtasks", lambda q, s, context="", limit=4: ["Teil A"]
+        "cortex.subagents.plan_subtasks", lambda q, s, context="", limit=4: ["Teil A"]
     )
     monkeypatch.setattr(
-        "scoutr.agent.Agent._run_subagents",
+        "cortex.agent.Agent._run_subagents",
         lambda self, tasks: [
             {"task": "Teil A", "summary": "Ausfuehrliches Ergebnis.",
              "sources": ["https://a.de"]}
@@ -1356,8 +1356,8 @@ def test_ask_instructions_follow_the_handler(settings: Settings) -> None:
 
 def test_setting_the_handler_keeps_the_notes_in_the_prompt(tmp_path) -> None:
     """Der Merkzettel steht hinter dem Systemprompt -- er darf nicht verschwinden."""
-    from scoutr.cache import Cache
-    from scoutr.config import Settings as S
+    from cortex.cache import Cache
+    from cortex.config import Settings as S
 
     settings = S(model="openai/gpt-4o", data_dir=tmp_path / "d", subagents_auto=False)
     cache = Cache(settings.db_path, settings.cache_ttl_hours)
@@ -1413,10 +1413,10 @@ def test_a_long_tool_result_is_shortened_for_reading_along(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Mitlesen soll erkennbar machen, was zurueckkam -- nicht die halbe Seite."""
-    from scoutr import agent as agent_module
+    from cortex import agent as agent_module
 
     monkeypatch.setattr(
-        "scoutr.tools.search_web",
+        "cortex.tools.search_web",
         lambda query, **kwargs: [
             SearchResult(title="T" * 400, url=f"https://a.de/{i}", snippet="S" * 400)
             for i in range(20)
@@ -1529,3 +1529,153 @@ def test_the_prompt_says_it_cannot_send_mail(settings: Settings, toolbox: Toolbo
     settings.google_client_id = "id.apps.googleusercontent.com"
     agent = Agent(settings, cache=None, toolbox=toolbox)
     assert "nur lesen" in agent.messages[0]["content"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Wer ist das hier eigentlich
+# ---------------------------------------------------------------------------
+def test_the_agent_introduces_itself_as_cortex(settings: Settings, toolbox: Toolbox) -> None:
+    """Auf "wer bist du" kommt Cortex von Jonas, nicht der Anbieter."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    prompt = agent.messages[0]["content"]
+    assert "Ich bin Cortex, ein KI-Assistent von Jonas." in prompt
+    for vendor in ("Google", "OpenAI", "Anthropic", "Meta", "NVIDIA"):
+        assert vendor in prompt, f"{vendor} wird ausdruecklich ausgeschlossen"
+
+
+def test_the_underlying_model_may_still_be_named(settings: Settings, toolbox: Toolbox) -> None:
+    """Nicht luegen, nur nicht verwechseln -- das ist der Unterschied."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    prompt = agent.messages[0]["content"]
+    assert "darfst du das" in prompt
+    assert "Luegen sollst du nicht" in prompt
+
+
+def test_a_question_about_identity_needs_no_research(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Wer bist du? -- dafuer muss niemand das Web durchsuchen."""
+    llm = ScriptedLLM(_message(content="Ich bin Cortex, ein KI-Assistent von Jonas."))
+    monkeypatch.setattr("litellm.completion", llm)
+    settings.subagents_auto = False
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("wer bist du?", stream=False)
+    assert "Cortex" in result.answer
+    assert result.tool_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Mehrere Werkzeuge einer Runde laufen nebeneinander
+# ---------------------------------------------------------------------------
+def test_several_pages_are_read_at_once(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Nacheinander summiert sich das: vier Seiten a zwei Sekunden sind acht."""
+    import threading
+    import time
+
+    running = []
+    highest = []
+    lock = threading.Lock()
+
+    def slow_fetch(url: str):
+        with lock:
+            running.append(url)
+            highest.append(len(running))
+        time.sleep(0.15)
+        with lock:
+            running.remove(url)
+        return {"url": url, "text": "Inhalt"}
+
+    monkeypatch.setattr(toolbox, "fetch_page", slow_fetch)
+    llm = ScriptedLLM(
+        _message(
+            tool_calls=[
+                _tool_call("fetch_page", {"url": f"https://s{i}.de/x"}, f"c{i}") for i in range(4)
+            ]
+        ),
+        _message(content="Fertig."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    started = time.monotonic()
+    agent.ask("Lies vier Seiten", stream=False)
+    elapsed = time.monotonic() - started
+
+    assert max(highest) == 4, "alle vier gleichzeitig"
+    assert elapsed < 0.45, f"nacheinander waeren es 0,6 s gewesen, gemessen: {elapsed:.2f}"
+
+
+def test_the_answers_keep_the_order_of_the_calls(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Die Schnittstellen erwarten zu jedem Aufruf genau eine Antwort, der Reihe nach."""
+    import time
+
+    def uneven(url: str):
+        # Die letzte Seite ist die schnellste -- ohne Sortierung stuende sie vorn.
+        time.sleep(0.2 if url.endswith("0") else 0.01)
+        return {"url": url}
+
+    monkeypatch.setattr(toolbox, "fetch_page", uneven)
+    llm = ScriptedLLM(
+        _message(
+            tool_calls=[
+                _tool_call("fetch_page", {"url": f"https://s{i}.de/x"}, f"c{i}") for i in range(3)
+            ]
+        ),
+        _message(content="Fertig."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Lies drei Seiten", stream=False)
+
+    answered = [m["tool_call_id"] for m in agent.messages if m.get("role") == "tool"]
+    assert answered == ["c0", "c1", "c2"]
+
+
+def test_a_question_to_the_user_never_runs_in_parallel(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Eine Rueckfrage wartet auf einen Menschen -- das gehoert nicht in einen Pool."""
+    from cortex.agent import PARALLEL_SAFE
+
+    assert "ask_user" not in PARALLEL_SAFE
+
+
+def test_writing_and_switching_stay_sequential() -> None:
+    """Notizen und Schaltbefehle veraendern etwas -- Reihenfolge zaehlt."""
+    from cortex.agent import PARALLEL_SAFE
+
+    for name in ("remember", "save_memory", "ha_call", "lan_scan", "research"):
+        assert name not in PARALLEL_SAFE, name
+
+
+def test_a_mixed_round_runs_in_order(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ein einziger heikler Aufruf in der Runde, und alles laeuft nacheinander."""
+    order: list[str] = []
+
+    monkeypatch.setattr(
+        toolbox, "fetch_page", lambda url: (order.append("fetch"), {"url": url})[1]
+    )
+    monkeypatch.setattr(
+        toolbox, "remember", lambda text: (order.append("remember"), {"ok": True})[1]
+    )
+    llm = ScriptedLLM(
+        _message(
+            tool_calls=[
+                _tool_call("fetch_page", {"url": "https://a.de/1"}, "c1"),
+                _tool_call("remember", {"text": "Notiz"}, "c2"),
+            ]
+        ),
+        _message(content="Fertig."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Lies und merk dir was", stream=False)
+    assert order == ["fetch", "remember"]

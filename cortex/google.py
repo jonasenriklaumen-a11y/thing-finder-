@@ -10,7 +10,7 @@ dass hier je eine Mail verschickt, geloescht oder ein Termin veraendert wird
 -- Google laesst es schlicht nicht zu. Das ist Absicht: der Agent liest mit,
 er handelt nicht im Namen des Nutzers.
 
-**Aus, bis jemand es einschaltet.** Ohne `SCOUTR_GOOGLE=true` und ohne
+**Aus, bis jemand es einschaltet.** Ohne `CORTEX_GOOGLE=true` und ohne
 hinterlegtes Konto existieren die Werkzeuge fuer das Modell gar nicht.
 
 **Die Anmeldedaten bleiben hier.** Access- und Refresh-Token liegen
@@ -104,7 +104,7 @@ class TokenStore:
         self._passphrase = passphrase
 
     def _cipher(self) -> Any:
-        from scoutr.memory import Cipher
+        from cortex.memory import Cipher
 
         return Cipher(self._key_path, self._passphrase)
 

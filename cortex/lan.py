@@ -1,6 +1,6 @@
 """Das eigene Netz erkunden -- ohne nmap, nur mit der Standardbibliothek.
 
-scoutr soll auch Fragen beantworten koennen, die nicht im Web stehen: "laeuft
+cortex soll auch Fragen beantworten koennen, die nicht im Web stehen: "laeuft
 mein Drucker noch", "welche Geraete haengen hier eigentlich drin", "ist Home
 Assistant erreichbar". Dafuer reicht ein einfacher TCP-Verbindungstest ueber
 das eigene Subnetz -- parallel, mit kurzem Zeitlimit.
@@ -9,7 +9,7 @@ Zwei Grenzen sind bewusst hart gezogen:
 
 * **Nur private Netze.** 10/8, 172.16/12, 192.168/16 und der Tailscale-Bereich
   100.64/10. Ein Scan fremder Adressen waere weder gewollt noch in Ordnung.
-* **Nur die Frage "antwortet da etwas".** scoutr klopft an, liest den Titel
+* **Nur die Frage "antwortet da etwas".** cortex klopft an, liest den Titel
   einer Weboberflaeche und geht weiter. Keine Passwortversuche, keine
   Schwachstellensuche, keine Sicherheitspruefung.
 """
@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-#: Ports, die scoutr kennt, mit dem, was dort ueblicherweise laeuft.
+#: Ports, die cortex kennt, mit dem, was dort ueblicherweise laeuft.
 KNOWN_PORTS: dict[int, str] = {
     21: "FTP",
     22: "SSH",
@@ -69,7 +69,7 @@ CONNECT_TIMEOUT = 0.35
 #: gut 3000 Versuche; mit 200 Faeden ist das in wenigen Sekunden durch.
 WORKERS = 200
 
-#: Groesstes Netz, das scoutr am Stueck durchgeht. Ein /16 waere 65.000
+#: Groesstes Netz, das cortex am Stueck durchgeht. Ein /16 waere 65.000
 #: Adressen -- das dauert zu lange und will niemand.
 MAX_HOSTS = 512
 
@@ -128,7 +128,7 @@ def in_container() -> bool:
 
 
 def container_hint(subnet: str = "") -> str:
-    """Sagt es, wenn scoutr im Container am eigenen Netz vorbeisieht.
+    """Sagt es, wenn cortex im Container am eigenen Netz vorbeisieht.
 
     Ein Container haengt normalerweise in Dockers eigenem Bruecken-Netz. Von
     dort ist das Heimnetz nicht zu sehen -- die Suche findet dann schlicht
@@ -147,8 +147,8 @@ def container_hint(subnet: str = "") -> str:
     return (
         "Cortex AI laeuft in einem Container und sieht nur dessen eigenes Netz "
         f"({subnet or address}), nicht dein Heimnetz. Abhilfe: den Container mit "
-        "SCOUTR_NETWORK=host starten "
-        "(docker compose) bzw. `--network host` (docker run) -- oder scoutr direkt auf "
+        "CORTEX_NETWORK=host starten "
+        "(docker compose) bzw. `--network host` (docker run) -- oder cortex direkt auf "
         "dem Rechner laufen lassen."
     )
 
@@ -157,9 +157,9 @@ def own_subnet() -> str:
     """Das eigene /24, abgeleitet aus der Adresse zur Standardroute.
 
     Gibt "" zurueck, wenn keine private Adresse gefunden wird -- dann kann
-    scoutr nicht raten, welches Netz gemeint ist, und fragt lieber nach.
+    cortex nicht raten, welches Netz gemeint ist, und fragt lieber nach.
     """
-    from scoutr.web import lan_address
+    from cortex.web import lan_address
 
     address = lan_address()
     if not address:
@@ -327,7 +327,7 @@ def scan(
 def find_port(port: int, subnet: str = "") -> list[str]:
     """Alle Adressen im Netz, auf denen *port* offen ist.
 
-    Damit findet scoutr Home Assistant (8123) oder Ollama (11434), ohne das
+    Damit findet cortex Home Assistant (8123) oder Ollama (11434), ohne das
     ganze Netz einzusammeln.
     """
     network = parse_subnet(subnet or own_subnet())

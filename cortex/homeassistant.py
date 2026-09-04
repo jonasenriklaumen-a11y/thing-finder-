@@ -1,13 +1,13 @@
 """Home Assistant anbinden -- ueber die REST-Schnittstelle, ohne Zusatzpaket.
 
 Home Assistant bringt eine schlichte REST-Schnittstelle mit, die alles kann,
-was scoutr braucht: Zustaende lesen und Dienste aufrufen. Angemeldet wird sich
+was cortex braucht: Zustaende lesen und Dienste aufrufen. Angemeldet wird sich
 mit einem langlebigen Zugriffstoken, das man sich im eigenen Profil anlegt.
 
 Zwei Vorsichtsmassnahmen sind eingebaut:
 
-* **Lesen ist frei, Schalten nicht.** Ohne `SCOUTR_HA_CONTROL=true` beantwortet
-  scoutr Fragen ueber das Haus, aber schaltet nichts.
+* **Lesen ist frei, Schalten nicht.** Ohne `CORTEX_HA_CONTROL=true` beantwortet
+  cortex Fragen ueber das Haus, aber schaltet nichts.
 * **Empfindliches immer mit Rueckfrage.** Schloesser, Alarmanlagen, Tore und
   Heizungen bleiben auch mit erlaubtem Schalten bestaetigungspflichtig. Ein
   falsch verstandener Satz soll nicht die Haustuer aufschliessen.
@@ -39,7 +39,7 @@ PROTECTED_DOMAINS: frozenset[str] = frozenset(
     {"lock", "alarm_control_panel", "cover", "water_heater", "climate", "vacuum"}
 )
 
-#: Bereiche, in denen scoutr ueberhaupt schalten darf. Alles andere lehnt er
+#: Bereiche, in denen cortex ueberhaupt schalten darf. Alles andere lehnt er
 #: ab -- lieber eine Absage als ein unerwarteter Eingriff.
 ALLOWED_DOMAINS: frozenset[str] = frozenset(
     {
@@ -71,7 +71,7 @@ STATES_TTL = 10.0
 #: (Adresse, Token) -> (Zeitpunkt, Zustaende)
 _states_cache: dict[tuple[str, str], tuple[float, list[Entity]]] = {}
 
-#: So viele Entitaeten gibt scoutr hoechstens an das Modell weiter. Eine
+#: So viele Entitaeten gibt cortex hoechstens an das Modell weiter. Eine
 #: gewachsene Installation hat schnell tausend -- die wuerden das
 #: Kontextfenster sprengen, bevor die eigentliche Frage drankommt.
 MAX_ENTITIES = 60
@@ -139,7 +139,7 @@ class HomeAssistant:
     def _request(self, method: str, path: str, payload: Any = None) -> Any:
         if not self.configured:
             raise HomeAssistantError(
-                "Home Assistant ist nicht eingerichtet. `scoutr connect-ha` verbindet dich."
+                "Home Assistant ist nicht eingerichtet. `cortex connect-ha` verbindet dich."
             )
         try:
             response = httpx.request(
@@ -256,12 +256,12 @@ def discover(subnet: str = "", timeout: float = 1.0) -> list[str]:
             address = socket.gethostbyname(host)
         except OSError:
             continue
-        from scoutr.lan import port_open
+        from cortex.lan import port_open
 
         if port_open(address, HA_PORT, timeout=timeout):
             found.append(url)
 
-    from scoutr.lan import NotPrivate, find_port
+    from cortex.lan import NotPrivate, find_port
 
     try:
         for address in find_port(HA_PORT, subnet):

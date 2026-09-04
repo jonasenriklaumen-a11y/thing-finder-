@@ -1,16 +1,13 @@
-# scoutr
+# Cortex
 
-**Cortex AI** ist der Rechercheagent, mit dem man chatten kann — er durchsucht
+**Cortex** ist der Rechercheagent, mit dem man chatten kann — er durchsucht
 eigenständig das Internet, liest die gefundenen Seiten und gibt die Ergebnisse
 ausgewertet zurück, mit Quelle zu jeder Angabe. **Und er kennt dein Zuhause:** er sieht
-ins eigene Netz und liest Home Assistant, beantwortet also auch Fragen, die im Web gar
-nicht stehen können.
+ins eigene Netz, liest Home Assistant und — wenn du es erlaubst — deinen Kalender und
+dein Postfach. Also auch Fragen, deren Antwort im Web gar nicht stehen kann.
 
-Installiert und gestartet wird er über das Kommandozeilenwerkzeug `cortex` — im
-Terminal (`cortex`), im Browser (`cortex web`) und vom Handy aus (`cortex web --lan`),
-überall derselbe Agent mit denselben Einstellungen. Der alte Name `scoutr` funktioniert
-weiter: beide Befehle starten dasselbe Programm, damit bestehende Skripte und Dienste
-nicht kaputtgehen.
+Ein Befehl, drei Wege: im Terminal (`cortex`), im Browser (`cortex web`) und vom Handy
+aus (`cortex web --lan`) — überall derselbe Agent mit denselben Einstellungen.
 
 ```
 $ cortex
@@ -37,7 +34,7 @@ $ cortex
 ## Quickstart in 3 Minuten
 
 ```bash
-# 1. Installieren (aus diesem Repo -- scoutr liegt noch nicht auf PyPI)
+# 1. Installieren (aus diesem Repo -- Cortex liegt noch nicht auf PyPI)
 git clone https://github.com/jonasenriklaumen-a11y/thing-finder-
 cd thing-finder-
 uv tool install .
@@ -63,8 +60,28 @@ cortex --version            # zeigt, ob die neue Version aktiv ist
 ```
 
 > Voraussetzungen: Python 3.11+ und [uv](https://docs.astral.sh/uv/). Sobald das Paket
-> veröffentlicht ist, genügt `uv tool install scoutr`. Zum Entwickeln stattdessen
+> veröffentlicht ist, genügt `uv tool install cortex`. Zum Entwickeln stattdessen
 > `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run cortex ...` aufrufen.
+
+### Umstieg von einer Version vor 7.5
+
+Mit 7.5 heißt alles einheitlich Cortex — das Programm, der Ordner mit deinen Daten und
+die Namen in der `.env`. Bestehende Einstellungen ziehen nicht von selbst mit. Ein
+Durchlauf reicht:
+
+1. **Alte Installation entfernen** (`uv tool uninstall <alter-name>`), sonst liegen
+   zwei Programme nebeneinander.
+2. **Datenordner umbenennen** — darin stecken Verlauf, Merkzettel, der verschlüsselte
+   Speicher und die Google-Anmeldung. Verschiebe den alten versteckten Ordner in
+   deinem Home-Verzeichnis nach `~/.cortex` und den Ordner unter `~/.config` nach
+   `~/.config/cortex`.
+3. **Die `.env` anpassen**: alle Schlüssel, die früher mit dem alten Namen begannen,
+   heißen jetzt `CORTEX_…`. Die Namen der Anbieter-Schlüssel (`ANTHROPIC_API_KEY`,
+   `NVIDIA_NIM_API_KEY`, `GOOGLE_CLIENT_ID` …) bleiben unverändert.
+
+Wenn dir das zu fummelig ist: `cortex setup` legt eine frische `.env` an und fragt
+dich durch. Verlauf und Merkzettel sind dann weg, alles andere ist in zwei Minuten
+wieder eingerichtet.
 
 ### Windows
 
@@ -74,7 +91,7 @@ Alles läuft auch unter Windows — in **PowerShell**:
 # uv installieren, falls noch nicht vorhanden
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-git clone --branch claude/scoutr-ai-web-agent-yogr3j `
+git clone --branch claude/cortex-ai-web-agent-yogr3j `
   https://github.com/jonasenriklaumen-a11y/thing-finder-.git
 cd thing-finder-
 uv tool install .
@@ -100,7 +117,7 @@ Unterschiede zu Linux und macOS:
 | Suchmaschine | **Nichts.** Die offene Metasuche ist Standard und braucht weder Key noch Konto. | nein |
 
 Beide werden direkt mit einem Probe-Request getestet, bevor die `.env` geschrieben wird
-(nach `~/.config/scoutr/.env`, Rechte `600`).
+(nach `~/.config/cortex/.env`, Rechte `600`).
 
 Ohne Chat, für einen einzelnen Durchlauf:
 
@@ -114,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 7.4.5                                      │
+│ Cortex AI 7.5.0                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -149,7 +166,7 @@ $ cortex --location "Mönchengladbach" --lang de
   ...
 
 > /export html
-  Gespeichert: scoutr-20260822-2043-ich-suche-einen-laptop.html
+  Gespeichert: cortex-20260822-2043-ich-suche-einen-laptop.html
 ```
 
 ## Kernprinzip
@@ -201,12 +218,12 @@ Genauigkeit: gekürzt wird nur, wo sonst geraten werden müsste.
 
 ### Subagenten: Teilfragen parallel
 
-Vor jeder Planung schaut scoutr kurz auf die Nachricht: **Braucht das überhaupt eine
+Vor jeder Planung schaut cortex kurz auf die Nachricht: **Braucht das überhaupt eine
 Recherche?** Offensichtlicher Small-Talk („hallo", „danke") wird per Heuristik erkannt und
 kostet keinen einzigen Modellaufruf. Bei allem anderen liefert **ein einziger Aufruf**
 Entscheidung *und* Teilfragen — auf dem kleinen Subagenten-Modell, mit abgeschaltetem
 Denk-Modus, kleinem Fenster und erzwungenem JSON-Schema. Fällt er aus oder dauert zu
-lange (`SCOUTR_PLANNER_TIMEOUT`, Default 20 s), gilt sicherheitshalber „Recherche" —
+lange (`CORTEX_PLANNER_TIMEOUT`, Default 20 s), gilt sicherheitshalber „Recherche" —
 lieber einmal zu viel geplant als eine echte Frage unbeantwortet.
 
 Warum das schnell ist — vier Hebel:
@@ -223,7 +240,7 @@ kleinem Modell hin- und herladen muss, kostet allein das mehr als alle Aufrufe z
 Jetzt läuft alles vor der eigentlichen Antwort auf dem kleinen Modell. Auch die
 Subagenten arbeiten ohne Denk-Modus — bei vier parallelen summiert sich das.
 
-Recherche-Anfragen zerlegt scoutr dann von sich aus in Teilfragen und lässt sie parallel
+Recherche-Anfragen zerlegt cortex dann von sich aus in Teilfragen und lässt sie parallel
 bearbeiten, bevor der Hauptagent übernimmt:
 
 ```
@@ -251,8 +268,8 @@ Der Hauptagent darf zusätzlich jederzeit selbst weitere Teilfragen abgeben
 **Abschalten** fragt `cortex setup` direkt ab, oder von Hand:
 
 ```bash
-SCOUTR_SUBAGENTS_AUTO=false     # nur noch auf Wunsch des Modells
-SCOUTR_MAX_SUBAGENTS=0          # ganz aus, zurück zu zwei Werkzeugen
+CORTEX_SUBAGENTS_AUTO=false     # nur noch auf Wunsch des Modells
+CORTEX_MAX_SUBAGENTS=0          # ganz aus, zurück zu zwei Werkzeugen
 ```
 
 #### Eigenes Modell für die Subagenten
@@ -269,7 +286,7 @@ Hauptmodell in den Speicher passt. `cortex install-model` fragt danach; Stand Au
 | `qwen3:4b` | 2,5 GB | 5 GB |
 
 ```bash
-SCOUTR_SUBAGENT_MODEL=ollama_chat/qwen3:1.7b   # leer = Hauptmodell
+CORTEX_SUBAGENT_MODEL=ollama_chat/qwen3:1.7b   # leer = Hauptmodell
 ```
 
 Wichtig ist hier nur eines: Das Modell muss zuverlässig Werkzeuge aufrufen. Klug sein
@@ -277,6 +294,17 @@ darf das Hauptmodell, das die Ergebnisse am Ende zusammenführt.
 
 **Grenzen:** maximal 20 Tool-Calls pro Anfrage, dann wird der Zwischenstand ausgegeben.
 Was nicht gefunden wurde, wird als „nicht gefunden" gekennzeichnet — niemals geraten.
+
+## Wer antwortet da eigentlich
+
+Fragt man Cortex, wer er ist, sagt er: *„Ich bin Cortex, ein KI-Assistent von Jonas."*
+Nicht „ich bin ein Modell von Google" oder von sonst jemandem — Cortex ist das
+Programm, das Sprachmodell darunter ist ein Bauteil davon, austauschbar über die
+Einstellungen.
+
+Gelogen wird dabei nicht: Fragt jemand ausdrücklich, welches Modell gerade läuft, sagt
+er es. Der Unterschied ist, dass er sich nicht mit dem Modell verwechselt, das ihn
+antreibt.
 
 ## Weboberfläche
 
@@ -304,7 +332,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   ans Vision-Modell, PDFs werden ausgelesen, Text-, Markdown-, CSV- und JSON-Dateien
   direkt übernommen. Bis zu 5 Dateien à 25 MB. Ein gescanntes PDF ohne Textebene sagt
   das offen — geraten wird nichts.
-* **Rückfragen:** braucht scoutr etwas Entscheidendes (Budget, Ort, welches von
+* **Rückfragen:** braucht cortex etwas Entscheidendes (Budget, Ort, welches von
   mehreren Dingen gemeint ist), fragt er nach — mit anklickbaren Antworten oder einem
   Feld zum Selberschreiben. Er fragt höchstens zweimal je Anfrage und nur, wenn die
   Antwort das Ergebnis wirklich ändert; sonst trifft er eine Annahme und sagt sie dazu.
@@ -347,12 +375,12 @@ Abhängigkeit. Beenden mit <kbd>Strg</kbd>+<kbd>C</kbd>.
 cortex web --lan
 ```
 
-Damit hört scoutr auf allen Netzwerkkarten und nennt dir jede Adresse, unter der
+Damit hört cortex auf allen Netzwerkkarten und nennt dir jede Adresse, unter der
 er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 7.4.5                                                   │
+│ Cortex AI 7.5.0                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -363,7 +391,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 ```
 
 **Mehr als Adresse und Port braucht es nicht** — keine Anmeldung, kein Zugangswort,
-nichts einzutippen. Die Adressen ermittelt scoutr selbst, du musst nichts
+nichts einzutippen. Die Adressen ermittelt cortex selbst, du musst nichts
 nachschlagen. Die Tailscale-Adresse erscheint nur, wenn Tailscale auch läuft.
 
 Wer den Zugang trotzdem einschränken will, vergibt ein Wort:
@@ -374,9 +402,9 @@ cortex web --host 192.168.1.44     # gezielt eine Netzwerkkarte
 ```
 
 Das Wort hängt hinten an der Adresse. Nur der erste Aufruf braucht es — danach
-merkt es sich der Browser, und scoutr nimmt es aus der Adresszeile heraus. Es darf
+merkt es sich der Browser, und cortex nimmt es aus der Adresszeile heraus. Es darf
 nur ASCII enthalten (also `gruen`, nicht `grün`): der Browser schickt es als
-HTTP-Kopfzeile mit, und die verträgt keine Umlaute. scoutr sagt es dir beim Start,
+HTTP-Kopfzeile mit, und die verträgt keine Umlaute. cortex sagt es dir beim Start,
 falls das Wort nicht taugt.
 
 **Wenn das andere Gerät die Seite nicht lädt:** meist blockt die Firewall des
@@ -389,7 +417,7 @@ Alle Geräte teilen sich **eine** Sitzung — der Gesprächsverlauf ist also der
 egal von wo du weiterfragst. Fragt ein zweites Gerät, während noch eine Recherche
 läuft, sieht es „[Warte] Ein anderes Gerät fragt gerade" und kommt danach dran.
 Ins offene Internet stellt `--lan` nichts: dafür bräuchte es zusätzlich eine
-Portfreigabe im Router. Über Tailscale erreichst du scoutr auch von unterwegs,
+Portfreigabe im Router. Über Tailscale erreichst du cortex auch von unterwegs,
 ohne eine solche Freigabe — genau dafür ist es da.
 
 ## Chat-Interface
@@ -409,7 +437,7 @@ ohne eine solche Freigabe — genau dafür ist es da.
 Der Kontext bleibt über mehrere Turns erhalten, Nachfragen wie „nur die mit 4+ Sternen"
 funktionieren also.
 
-**Umgekehrt fragt scoutr auch selbst nach.** Ist etwas Entscheidendes offen — Budget,
+**Umgekehrt fragt cortex auch selbst nach.** Ist etwas Entscheidendes offen — Budget,
 Ort, welches von mehreren Dingen gemeint ist —, stellt er *eine* Rückfrage und wartet
 auf die Antwort. Im Terminal tippst du sie ein (oder die Nummer einer angebotenen
 Möglichkeit), Enter allein überspringt. Er fragt höchstens zweimal je Anfrage und nur,
@@ -470,7 +498,7 @@ Vier Regeln bestimmen den Aufbau:
   nichts.
 * **Höchstens 400 MB**, zusammen mit Verlauf und hochgeladenen Dateien. Wird es eng,
   fliegen zuerst alte Uploads raus: ein Bild liegt meist noch woanders, eine Notiz nicht.
-* **Abschaltbar** unter *Einstellungen → Speicher*, oder mit `SCOUTR_MEMORY=false`.
+* **Abschaltbar** unter *Einstellungen → Speicher*, oder mit `CORTEX_MEMORY=false`.
 
 ```bash
 /memory            # was liegt drin, wie voll ist es
@@ -489,7 +517,7 @@ Benutzerkonto sitzt — der liest den Schlüssel einfach mit.
 Wer auch das abdecken will, setzt eine Passphrase:
 
 ```bash
-SCOUTR_MEMORY_KEY="ein langes Passwort" cortex web
+CORTEX_MEMORY_KEY="ein langes Passwort" cortex web
 ```
 
 Dann wird der Schlüssel bei jedem Start neu abgeleitet und liegt nirgends auf der
@@ -570,7 +598,7 @@ Der Agent bekommt drei Werkzeuge: `calendar_events` (Termine des Hauptkalenders)
 ### Was mit deinen Daten passiert
 
 * **Die Anmeldedaten bleiben auf deinem Rechner.** Access- und Refresh-Token liegen
-  verschlüsselt in `~/.scoutr/google.json` (dieselbe Fernet-Schlüsseldatei wie beim
+  verschlüsselt in `~/.cortex/google.json` (dieselbe Fernet-Schlüsseldatei wie beim
   Speicher, Rechte 600). Der Browser bekommt sie nie zu sehen — nur, *ob* ein Konto
   verbunden ist und welche Adresse es hat.
 * **Nichts aus deinem Postfach geht an eine Suchmaschine.** Der Agent hat die
@@ -584,7 +612,7 @@ Der Agent bekommt drei Werkzeuge: `calendar_events` (Termine des Hauptkalenders)
 ## Zuhause: Heimnetz und Home Assistant
 
 Manche Fragen kann kein Suchtreffer beantworten. „Welche Geräte hängen hier im Netz",
-„läuft mein Drucker noch", „wie warm ist es im Wohnzimmer" — dafür sieht scoutr selbst
+„läuft mein Drucker noch", „wie warm ist es im Wohnzimmer" — dafür sieht cortex selbst
 nach.
 
 ### Das eigene Netz
@@ -607,20 +635,20 @@ Im Chat geht dasselbe in Worten: *„welche Geräte hängen in meinem Netz"*, *�
 192.168.1.23 noch da"*. Zwei Grenzen sind fest verdrahtet:
 
 * **Nur private Netze** — 10.x, 172.16–31.x, 192.168.x und das Tailnet (100.64/10).
-  Fremde Adressen lehnt scoutr ab, in jeder Schreibweise. Höchstens 512 Adressen am
+  Fremde Adressen lehnt cortex ab, in jeder Schreibweise. Höchstens 512 Adressen am
   Stück, ein `/16` also nicht.
-* **Nur die Frage „antwortet da etwas"** — scoutr klopft an, liest den Titel einer
+* **Nur die Frage „antwortet da etwas"** — cortex klopft an, liest den Titel einer
   Weboberfläche und geht weiter. Keine Passwortversuche, keine Schwachstellensuche.
   Ein Gerät, das nicht antwortet, heißt „nicht erreichbar", nie „existiert nicht": es
   kann auch schlafen.
 
-Abschalten: `SCOUTR_LAN_ENABLED=false` oder der Haken in den Einstellungen.
+Abschalten: `CORTEX_LAN_ENABLED=false` oder der Haken in den Einstellungen.
 
 ### Home Assistant
 
-**scoutr bringt kein Home Assistant mit und startet keins.** Er sucht das, das bei dir
+**cortex bringt kein Home Assistant mit und startet keins.** Er sucht das, das bei dir
 schon läuft, und meldet sich dort mit einem langlebigen Zugriffstoken an — genau wie
-jede andere App, der du Zugriff gibst. Deine Installation bleibt unangetastet; scoutr
+jede andere App, der du Zugriff gibst. Deine Installation bleibt unangetastet; cortex
 ist nur ein weiterer Client.
 
 ```bash
@@ -643,10 +671,10 @@ und Token in die `.env`. Eine Minute, dann kannst du fragen:
 ```
 
 In der Weboberfläche geht dasselbe unter **Einstellungen → Zuhause & Netz**: „Suchen"
-findet die Instanz, „Testen" prüft das Token und sagt dir, wie viele Geräte scoutr
+findet die Instanz, „Testen" prüft das Token und sagt dir, wie viele Geräte cortex
 sieht.
 
-**Schalten ist standardmäßig aus.** Ohne Haken sieht scoutr nur nach. Mit Haken darf er
+**Schalten ist standardmäßig aus.** Ohne Haken sieht cortex nur nach. Mit Haken darf er
 Licht, Steckdosen, Szenen und Medien bedienen — und selbst dann fragt er bei
 **Schlössern, Alarmanlagen, Toren, Rollläden, Heizung und Saugrobotern** jedes Mal
 nach, bevor er etwas tut. Ein missverstandener Halbsatz soll nicht die Haustür
@@ -659,17 +687,17 @@ Assistant selbst: dasselbe Menü, Token löschen, fertig.
 
 ### Im Container: die Netzwerkkarte des Rechners
 
-Läuft scoutr im Container, hängt er in Dockers eigenem Brücken-Netz — von dort ist dein
+Läuft cortex im Container, hängt er in Dockers eigenem Brücken-Netz — von dort ist dein
 Heimnetz **nicht** zu sehen, `cortex lan` und `connect-ha` fänden schlicht nichts.
 Deshalb:
 
 ```bash
-./scoutr-box --lan                              # Wrapper, setzt es selbst
-SCOUTR_NETWORK=host docker compose run --rm scoutr
+./cortex-box --lan                              # Wrapper, setzt es selbst
+CORTEX_NETWORK=host docker compose run --rm cortex
 docker run --network host ...                   # ohne Compose
 ```
 
-Merkt scoutr, dass er im Container nur das Container-Netz sieht, sagt er es von sich aus,
+Merkt cortex, dass er im Container nur das Container-Netz sieht, sagt er es von sich aus,
 statt dich rätseln zu lassen.
 
 ## Ortsfilter
@@ -690,19 +718,19 @@ cortex --location "Mönchengladbach" --lang de
 
 ```bash
 cortex --image foto.jpg              # eine Datei
-cortex --image ~/hallo1234           # ein Ordner -- scoutr sucht das Bild darin
+cortex --image ~/hallo1234           # ein Ordner -- cortex sucht das Bild darin
 cortex --image ~/hallo1234 "wo kann ich das kaufen?"
 ```
 
-Zeigt der Pfad auf einen **Ordner**, nimmt scoutr das einzige Bild darin; sind es mehrere,
+Zeigt der Pfad auf einen **Ordner**, nimmt cortex das einzige Bild darin; sind es mehrere,
 listet er sie auf (neueste zuerst) und fragt, welches gemeint ist.
 
 Ein Vision-Modell beschreibt, was auf dem Bild zu sehen ist (Produkt, Logo, Schild,
 Text), daraus werden Suchbegriffe — danach läuft die normale Recherche. Im Chat geht
 dasselbe mit `/image pfad.jpg`.
 
-Es wird nichts hochgeladen: scoutr liest die Datei von deiner Platte. Zuständig ist
-`SCOUTR_VISION_MODEL`; ist das leer, wird das Hauptmodell gefragt — und **Textmodelle
+Es wird nichts hochgeladen: cortex liest die Datei von deiner Platte. Zuständig ist
+`CORTEX_VISION_MODEL`; ist das leer, wird das Hauptmodell gefragt — und **Textmodelle
 können keine Bilder sehen**. Ein lokales Vision-Modell richtest du so ein:
 
 ```bash
@@ -713,23 +741,23 @@ Welches Modell gerade zuständig ist, zeigt `cortex config` in der Zeile „Visi
 
 ## Im Container laufen lassen
 
-Wer scoutr nicht direkt aufs System installieren will, lässt es in einem Container
+Wer cortex nicht direkt aufs System installieren will, lässt es in einem Container
 laufen. Der isoliert das **Dateisystem**, nicht die Verbindung: das Netz bleibt
 uneingeschränkt offen, sonst könnte der Agent nicht recherchieren.
 
 ```bash
-./scoutr-box --setup            # einmalig: fragt Modell und Key ab, schreibt ./.env
-./scoutr-box                    # Chat
-./scoutr-box "deine Frage"      # einmalige Recherche
-./scoutr-box search "test"      # nur die Suche, ohne LLM
+./cortex-box --setup            # einmalig: fragt Modell und Key ab, schreibt ./.env
+./cortex-box                    # Chat
+./cortex-box "deine Frage"      # einmalige Recherche
+./cortex-box search "test"      # nur die Suche, ohne LLM
 ```
 
 Oder direkt mit Compose, ohne den Wrapper:
 
 ```bash
-docker compose run --rm scoutr                 # Chat
-docker compose run --rm scoutr "deine Frage"
-docker compose build scoutr                    # nach Codeänderungen
+docker compose run --rm cortex                 # Chat
+docker compose run --rm cortex "deine Frage"
+docker compose build cortex                    # nach Codeänderungen
 ```
 
 ### Was der Container sieht — und was nicht
@@ -738,22 +766,22 @@ docker compose build scoutr                    # nach Codeänderungen
 |---|---|
 | **Netz** | vollständig offen, keine Einschränkung — nötig für Suche und Seitenabruf |
 | **Dateisystem** | nur `/data` (Cache + Verlauf, Docker-Volume) und `/work` (→ `./exports`) |
-| **Benutzer** | nicht `root`, sondern `scoutr` (UID 1000) |
+| **Benutzer** | nicht `root`, sondern `cortex` (UID 1000) |
 | **Rechte** | `no-new-privileges`, keine Zugriffe aufs Home-Verzeichnis des Hosts |
 | **Keys** | kommen aus `./.env`, werden als Umgebungsvariablen hineingereicht |
 
 Exporte (`/export html`) landen in `./exports` und sind damit direkt auf dem Host
-lesbar. Cache und Verlauf überleben im Volume `scoutr-data`.
+lesbar. Cache und Verlauf überleben im Volume `cortex-data`.
 
 ### Zwei Varianten des Images
 
 ```bash
-docker compose build scoutr                                  # mit Chromium (Default)
-SCOUTR_IMAGE_TARGET=slim docker compose build scoutr         # ohne, ~700 MB kleiner
+docker compose build cortex                                  # mit Chromium (Default)
+CORTEX_IMAGE_TARGET=slim docker compose build cortex         # ohne, ~700 MB kleiner
 ```
 
 Das `browser`-Image bringt Chromium für den JavaScript-Fallback (Stufe 3) mit. Darin
-läuft Chromium ohne seine eigene Sandbox (`SCOUTR_BROWSER_NO_SANDBOX=1`) — die Isolation
+läuft Chromium ohne seine eigene Sandbox (`CORTEX_BROWSER_NO_SANDBOX=1`) — die Isolation
 übernimmt der Container. Bei einer normalen Installation aufs System bleibt die
 Browser-Sandbox aktiv.
 
@@ -763,8 +791,8 @@ Zusammen mit SearXNG geht auch die Suche über keinen fremden Dienst mehr:
 
 ```bash
 docker compose --profile searxng up -d searxng
-echo 'SCOUTR_SEARCH_BACKEND=searxng' >> .env
-docker compose --profile searxng run --rm scoutr
+echo 'CORTEX_SEARCH_BACKEND=searxng' >> .env
+docker compose --profile searxng run --rm cortex
 ```
 
 Die mitgelieferte `docker/searxng/settings.yml` hat die JSON-Ausgabe bereits aktiviert.
@@ -774,7 +802,7 @@ Ersetze darin vor dem ersten Start den `secret_key` durch etwas Eigenes
 ## Suchmaschine — ohne API-Key
 
 Die Suche kostet nichts und braucht **kein Konto**. Standard ist eine offene Metasuche:
-`scoutr` fragt über [`ddgs`](https://pypi.org/project/ddgs/) mehrere freie Suchmaschinen
+`cortex` fragt über [`ddgs`](https://pypi.org/project/ddgs/) mehrere freie Suchmaschinen
 per HTML ab und mischt die Treffer. Fällt eine aus (Rate-Limit, Umbau), übernehmen die
 anderen — genau deshalb ist die Metasuche robuster als eine einzelne Engine.
 
@@ -789,7 +817,7 @@ Literatur stecken darin:
    gebrauchtes Lastenrad in Bremen?" wird zusätzlich „kostet gebrauchtes Lastenrad
    Bremen". Drei bis sechs inhaltstragende Wörter, das Hauptthema in jeder Variante.
 2. **Zwei bis drei Formulierungen, nicht mehr.** Ab der vierten nehmen die Treffer
-   nicht mehr zu, nur noch die Streuung. `SCOUTR_SEARCH_VARIANTS=1` schaltet es ab.
+   nicht mehr zu, nur noch die Streuung. `CORTEX_SEARCH_VARIANTS=1` schaltet es ab.
 3. **Gemischt wird über die Plätze, nicht über Punktzahlen.** Jeder Treffer bekommt je
    Liste `1/(60+Platz)` gutgeschrieben; was mehrere Anfragen übereinstimmend weit oben
    haben, steht am Ende vorn. Punktzahlen verschiedener Engines lassen sich nicht
@@ -808,10 +836,10 @@ Verfügbar ohne Key: `duckduckgo`, `mojeek`, `startpage`, `brave`, `yahoo`, `wik
 
 ```bash
 # alle offenen Engines (Default, nichts zu tun)
-SCOUTR_SEARCH_BACKEND=duckduckgo
+CORTEX_SEARCH_BACKEND=duckduckgo
 
 # gezielt einschränken, wenn eine Engine bei dir zickt
-SCOUTR_SEARCH_ENGINES=duckduckgo,mojeek
+CORTEX_SEARCH_ENGINES=duckduckgo,mojeek
 ```
 
 ### Eigene Instanz: SearXNG
@@ -828,8 +856,8 @@ In der `settings.yml` der Instanz muss unter `search.formats` der Eintrag `json`
 (sonst antwortet sie mit HTML oder 403). Dann:
 
 ```bash
-SCOUTR_SEARCH_BACKEND=searxng
-SCOUTR_SEARXNG_URL=http://localhost:8080
+CORTEX_SEARCH_BACKEND=searxng
+CORTEX_SEARXNG_URL=http://localhost:8080
 ```
 
 Öffentliche SearXNG-Instanzen funktionieren auch, haben die JSON-Ausgabe aber oft
@@ -842,7 +870,7 @@ sind eingebaut, brauchen aber einen Key. Nur sinnvoll, wenn dir die offenen Engi
 zuverlässig genug sind:
 
 ```bash
-SCOUTR_SEARCH_BACKEND=brave
+CORTEX_SEARCH_BACKEND=brave
 BRAVE_API_KEY=...
 ```
 
@@ -852,23 +880,51 @@ Testen lässt sich jedes Backend ohne LLM:
 cortex search "cafés mönchengladbach" -n 5
 ```
 
+## Tempo
+
+Zwei Dinge bestimmen, wie lange eine Antwort dauert: wie oft Cortex das Modell fragen
+muss, und wie lange das Modell je Frage braucht. Das zweite gehört dem Anbieter — ein
+Modell mit 550 Milliarden Parametern antwortet nun einmal langsamer als ein kleines auf
+der eigenen Grafikkarte. Am ersten lässt sich etwas machen, und das ist hier gemacht:
+
+* **Mehrere Seiten pro Runde werden gleichzeitig gelesen.** Das Modell wird
+  ausdrücklich aufgefordert, in einem Zug mehrere Quellen anzufordern. Nacheinander
+  abgearbeitet summiert sich das — vier Seiten à zwei Sekunden sind acht Sekunden, in
+  denen nichts anderes passiert. Gemessen an vier Seiten: **6,0 s vorher, 1,5 s jetzt.**
+  Das gilt für den Hauptagenten wie für jeden Subagenten.
+* **Nur lesende Werkzeuge laufen parallel.** Eine Rückfrage wartet auf einen Menschen,
+  eine Notiz und ein Schaltbefehl verändern etwas — so etwas läuft weiter nacheinander
+  und in der Reihenfolge, die das Modell gewählt hat.
+* **Kein Denk-Modus für die Planung.** Vor jeder Anfrage entscheidet ein kurzer Aufruf,
+  ob überhaupt recherchiert werden muss und wie die Teilfragen lauten. Ein
+  Denk-Modell überlegt dafür sekundenlang, bevor drei Stichworte kommen. Bei lokalen
+  Modellen war das schon abgeschaltet, jetzt auch in der Cloud — dort kostet es am
+  meisten.
+* **Die Vorrecherche ist der größte Posten.** Sie zerlegt die Frage und lässt die Teile
+  parallel recherchieren; das ist gründlicher, verdoppelt aber die Wartezeit. Wer es
+  eilig hat, schaltet sie in den Einstellungen unter *Subagenten* ab oder setzt
+  `CORTEX_SUBAGENTS_AUTO=false`.
+
+Bleibt es zäh, liegt es am Modell, nicht am Weg dorthin: ein kleineres Modell desselben
+Anbieters oder ein lokales über `cortex install-model` ist dann der wirksamste Hebel.
+
 ## Stabilität
 
-Lokale Modelle scheitern anders als Cloud-Modelle. scoutr fängt die drei häufigsten Fälle
+Lokale Modelle scheitern anders als Cloud-Modelle. cortex fängt die drei häufigsten Fälle
 ab:
 
 * **Kontextüberlauf — die häufigste Ursache für „er vergisst die letzte Frage".**
   Läuft das Fenster über, wirft der Anbieter *still* den **Anfang** weg: erst den
   Systemprompt, dann die früheren Fragen. Das Gespräch wirkt dann wie zurückgesetzt.
-  scoutr beugt zweifach vor:
+  cortex beugt zweifach vor:
 
   1. **Ein ausreichend großes Fenster anfordern.** Ollama nimmt sonst seinen Default von
-     2048–4096 Token — nach einer recherchierten Antwort ist der schon voll. scoutr
-     schickt `num_ctx` mit (`SCOUTR_CONTEXT_TOKENS`, Default 16384). Bei Cloud-Anbietern
+     2048–4096 Token — nach einer recherchierten Antwort ist der schon voll. cortex
+     schickt `num_ctx` mit (`CORTEX_CONTEXT_TOKENS`, Default 16384). Bei Cloud-Anbietern
      entfällt das, die kennen den Parameter nicht.
   2. **Selbst kürzen statt gekürzt werden — und zwar in der richtigen Reihenfolge.**
      Geopfert wird von hinten nach vorn nach Wert: zuerst ältere Werkzeug-Ausgaben →
-     Platzhalter (`SCOUTR_KEEP_FULL_RESULTS`, Default 4), dann ältere Vorrecherche-Blöcke
+     Platzhalter (`CORTEX_KEEP_FULL_RESULTS`, Default 4), dann ältere Vorrecherche-Blöcke
      (die wiederholten sich sonst jeden Turn), dann die verbliebenen Suchergebnisse, dann
      ältere Antworten — und **erst ganz zuletzt die Fragen des Nutzers**. Ein Suchergebnis
      von vorletzter Runde ist ersetzbar, deine Frage nicht: die steht nirgendwo sonst.
@@ -878,17 +934,17 @@ ab:
      angehängte Datei bekommt höchstens gut ein Drittel des Budgets — sonst passt bei
      einem kleinen Fenster schon ein einziges Ergebnis samt Systemprompt nicht mehr hinein,
      und dem Kürzen bliebe nur noch das Gespräch selbst. Obergrenze ist zusätzlich
-     `SCOUTR_MAX_TOOL_CHARS` (Default 8000).
+     `CORTEX_MAX_TOOL_CHARS` (Default 8000).
 
   Passt dein Modell mehr, dreh auf — `gemma4:12b` kann 128k, kostet aber VRAM:
 
   ```bash
-  SCOUTR_CONTEXT_TOKENS=32768
+  CORTEX_CONTEXT_TOKENS=32768
   ```
-* **Abgestürzter Runner.** Bei `model runner has unexpectedly stopped` entlädt scoutr alle
+* **Abgestürzter Runner.** Bei `model runner has unexpectedly stopped` entlädt cortex alle
   Modelle und versucht es erneut, statt den Durchlauf zu verlieren.
 * **Wackelige Verbindung.** Timeouts, 502/503 und Rate-Limits werden bis zu
-  `SCOUTR_LLM_RETRIES` mal wiederholt (Default 3, mit wachsender Wartezeit). Ein falscher
+  `CORTEX_LLM_RETRIES` mal wiederholt (Default 3, mit wachsender Wartezeit). Ein falscher
   API-Key wird *nicht* wiederholt — das würde nur Zeit kosten.
 
 Dazu: Ein Werkzeug, das eine Ausnahme wirft, beendet den Durchlauf nicht mehr, sondern
@@ -897,7 +953,7 @@ meldet den Fehler an das Modell, das dann eine andere Quelle nimmt.
 ## Verhalten beim Seitenabruf
 
 * `robots.txt` wird respektiert (einmal je Origin geholt und zwischengespeichert)
-* ehrlicher User-Agent, der scoutr benennt
+* ehrlicher User-Agent, der cortex benennt
 * maximal 1 Request pro Sekunde und Domain, Timeout 15 s
 * bei Fehler oder Blockade: überspringen und mit dem nächsten Treffer weitermachen,
   nicht abbrechen
@@ -907,12 +963,12 @@ meldet den Fehler an das Modell, das dann eine andere Quelle nimmt.
 ## Cookie-Banner und Pop-ups
 
 Der Punkt, an dem die meisten simplen Crawler scheitern: Statt des Seiteninhalts wird der
-Text des Cookie-Dialogs extrahiert. scoutr löst das in drei Stufen.
+Text des Cookie-Dialogs extrahiert. cortex löst das in drei Stufen.
 
 **Stufe 1 — gar nicht erst hinklicken (Standardfall).** `fetch_page` holt reines HTML
 ohne JavaScript-Ausführung. Consent-Banner sind dann meist nur inaktive DOM-Knoten oder
 werden gar nicht erst eingebaut. Vor der Textextraktion fliegen sie per Selektor-Blockliste
-raus (`scoutr/selectors.yaml`, ohne Codeänderung erweiterbar), danach übernimmt
+raus (`cortex/selectors.yaml`, ohne Codeänderung erweiterbar), danach übernimmt
 trafilatura die restliche Boilerplate-Entfernung. Absätze, die im Wesentlichen aus
 Consent-Formulierungen bestehen, werden zusätzlich aus dem Text gestrichen.
 
@@ -925,7 +981,7 @@ gescheitert. Unterschieden wird zwischen `blocked`, `consent_required`, `paywall
 JavaScript nichts liefern:
 
 ```bash
-uv tool install --with playwright scoutr
+uv tool install --with playwright cortex
 cortex install-browser
 ```
 
@@ -985,7 +1041,7 @@ class Product(BaseModel):
 ```
 
 **Zu Amazon & Co.:** Amazon, Zalando und ähnliche Plattformen blocken einfache
-HTTP-Abrufe aggressiv (403, Captcha-Seite). scoutr baut dafür **keine Umgehung**, sondern
+HTTP-Abrufe aggressiv (403, Captcha-Seite). cortex baut dafür **keine Umgehung**, sondern
 erkennt Blockade-Antworten und markiert den Treffer als `blocked`. Der Agent weicht dann
 auf frei lesbare Quellen aus — Herstellerseiten, Testberichte (Notebookcheck, Heise,
 Chip), Preisvergleiche (Geizhals) und kleinere Shops, die für Specs ohnehin die besseren
@@ -1015,37 +1071,37 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 
 | Variable | Bedeutung | Default |
 |---|---|---|
-| `SCOUTR_MODEL` | LiteLLM-Modell-ID | `anthropic/claude-sonnet-4-6` |
-| `SCOUTR_VISION_MODEL` | Modell für `--image` | wie `SCOUTR_MODEL` |
-| `SCOUTR_API_BASE` | eigene Basis-URL (Ollama, eigene NIM, Proxy) | — |
-| `SCOUTR_API_KEY` | Key für Anbieter ohne eigenen Eintrag | — |
-| `SCOUTR_SEARCH_BACKEND` | `duckduckgo`, `searxng`, `brave`, `tavily` | `duckduckgo` |
-| `SCOUTR_SEARCH_ENGINES` | Engines der Metasuche einschränken | alle |
-| `SCOUTR_SEARCH_VARIANTS` | Formulierungen je Suche (`1` = aus) | `3` |
-| `SCOUTR_SEARXNG_URL` | Adresse der SearXNG-Instanz | — |
-| `SCOUTR_LOCATION` | Standard-Ortsfilter | — |
-| `SCOUTR_LANG` / `SCOUTR_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
-| `SCOUTR_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
-| `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `12` |
-| `SCOUTR_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
-| `SCOUTR_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
-| `SCOUTR_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
-| `SCOUTR_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
-| `SCOUTR_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
-| `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
-| `SCOUTR_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud: alle |
-| `SCOUTR_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
-| `SCOUTR_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
-| `SCOUTR_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |
-| `SCOUTR_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
-| `SCOUTR_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
-| `SCOUTR_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
-| `SCOUTR_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |
+| `CORTEX_MODEL` | LiteLLM-Modell-ID | `anthropic/claude-sonnet-4-6` |
+| `CORTEX_VISION_MODEL` | Modell für `--image` | wie `CORTEX_MODEL` |
+| `CORTEX_API_BASE` | eigene Basis-URL (Ollama, eigene NIM, Proxy) | — |
+| `CORTEX_API_KEY` | Key für Anbieter ohne eigenen Eintrag | — |
+| `CORTEX_SEARCH_BACKEND` | `duckduckgo`, `searxng`, `brave`, `tavily` | `duckduckgo` |
+| `CORTEX_SEARCH_ENGINES` | Engines der Metasuche einschränken | alle |
+| `CORTEX_SEARCH_VARIANTS` | Formulierungen je Suche (`1` = aus) | `3` |
+| `CORTEX_SEARXNG_URL` | Adresse der SearXNG-Instanz | — |
+| `CORTEX_LOCATION` | Standard-Ortsfilter | — |
+| `CORTEX_LANG` / `CORTEX_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
+| `CORTEX_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
+| `CORTEX_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `12` |
+| `CORTEX_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
+| `CORTEX_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
+| `CORTEX_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
+| `CORTEX_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
+| `CORTEX_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
+| `CORTEX_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
+| `CORTEX_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud: alle |
+| `CORTEX_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
+| `CORTEX_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
+| `CORTEX_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |
+| `CORTEX_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
+| `CORTEX_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
+| `CORTEX_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
+| `CORTEX_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | eigene Google-Anwendung | — |
 
 ### Ganz ohne API-Key: lokales Modell
 
-Ein Befehl, und scoutr richtet sich ein Modell auf deinem Rechner ein:
+Ein Befehl, und cortex richtet sich ein Modell auf deinem Rechner ein:
 
 ```bash
 cortex install-model
@@ -1066,8 +1122,8 @@ Der Befehl macht der Reihe nach:
 Danach steht in der `.env`:
 
 ```bash
-SCOUTR_MODEL=ollama_chat/qwen2.5:7b
-SCOUTR_API_BASE=http://localhost:11434
+CORTEX_MODEL=ollama_chat/qwen2.5:7b
+CORTEX_API_BASE=http://localhost:11434
 ```
 
 Zum Schluss fragt er, ob du **auch Bilder** als Eingabe nutzen willst, und richtet dafür
@@ -1120,16 +1176,16 @@ Modell im Speicher liegt. Stand August 2026:
 | `gemma3:12b` | 8,1 GB | 12 GB |
 
 > **Namensfalle:** Das offizielle `gemma3` kann in Ollama Bilder ansehen, aber **keine
-> Werkzeuge aufrufen** — als Hauptmodell ist es damit unbrauchbar, scoutr führt es
+> Werkzeuge aufrufen** — als Hauptmodell ist es damit unbrauchbar, cortex führt es
 > deshalb nur bei den Vision-Modellen. Erst `gemma4` bringt beides mit.
 
-scoutr liest den VRAM per `nvidia-smi` aus und schlägt danach vor — ohne GPU rechnet er
+cortex liest den VRAM per `nvidia-smi` aus und schlägt danach vor — ohne GPU rechnet er
 mit 70 % des Arbeitsspeichers, weil auf der CPU nicht alles nutzbar ist. Passt ein
 Modell, das beides kann, wird kein zweites geladen.
 
 **Die Hardware empfiehlt, sie entscheidet nicht.** Die Liste zeigt immer alle Modelle,
 und du kannst jedes davon wählen — oder einen beliebigen Namen aus dem Ollama-Katalog
-eintippen. Passt eines rechnerisch nicht, sagt scoutr das als Hinweis und lädt es
+eintippen. Passt eines rechnerisch nicht, sagt cortex das als Hinweis und lädt es
 trotzdem: Ein Modell läuft notfalls teilweise auf der CPU, das ist langsam, aber deine
 Entscheidung.
 
@@ -1143,7 +1199,7 @@ Namen aus dem [Ollama-Katalog](https://ollama.com/library).
 #### Wenn der Speicher knapp wird
 
 Text- und Vision-Modell gleichzeitig im VRAM sprengen viele Grafikkarten — der
-Ollama-Runner stirbt dann mit `model runner has unexpectedly stopped`. scoutr entlädt
+Ollama-Runner stirbt dann mit `model runner has unexpectedly stopped`. cortex entlädt
 deshalb vor jedem Test alle laufenden Modelle und erkennt diesen Absturz als das, was er
 ist: ein Speicherproblem, kein Urteil über das Modell. Er bietet dann automatisch ein
 kleineres an.
@@ -1183,13 +1239,13 @@ cortex --model ollama_chat/qwen2.5:7b                   # lokal, siehe oben
 
 **Wichtig: Das Modell muss Tool-Calling (Function Calling) beherrschen.** Ohne das kann
 der Agent weder suchen noch Seiten lesen — er antwortet dann aus dem Gedächtnis statt aus
-dem Web, was genau das ist, was scoutr vermeiden soll.
+dem Web, was genau das ist, was cortex vermeiden soll.
 
-Jeden weiteren LiteLLM-Anbieter nutzt du über den Notausgang `SCOUTR_API_KEY`:
+Jeden weiteren LiteLLM-Anbieter nutzt du über den Notausgang `CORTEX_API_KEY`:
 
 ```bash
-SCOUTR_MODEL=irgendein_anbieter/modell
-SCOUTR_API_KEY=dein-key
+CORTEX_MODEL=irgendein_anbieter/modell
+CORTEX_API_KEY=dein-key
 ```
 
 #### NVIDIA NIM im Detail
@@ -1198,38 +1254,38 @@ SCOUTR_API_KEY=dein-key
 und einen Key (`nvapi-...`). Modell auswählen, „Get API Key" klicken, dann:
 
 ```bash
-SCOUTR_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct
+CORTEX_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct
 NVIDIA_NIM_API_KEY=nvapi-...
 ```
 
 Die Modell-ID ist genau die von build.nvidia.com, mit `nvidia_nim/` davor. Vergisst du
-das Kürzel, ergänzt scoutr es selbst — kopierst du `nvidia/nemotron-3-ultra-550b-a55b`
+das Kürzel, ergänzt cortex es selbst — kopierst du `nvidia/nemotron-3-ultra-550b-a55b`
 von der Seite, wird daraus beim Speichern `nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b`.
 Am schnellsten geht es in der Weboberfläche: *Einstellungen → Modell → Anbieter: NVIDIA
 NIM*, Schlüssel einfügen, **Modell speichern**. Mehr braucht es nicht.
 
 Achte darauf, ein Modell zu wählen, das in der Modellkarte Tool-Calling aufführt — nicht
 alle dort angebotenen Modelle können das. Eine eigene, selbst gehostete NIM-Instanz
-erreichst du über `SCOUTR_API_BASE=http://dein-host:8000/v1`.
+erreichst du über `CORTEX_API_BASE=http://dein-host:8000/v1`.
 
 ### Wenn nach dem Anbieterwechsel „404 page not found" kommt
 
-Der Klassiker: In der `.env` steht noch `SCOUTR_API_BASE=http://localhost:11434` vom
+Der Klassiker: In der `.env` steht noch `CORTEX_API_BASE=http://localhost:11434` vom
 lokalen Modell, das Modell zeigt aber längst zu NVIDIA oder Anthropic. Die Anfrage geht
 dann an Ollama statt an den Anbieter, und Ollama antwortet mit genau diesem Satz.
 
-scoutr lässt eine Basis-URL auf dem Ollama-Port (11434) deshalb weg, sobald das Modell
+cortex lässt eine Basis-URL auf dem Ollama-Port (11434) deshalb weg, sobald das Modell
 zu einem anderen Anbieter gehört. Jede andere Adresse bleibt stehen — ein LiteLLM-Proxy
 oder ein eigenes NIM im Heimnetz ist ein völlig legitimer Weg zu einem Cloud-Modell und
 wird nicht angefasst.
 
-SQLite (`~/.scoutr/scoutr.sqlite3`) wird für genau zwei Dinge benutzt: Response-Cache
+SQLite (`~/.cortex/cortex.sqlite3`) wird für genau zwei Dinge benutzt: Response-Cache
 (TTL 24 h) und Verlauf vergangener Recherchen.
 
 ## Aufbau
 
 ```
-scoutr/
+cortex/
   cli.py         # Chat-Loop, Slash-Befehle, Unterbefehle
   agent.py       # LLM-Loop mit Tool-Calling
   tools.py       # web_search + fetch_page
@@ -1250,8 +1306,8 @@ scoutr/
   selectors.yaml # Selektor- und Marker-Listen, ohne Code erweiterbar
 
 Dockerfile       # zwei Ziele: slim (ohne Browser) und browser (mit Chromium)
-compose.yaml     # scoutr plus optionales SearXNG
-scoutr-box       # Wrapper: ./scoutr-box "deine Frage"
+compose.yaml     # cortex plus optionales SearXNG
+cortex-box       # Wrapper: ./cortex-box "deine Frage"
 ```
 
 ## Entwicklung

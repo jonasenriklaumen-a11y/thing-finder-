@@ -8,7 +8,7 @@ Felder werden aus den nachfolgenden Quellen aufgefuellt):
 3. Microdata (`itemprop="image"`, `itemprop="price"`)
 4. Spec-Tabellen (`<table>` / `<dl>` unter "Technische Daten" o.ae.)
 
-Ein LLM-Fallback existiert zusaetzlich in :mod:`scoutr.tools`, wenn hier
+Ein LLM-Fallback existiert zusaetzlich in :mod:`cortex.tools`, wenn hier
 nichts herauskommt.
 """
 
@@ -21,7 +21,7 @@ from urllib.parse import urljoin
 
 from selectolax.parser import HTMLParser, Node
 
-from scoutr.models import Product, domain_of
+from cortex.models import Product, domain_of
 
 #: Ueberschriften, unter denen typischerweise technische Daten stehen.
 SPEC_HEADINGS = (

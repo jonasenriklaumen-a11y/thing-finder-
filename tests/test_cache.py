@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from scoutr.cache import Cache, cache_key
+from cortex.cache import Cache, cache_key
 
 
 def test_set_get_roundtrip(tmp_path: Path) -> None:

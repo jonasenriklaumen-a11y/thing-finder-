@@ -11,14 +11,15 @@ import json
 import re
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from scoutr.cache import Cache
-from scoutr.config import Settings
-from scoutr.models import Product
-from scoutr.tools import (
+from cortex.cache import Cache
+from cortex.config import Settings
+from cortex.models import Product
+from cortex.tools import (
     ASK_SCHEMA,
     CALENDAR_SCHEMA,
     HA_CALL_SCHEMA,
@@ -37,8 +38,19 @@ from scoutr.tools import (
 )
 
 SYSTEM_PROMPT = """\
-Du bist Cortex AI, ein Rechercheagent. Du beantwortest Fragen ausschliesslich auf Basis \
-dessen, was du im Web tatsaechlich gefunden und gelesen hast.
+Du bist Cortex, ein Rechercheagent, gebaut von Jonas. Du beantwortest Fragen \
+ausschliesslich auf Basis dessen, was du im Web tatsaechlich gefunden und gelesen hast.
+
+Wer du bist:
+- Fragt dich jemand, wer oder was du bist, antwortest du: "Ich bin Cortex, ein \
+KI-Assistent von Jonas." Du bist nicht der Chatbot eines Anbieters und stellst dich \
+auch nicht als einer vor -- weder als Modell von Google, OpenAI, Anthropic, Meta, \
+NVIDIA noch von sonst jemandem.
+- Fragt jemand ausdruecklich, welches Sprachmodell unter dir laeuft, darfst du das \
+sagen. Luegen sollst du nicht -- du sollst dich nur nicht mit dem Modell verwechseln, \
+das dich antreibt. Cortex ist das Programm, das Modell ist ein Bauteil davon.
+- Erfinde nichts ueber dich: keine Trainingsdaten, keine Firma, keine Versprechen. \
+Was du kannst, steht weiter unten -- danach richtest du dich.
 
 Deine Werkzeuge:
 - `web_search(query, queries, count, country, lang)` -- sucht im Web. In `queries` \
@@ -194,7 +206,7 @@ Ausstattung, Vorlieben, laufende Vorhaben. Leg ab, was laenger gilt -- nicht jed
 Kleinigkeit und nichts, was morgen veraltet ist. Schreib ganze Saetze, damit die Notiz \
 spaeter fuer sich steht. In den Speicher gehoert nur Text, nie Bilder oder Dateien."""
 
-#: Wird angehaengt, wenn scoutr ins eigene Netz sehen darf.
+#: Wird angehaengt, wenn cortex ins eigene Netz sehen darf.
 LAN_PROMPT = """\
 
 Du kannst ausserdem in das Heimnetz des Nutzers sehen:
@@ -302,6 +314,57 @@ TOOL_SHARE = 0.35
 #: So viel eines Werkzeug-Ergebnisses geht ans Mitlesen. Es soll erkennbar
 #: sein, was zurueckkam -- nicht die halbe Seite im Fenster stehen.
 TRACE_CHARS = 1200
+
+#: Werkzeuge, die in derselben Runde nebeneinander laufen duerfen. Sie lesen
+#: nur: kein Schreiben, kein Schalten, kein Warten auf einen Menschen. Alles
+#: andere laeuft nacheinander, in der Reihenfolge, die das Modell gewaehlt hat.
+PARALLEL_SAFE = frozenset(
+    {
+        "web_search",
+        "search_news",
+        "fetch_page",
+        "calculate",
+        "recall_memory",
+        "calendar_events",
+        "mail_search",
+        "mail_read",
+        "lan_check",
+        "ha_states",
+    }
+)
+
+
+def parallel_ready(tool_calls: list[dict[str, Any]]) -> bool:
+    """Duerfen diese Aufrufe nebeneinander laufen?
+
+    Nur wenn es mehr als einer ist und jeder davon nur liest. Ein einziger
+    heikler Aufruf in der Runde -- eine Rueckfrage, eine Notiz, ein
+    Schaltbefehl -- und alles laeuft wieder nacheinander.
+    """
+    return len(tool_calls) > 1 and all(
+        call["function"]["name"] in PARALLEL_SAFE for call in tool_calls
+    )
+
+
+def run_calls(
+    tool_calls: list[dict[str, Any]],
+    runner: Callable[[dict[str, Any]], dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Fuehrt die Werkzeuge einer Runde aus und gibt die Antworten zurueck.
+
+    Nebeneinander, wo es geht: das Modell wird ausdruecklich aufgefordert,
+    pro Runde mehrere Seiten abzurufen. Nacheinander abgearbeitet summiert
+    sich das -- vier Seiten a zwei Sekunden sind acht Sekunden, in denen
+    nichts anderes passiert. Nebeneinander ist es eine.
+
+    Die Antworten kommen in der Reihenfolge der Aufrufe zurueck, auch wenn
+    sie in einer anderen fertig wurden: die Schnittstellen erwarten zu jedem
+    Aufruf genau eine Antwort, und zwar in dieser Reihenfolge.
+    """
+    if not parallel_ready(tool_calls):
+        return [runner(call) for call in tool_calls]
+    with ThreadPoolExecutor(max_workers=len(tool_calls)) as pool:
+        return list(pool.map(runner, tool_calls))
 
 
 #: Fehler, die ein zweiter Versuch sicher NICHT behebt -- auch wenn LiteLLM
@@ -424,7 +487,7 @@ class Agent:
 
         Stufe 1 bleibt die Heuristik: "hallo" kostet weiterhin gar nichts.
         """
-        from scoutr.subagents import plan_request
+        from cortex.subagents import plan_request
 
         self._planned_tasks = None
         text = question.strip()
@@ -482,7 +545,7 @@ class Agent:
         Returns:
             Wie viele Werkzeug-Aufrufe das gekostet hat.
         """
-        from scoutr.subagents import plan_subtasks
+        from cortex.subagents import plan_subtasks
 
         # Wie viele Teilfragen hoechstens entstehen duerfen. Wie viele davon
         # GLEICHZEITIG laufen, entscheidet effective_parallel -- zwoelf
@@ -515,9 +578,12 @@ class Agent:
                 "content": (
                     PRE_RESEARCH_PREFIX
                     + " bereits in Teilfragen "
-                    "zerlegt und vorrecherchiert. Nutze diese Ergebnisse vollstaendig "
-                    "in deiner Antwort, pruefe sie gegen die Kriterien des Nutzers und "
-                    "recherchiere nur nach, wo etwas fehlt.\n\n"
+                    "zerlegt und vorrecherchiert. Das hier ist deine Quellenlage -- "
+                    "SCHREIB JETZT DIE ANTWORT daraus, ausfuehrlich und mit Quellen. "
+                    "Nur wenn zu einem Punkt, nach dem der Nutzer ausdruecklich gefragt "
+                    "hat, gar nichts dabei ist, suchst du gezielt danach nach. Etwas "
+                    "noch einmal nachzuschlagen, das unten schon steht, kostet nur "
+                    "Wartezeit.\n\n"
                     + findings[: max(4000, self.settings.max_tool_chars * 2)]
                 ),
             }
@@ -526,7 +592,7 @@ class Agent:
 
     def _run_subagents(self, tasks: list[str]) -> list[dict[str, Any]]:
         """Fuehrt Teilfragen parallel aus und zaehlt ihr Budget mit."""
-        from scoutr.subagents import run_subagents
+        from cortex.subagents import run_subagents
 
         results = run_subagents(
             tasks,
@@ -686,7 +752,7 @@ class Agent:
                 if attempt + 1 >= attempts:
                     break
 
-                from scoutr.local_model import free_memory, resource_problem
+                from cortex.local_model import free_memory, resource_problem
 
                 if resource_problem(detail):
                     freed = free_memory()
@@ -849,9 +915,8 @@ class Agent:
                 # Budget deckelt die Runde -- der Rest wird als Fehlschlag gemeldet.
                 tool_calls = tool_calls[:remaining]
 
-            for call in tool_calls:
-                used += 1
-                self._run_tool_call(call)
+            used += len(tool_calls)
+            self._run_round(tool_calls)
 
             # Auf abgeschnittene Calls muss trotzdem geantwortet werden.
             answered = {call["id"] for call in tool_calls}
@@ -1004,6 +1069,29 @@ class Agent:
 
     def _run_tool_call(self, call: dict[str, Any]) -> None:
         """Fuehrt einen einzelnen Tool-Call aus und haengt das Ergebnis an."""
+        self.messages.append(self._tool_result(call))
+
+    def _run_round(self, tool_calls: list[dict[str, Any]]) -> None:
+        """Fuehrt die Werkzeuge einer Runde aus -- nebeneinander, wo es geht.
+
+        Das Modell wird ausdruecklich aufgefordert, pro Runde mehrere Seiten
+        abzurufen. Nacheinander abgearbeitet summiert sich das: vier Seiten a
+        zwei Sekunden sind acht Sekunden, in denen nichts anderes passiert.
+        Nebeneinander ist es eine.
+
+        Nur lesende Werkzeuge laufen parallel. Eine Rueckfrage wartet auf
+        einen Menschen, eine Notiz und ein Schaltbefehl veraendern etwas --
+        so etwas gehoert nacheinander und in der Reihenfolge, die das Modell
+        gewaehlt hat.
+
+        Die Ergebnisse werden anschliessend in der urspruenglichen Reihenfolge
+        angehaengt: die Schnittstellen erwarten zu jedem Aufruf genau eine
+        Antwort, und zwar in der Reihenfolge der Aufrufe.
+        """
+        self.messages.extend(run_calls(tool_calls, self._tool_result))
+
+    def _tool_result(self, call: dict[str, Any]) -> dict[str, Any]:
+        """Fuehrt einen Tool-Call aus und gibt die Antwortnachricht zurueck."""
         name = call["function"]["name"]
         raw_args = call["function"].get("arguments") or "{}"
         try:
@@ -1028,14 +1116,12 @@ class Agent:
 
         blob = json.dumps(payload, ensure_ascii=False)[: self.blob_limit()]
         self._emit("action_done", tool=name, result=blob[:TRACE_CHARS])
-        self.messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": call["id"],
-                "name": name,
-                "content": blob,
-            }
-        )
+        return {
+            "role": "tool",
+            "tool_call_id": call["id"],
+            "name": name,
+            "content": blob,
+        }
 
     def _final_answer(self, *, stream: bool) -> str:
         """Letzter Aufruf ohne Werkzeuge -- der Zwischenstand muss raus."""

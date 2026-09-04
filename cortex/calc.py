@@ -1,7 +1,7 @@
 """Sicherer Rechner fuer den Agenten.
 
 Kleine lokale Modelle verrechnen sich zuverlaessig bei Preis-pro-Einheit,
-Rabatten und Umrechnungen -- und scoutrs Kernversprechen ist, nicht zu
+Rabatten und Umrechnungen -- und cortexs Kernversprechen ist, nicht zu
 raten. Gerechnet wird deshalb hier, ueber einen AST mit strikter
 Positivliste. Kein `eval`, keine Namen, keine Funktionsaufrufe.
 """

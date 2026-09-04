@@ -7,7 +7,7 @@ import time
 import httpx
 import pytest
 
-from scoutr.fetch import (
+from cortex.fetch import (
     MIN_CONTENT_CHARS,
     DomainThrottle,
     Fetcher,
@@ -126,13 +126,13 @@ def test_robots_disallow_is_respected() -> None:
         assert request.url.path == "/robots.txt"
         return httpx.Response(200, text="User-agent: *\nDisallow: /privat/\n")
 
-    policy = RobotsPolicy(_client_returning(handler), "scoutr/0.1")
+    policy = RobotsPolicy(_client_returning(handler), "cortex/0.1")
     assert policy.allows("https://example.de/oeffentlich")
     assert not policy.allows("https://example.de/privat/geheim")
 
 
 def test_missing_robots_allows_everything() -> None:
-    policy = RobotsPolicy(_client_returning(lambda r: httpx.Response(404)), "scoutr/0.1")
+    policy = RobotsPolicy(_client_returning(lambda r: httpx.Response(404)), "cortex/0.1")
     assert policy.allows("https://example.de/beliebig")
 
 
@@ -140,7 +140,7 @@ def test_unreachable_robots_allows_everything() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("kein Netz", request=request)
 
-    policy = RobotsPolicy(_client_returning(handler), "scoutr/0.1")
+    policy = RobotsPolicy(_client_returning(handler), "cortex/0.1")
     assert policy.allows("https://example.de/x")
 
 
@@ -151,14 +151,14 @@ def test_robots_is_fetched_once_per_origin() -> None:
         calls.append(str(request.url))
         return httpx.Response(200, text="User-agent: *\nDisallow:\n")
 
-    policy = RobotsPolicy(_client_returning(handler), "scoutr/0.1")
+    policy = RobotsPolicy(_client_returning(handler), "cortex/0.1")
     policy.allows("https://example.de/a")
     policy.allows("https://example.de/b")
     assert len(calls) == 1
 
 
 def test_non_http_urls_are_rejected() -> None:
-    policy = RobotsPolicy(_client_returning(lambda r: httpx.Response(404)), "scoutr/0.1")
+    policy = RobotsPolicy(_client_returning(lambda r: httpx.Response(404)), "cortex/0.1")
     assert not policy.allows("ftp://example.de/x")
 
 
@@ -187,14 +187,14 @@ def test_throttle_is_per_domain() -> None:
 # ---------------------------------------------------------------------------
 def _fetcher(handler, **kwargs) -> Fetcher:
     fetcher = Fetcher(
-        user_agent="scoutr-test/0.1",
+        user_agent="cortex-test/0.1",
         timeout=5,
         delay_seconds=0,
         enable_browser=False,
         **kwargs,
     )
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "scoutr-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
     return fetcher
 
 
@@ -411,7 +411,7 @@ def test_broken_pdf_is_skipped_cleanly() -> None:
 
 
 def test_oversized_pdf_is_skipped() -> None:
-    from scoutr import fetch as fetch_mod
+    from cortex import fetch as fetch_mod
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":

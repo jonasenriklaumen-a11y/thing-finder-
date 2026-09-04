@@ -17,9 +17,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from scoutr.cache import Cache
-from scoutr.config import Settings
-from scoutr.tools import TOOL_SCHEMAS, EventHook, Toolbox
+from cortex.cache import Cache
+from cortex.config import Settings
+from cortex.tools import TOOL_SCHEMAS, EventHook, Toolbox
 
 SUBAGENT_PROMPT = """\
 Du bist ein Rechercheassistent und bearbeitest GENAU EINE Teilfrage. Du hast \
@@ -180,7 +180,7 @@ def _subagent_kwargs(settings: Settings, model: str) -> dict[str, Any]:
     bei vier parallelen Subagenten summiert sich das spuerbar.
     """
     kwargs = settings.llm_kwargs_for(model)
-    from scoutr.config import provider_of
+    from cortex.config import provider_of
 
     if provider_of(model) in ("ollama", "ollama_chat"):
         kwargs["reasoning_effort"] = "disable"
@@ -264,7 +264,7 @@ def _run_one(
                 result.summary = content.strip()
                 break
 
-            from scoutr.agent import repair_tool_calls
+            from cortex.agent import repair_tool_calls, run_calls
 
             call_dicts = repair_tool_calls(
                 [
@@ -283,27 +283,15 @@ def _run_one(
                 {"role": "assistant", "content": content, "tool_calls": call_dicts}
             )
 
-            answered: set[str] = set()
-            for call in call_dicts:
-                call_id = call["id"]
-                if used >= budget:
-                    # Auch abgeschnittene Aufrufe brauchen eine Antwort --
-                    # ein Tool-Call ohne Antwort macht den Verlauf ungueltig
-                    # und der abschliessende Aufruf wuerde abgelehnt.
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "name": call["function"]["name"],
-                            "content": json.dumps(
-                                {"error": "Werkzeug-Budget aufgebraucht."},
-                                ensure_ascii=False,
-                            ),
-                        }
-                    )
-                    continue
-                answered.add(call_id)
-                used += 1
+            # Was ins Budget passt, laeuft nebeneinander; der Rest bekommt
+            # eine Absage. Auch abgeschnittene Aufrufe BRAUCHEN eine Antwort
+            # -- ein Tool-Call ohne Antwort macht den Verlauf ungueltig und
+            # der abschliessende Aufruf wuerde abgelehnt.
+            room = max(0, budget - used)
+            doable, cut = call_dicts[:room], call_dicts[room:]
+            used += len(doable)
+
+            def answer(call: dict[str, Any]) -> dict[str, Any]:
                 name = call["function"]["name"]
                 raw = call["function"]["arguments"] or "{}"
                 try:
@@ -314,16 +302,27 @@ def _run_one(
                     payload = box.call(name, arguments if isinstance(arguments, dict) else {})
                 except Exception as exc:
                     payload = {"error": f"{type(exc).__name__}: {exc}"}
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "name": name,
-                        "content": json.dumps(payload, ensure_ascii=False)[
-                            : max(1000, settings.max_tool_chars)
-                        ],
-                    }
-                )
+                return {
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "name": name,
+                    "content": json.dumps(payload, ensure_ascii=False)[
+                        : max(1000, settings.max_tool_chars)
+                    ],
+                }
+
+            messages.extend(run_calls(doable, answer))
+            messages.extend(
+                {
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "name": call["function"]["name"],
+                    "content": json.dumps(
+                        {"error": "Werkzeug-Budget aufgebraucht."}, ensure_ascii=False
+                    ),
+                }
+                for call in cut
+            )
 
         if not result.summary:
             # Budget aufgebraucht -- ein letzter Aufruf ohne Werkzeuge.
@@ -385,7 +384,7 @@ def run_subagents(
     # gelten damit ueber die Subagenten hinweg. Mit je eigenem Fetcher wuerden
     # zwei parallele Subagenten dieselbe Domain gleichzeitig treffen -- und
     # unser Versprechen von einem Request pro Sekunde und Domain waere hin.
-    from scoutr.fetch import Fetcher
+    from cortex.fetch import Fetcher
 
     shared_fetcher = Fetcher(
         user_agent=settings.user_agent,

@@ -1,6 +1,6 @@
 """Lokales Modell einrichten -- ohne API-Key, ohne Konto, ohne Cloud.
 
-scoutr benutzt dafuer [Ollama](https://ollama.com). Dieses Modul kuemmert
+cortex benutzt dafuer [Ollama](https://ollama.com). Dieses Modul kuemmert
 sich um alles, was dazu noetig ist: Ollama finden oder installieren, den
 Server starten, ein Modell laden und -- das Entscheidende -- pruefen, ob
 das Modell wirklich Tool-Calling beherrscht. Ohne das kann der Agent weder
@@ -337,7 +337,7 @@ PROBE_MESSAGE = (
 def verify_tool_calling(model_id: str, api_base: str = DEFAULT_OLLAMA_URL) -> tuple[bool, str]:
     """Prueft an einem echten Aufruf, ob *model_id* Werkzeuge aufrufen kann.
 
-    Das ist die Bedingung, unter der scoutr ueberhaupt recherchieren kann --
+    Das ist die Bedingung, unter der cortex ueberhaupt recherchieren kann --
     ein Modell ohne Tool-Calling wuerde aus dem Gedaechtnis antworten.
     """
     try:
@@ -504,7 +504,7 @@ def too_big(name: str, memory_gb: float | None = None) -> str:
 def fits_together(main: LocalModel, vision: LocalModel, memory_gb: float | None) -> bool:
     """Passen zwei Modelle gleichzeitig in den Speicher?
 
-    scoutr entlaedt zwar zwischen den Aufrufen, aber wer beides parallel
+    cortex entlaedt zwar zwischen den Aufrufen, aber wer beides parallel
     halten kann, spart bei jedem Bild das Nachladen.
     """
     if memory_gb is None:
@@ -703,7 +703,7 @@ def vision_env_values(model: LocalModel | str) -> dict[str, str]:
     model_id = model.model_id if isinstance(model, LocalModel) else str(model)
     if "/" not in model_id:
         model_id = f"{MODEL_PREFIX}/{model_id}"
-    return {"SCOUTR_VISION_MODEL": model_id}
+    return {"CORTEX_VISION_MODEL": model_id}
 
 
 def env_values(model: LocalModel | str, base_url: str = DEFAULT_OLLAMA_URL) -> dict[str, str]:
@@ -712,8 +712,8 @@ def env_values(model: LocalModel | str, base_url: str = DEFAULT_OLLAMA_URL) -> d
     if "/" not in model_id:
         model_id = f"{MODEL_PREFIX}/{model_id}"
     return {
-        "SCOUTR_MODEL": model_id,
-        "SCOUTR_API_BASE": base_url.rstrip("/"),
+        "CORTEX_MODEL": model_id,
+        "CORTEX_API_BASE": base_url.rstrip("/"),
     }
 
 

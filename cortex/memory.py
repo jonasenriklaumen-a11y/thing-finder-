@@ -25,7 +25,7 @@ fuer den eigenen Benutzer. Das schuetzt gegen alles, was die Datenbankdatei
 allein betrifft: Backups, Kopien, Datentraeger in fremden Haenden. Es schuetzt
 NICHT gegen jemanden, der schon im laufenden Benutzerkonto sitzt -- der liest
 den Schluessel einfach mit. Wer das auch abdecken will, setzt
-``SCOUTR_MEMORY_KEY`` auf eine Passphrase: daraus wird der Schluessel bei
+``CORTEX_MEMORY_KEY`` auf eine Passphrase: daraus wird der Schluessel bei
 jedem Start neu abgeleitet, und auf der Platte liegt gar keiner.
 """
 

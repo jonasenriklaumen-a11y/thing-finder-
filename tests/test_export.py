@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from scoutr.export import Turn, export, to_html, to_markdown
-from scoutr.models import Product
+from cortex.export import Turn, export, to_html, to_markdown
+from cortex.models import Product
 
 
 def _turn() -> Turn:
@@ -209,7 +209,7 @@ def test_image_files_do_not_collide_across_turns(
             ],
         )
 
-    from scoutr.export import download_images
+    from cortex.export import download_images
 
     mapping = download_images(
         [turn_with("https://cdn.a.de/bild.jpg"), turn_with("https://cdn.b.de/bild.jpg")],

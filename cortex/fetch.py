@@ -4,10 +4,10 @@ Aufbau der Cookie-/Popup-Behandlung:
 
 * **Stufe 1** -- reines HTTP ohne JavaScript. Consent-Banner sind dann meist
   gar nicht im DOM; was doch drin ist, entfernen wir per Selektor-Blockliste
-  aus :mod:`scoutr.selectors` (`selectors.yaml`).
+  aus :mod:`cortex.selectors` (`selectors.yaml`).
 * **Stufe 2** -- pruefen, ob die Extraktion geklappt hat. Bleibt zu wenig Text
   uebrig und stehen Consent-Marker im HTML, gilt die Seite als Consent-Wall.
-* **Stufe 3** -- optionaler Playwright-Fallback in :mod:`scoutr.browser`.
+* **Stufe 3** -- optionaler Playwright-Fallback in :mod:`cortex.browser`.
 
 Gesperrte Inhalte (Paywall, Login, Captcha) werden **nie** umgangen.
 """
@@ -28,8 +28,8 @@ import trafilatura
 import yaml
 from selectolax.parser import HTMLParser
 
-from scoutr.extract import extract_product, has_spec_heading
-from scoutr.models import PageResult, domain_of
+from cortex.extract import extract_product, has_spec_heading
+from cortex.models import PageResult, domain_of
 
 SELECTORS_PATH = Path(__file__).with_name("selectors.yaml")
 
@@ -472,7 +472,7 @@ class Fetcher:
     def _try_browser(self, url: str) -> str | None:
         """Stufe 3 -- nur wenn Playwright installiert ist."""
         try:
-            from scoutr.browser import render_page
+            from cortex.browser import render_page
         except ImportError:
             return None
         try:

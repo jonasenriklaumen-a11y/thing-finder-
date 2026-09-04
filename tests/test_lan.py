@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from scoutr import lan
+from cortex import lan
 
 
 class TitlePage(BaseHTTPRequestHandler):
@@ -41,7 +41,7 @@ def listener():
 
 # -- Grenzen --------------------------------------------------------------
 def test_only_private_networks_are_scanned() -> None:
-    """Fremde Netze durchsucht scoutr nicht -- weder gewollt noch in Ordnung."""
+    """Fremde Netze durchsucht cortex nicht -- weder gewollt noch in Ordnung."""
     for public in ("8.8.8.0/24", "1.1.1.1", "93.184.216.0/24"):
         with pytest.raises(lan.NotPrivate):
             lan.parse_subnet(public)
@@ -148,11 +148,11 @@ def test_no_hint_outside_a_container(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_hint_names_the_way_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Sonst sucht scoutr im Docker-Netz und niemand versteht, warum nichts kommt."""
+    """Sonst sucht cortex im Docker-Netz und niemand versteht, warum nichts kommt."""
     monkeypatch.setattr(lan, "in_container", lambda: True)
     hint = lan.container_hint("172.17.0.0/24")
     assert "Container" in hint
-    assert "SCOUTR_NETWORK=host" in hint
+    assert "CORTEX_NETWORK=host" in hint
 
 
 def test_a_real_home_network_in_a_container_gets_no_hint(
