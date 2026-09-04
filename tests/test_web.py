@@ -13,6 +13,7 @@ import pytest
 
 from scoutr import web
 from scoutr.agent import AgentResult
+from scoutr.cache import Cache
 from scoutr.config import Settings
 
 
@@ -1050,10 +1051,13 @@ def test_the_sidebar_list_can_shrink_and_scroll() -> None:
     assert "min-height:0" in recents_rule
 
 
-def test_consecutive_duplicate_questions_are_collapsed() -> None:
-    """"hallo" dreimal hintereinander soll nicht dreimal in der Liste stehen."""
+def test_the_sidebar_lists_chats_not_single_questions() -> None:
+    """Ein Eintrag ist ein Chat -- deshalb tauchen Wiederholungen wie
+    dreimal "hallo" gar nicht erst als drei Zeilen auf."""
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "label === last" in html
+    assert "/api/chats" in html
+    assert "openChat(chat.session_id)" in html
+    assert "chat.turns" in html
 
 
 # -- Modellauswahl, Auslastung, Speicher ----------------------------------
@@ -1166,18 +1170,32 @@ def test_the_input_does_not_zoom_on_ios() -> None:
     assert "textarea{font-size:16px}" in phone
 
 
-def test_newest_chat_comes_first() -> None:
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    assert ".slice().reverse()" in html
+def test_newest_chat_comes_first(client, session: web.ChatSession) -> None:
+    """Die Reihenfolge kommt jetzt aus der Datenbank, nicht aus dem Browser."""
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id="alt", question="zuerst gefragt", answer="…", meta={})
+    cache.add_history(session_id="neu", question="zuletzt gefragt", answer="…", meta={})
+    _, body = client("GET", "/api/chats")
+    titles = [chat["title"] for chat in json.loads(body)["chats"]]
+    assert titles[0] == "zuletzt gefragt"
 
 
 def test_the_ui_offers_the_model_picker_and_load_button() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'id="btn-model"' in html and 'id="model-list"' in html
     assert "/api/models" in html
-    assert 'id="btn-usage"' in html and "/api/system" in html
+    assert 'id="showload"' in html and "/api/system" in html
     assert 'id="provider"' in html, "Anbieter zum Auswaehlen"
     assert 'name="SCOUTR_MEMORY"' in html
+
+
+def test_escape_closes_the_settings_window() -> None:
+    """Sonst bleibt es offen und die Auslastung fragt im Hintergrund weiter."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    handler = html[html.index('e.key !== "Escape"') :]
+    handler = handler[: handler.index("});")]
+    assert "closePicker()" in handler, "erst die Modellliste"
+    assert "closeSettings()" in handler, "dann die Einstellungen"
 
 
 # -- Anbieter-Kuerzel ergaenzen -------------------------------------------
@@ -1246,3 +1264,102 @@ def test_the_ui_shows_what_a_key_looks_like() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "nvapi-" in html
     assert "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in html
+
+
+# -- Chats statt Einzelfragen ---------------------------------------------
+def test_a_chat_is_named_after_its_first_question(client, session: web.ChatSession) -> None:
+    """Wie ein Ordner: benannt nach dem, weswegen man ihn angelegt hat."""
+    cache = Cache(session.settings().db_path, 24)
+    for question in ("Gute Cafes in Bremen?", "davon nur mit WLAN", "und sonntags?"):
+        cache.add_history(session_id="c1", question=question, answer="…", meta={})
+    _, body = client("GET", "/api/chats")
+    chats = json.loads(body)["chats"]
+    assert len(chats) == 1, "drei Fragen sind ein Chat, nicht drei"
+    assert chats[0]["title"] == "Gute Cafes in Bremen?"
+    assert chats[0]["turns"] == 3
+
+
+def test_a_new_chat_gets_its_own_entry(client, session: web.ChatSession) -> None:
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id="c1", question="erste Sache", answer="…", meta={})
+    cache.add_history(session_id="c2", question="ganz andere Sache", answer="…", meta={})
+    chats = json.loads(client("GET", "/api/chats")[1])["chats"]
+    assert [chat["title"] for chat in chats] == ["ganz andere Sache", "erste Sache"]
+
+
+def test_opening_a_chat_returns_its_turns(client, session: web.ChatSession) -> None:
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id="c1", question="erste Frage", answer="erste Antwort", meta={})
+    cache.add_history(session_id="c1", question="zweite Frage", answer="zweite Antwort", meta={})
+    _, body = client("POST", "/api/open", {"session_id": "c1"})
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert [turn["question"] for turn in payload["turns"]] == ["erste Frage", "zweite Frage"]
+    assert payload["title"] == "erste Frage"
+
+
+def test_opening_a_chat_restores_the_context(session: web.ChatSession) -> None:
+    """Nachfragen wie "und davon nur die guenstigen" muessen weiter gehen."""
+    cache = Cache(session.settings().db_path, 24)
+    cache.add_history(session_id="c1", question="Laptops bis 1200?", answer="Drei Stueck.",
+                      meta={})
+    session._agent = FakeAgent()
+
+    from scoutr.agent import Agent
+
+    real = Agent(session.settings())
+    session._agent = real
+    session.open_chat("c1")
+    texts = [str(message.get("content") or "") for message in real.messages]
+    assert any("Laptops bis 1200?" in text for text in texts)
+    assert any("Drei Stueck." in text for text in texts)
+    assert real.session_id == "c1"
+
+
+def test_opening_a_gone_chat_says_so(client) -> None:
+    _, body = client("POST", "/api/open", {"session_id": "gibt-es-nicht"})
+    payload = json.loads(body)
+    assert payload["turns"] == []
+    assert "nicht mehr" in payload["note"]
+
+
+def test_opening_needs_a_chat_id(client) -> None:
+    assert client("POST", "/api/open", {"session_id": "  "})[0] == 400
+
+
+def test_a_new_chat_starts_a_new_entry(client, session: web.ChatSession) -> None:
+    """Neuer Chat heisst: die naechste Frage benennt einen neuen Eintrag."""
+    from scoutr.agent import Agent
+
+    session._agent = Agent(session.settings())
+    before = session.chat_id()
+    _, body = client("POST", "/api/clear")
+    after = json.loads(body)["current"]
+    assert after and after != before
+
+
+# -- Anbieterwechsel: keine fremde Adresse --------------------------------
+def test_an_ollama_address_never_reaches_the_cloud() -> None:
+    """Ollama antwortet mit "404 page not found" -- das sieht aus wie ein
+    Fehler des Anbieters, ist aber nur die falsche Adresse."""
+    from scoutr.config import Settings as S
+
+    settings = S(model="nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b",
+                 api_base="http://localhost:11434")
+    assert "api_base" not in settings.llm_kwargs_for(settings.model)
+
+
+def test_a_local_model_keeps_its_address() -> None:
+    from scoutr.config import Settings as S
+
+    settings = S(model="ollama_chat/gemma4:12b", api_base="http://localhost:11434")
+    assert settings.llm_kwargs_for(settings.model)["api_base"] == "http://localhost:11434"
+
+
+def test_a_proxy_is_not_mistaken_for_ollama() -> None:
+    """Ein LiteLLM-Proxy im Heimnetz ist ein berechtigter Weg zur Cloud."""
+    from scoutr.config import base_fits
+
+    assert base_fits("http://192.168.1.9:4000", "nvidia_nim/meta/llama")
+    assert base_fits("http://localhost:4000", "openai/gpt-4o")
+    assert not base_fits("http://192.168.1.9:11434", "openai/gpt-4o")

@@ -305,7 +305,16 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   mehreren Dingen gemeint ist), fragt er nach — mit anklickbaren Antworten oder einem
   Feld zum Selberschreiben. Er fragt höchstens zweimal je Anfrage und nur, wenn die
   Antwort das Ergebnis wirklich ändert; sonst trifft er eine Annahme und sagt sie dazu.
+* **Letzte Chats** in der Seitenleiste sind Chats, keine Einzelfragen. Ein Chat
+  beginnt mit **Neuer Chat**, bekommt seinen Namen von der ersten Frage darin und
+  sammelt alles Weitere, bis du den nächsten startest. Klick auf einen Eintrag holt
+  ihn zurück — samt Verlauf, an den der Agent wieder anknüpft. Neueste oben.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
+* **Auslastung** unter *Einstellungen → Auslastung*: Der Haken „Auslastung des
+  Rechners anzeigen" blendet Prozessor, Arbeitsspeicher, Festplatte, Grafikkarte und
+  den belegten Speicher als Kacheln ein — alle vier Sekunden aufgefrischt, solange das
+  Einstellungsfenster offen ist. Standardmäßig aus; der Haken bleibt im Browser
+  gemerkt, gefragt wird nur, während du hinschaust.
 * **Alle Slash-Befehle** aus dem Terminal funktionieren auch hier: `/location`,
   `/model`, `/image`, `/export`, `/history`, `/notes`, `/clear`, `/help`. `/image`
   nimmt einen Dateipfad oder einen Ordner vom selben Rechner — bei mehreren Bildern
@@ -891,14 +900,14 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_LOCATION` | Standard-Ortsfilter | — |
 | `SCOUTR_LANG` / `SCOUTR_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
 | `SCOUTR_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
-| `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `4` |
+| `SCOUTR_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `12` |
 | `SCOUTR_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
 | `SCOUTR_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
 | `SCOUTR_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
 | `SCOUTR_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
 | `SCOUTR_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
 | `SCOUTR_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
-| `SCOUTR_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud `4` |
+| `SCOUTR_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud: alle |
 | `SCOUTR_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
 | `SCOUTR_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
 | `SCOUTR_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |
@@ -1074,6 +1083,17 @@ NIM*, Schlüssel einfügen, **Modell speichern**. Mehr braucht es nicht.
 Achte darauf, ein Modell zu wählen, das in der Modellkarte Tool-Calling aufführt — nicht
 alle dort angebotenen Modelle können das. Eine eigene, selbst gehostete NIM-Instanz
 erreichst du über `SCOUTR_API_BASE=http://dein-host:8000/v1`.
+
+### Wenn nach dem Anbieterwechsel „404 page not found" kommt
+
+Der Klassiker: In der `.env` steht noch `SCOUTR_API_BASE=http://localhost:11434` vom
+lokalen Modell, das Modell zeigt aber längst zu NVIDIA oder Anthropic. Die Anfrage geht
+dann an Ollama statt an den Anbieter, und Ollama antwortet mit genau diesem Satz.
+
+scoutr lässt eine Basis-URL auf dem Ollama-Port (11434) deshalb weg, sobald das Modell
+zu einem anderen Anbieter gehört. Jede andere Adresse bleibt stehen — ein LiteLLM-Proxy
+oder ein eigenes NIM im Heimnetz ist ein völlig legitimer Weg zu einem Cloud-Modell und
+wird nicht angefasst.
 
 SQLite (`~/.scoutr/scoutr.sqlite3`) wird für genau zwei Dinge benutzt: Response-Cache
 (TTL 24 h) und Verlauf vergangener Recherchen.

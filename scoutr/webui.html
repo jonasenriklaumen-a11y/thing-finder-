@@ -65,6 +65,7 @@ body.collapsed aside{margin-left:-260px}
   line-height:1.4;color:var(--text-2);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .recent:hover{background:var(--surface);color:var(--text)}
+.recent.active{background:var(--accent-soft);color:var(--accent-text)}
 .side-foot{border-top:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:1px}
 .side-btn{display:flex;align-items:center;gap:10px;background:transparent;border:0;
   border-radius:9px;padding:9px 10px;cursor:pointer;font-size:13.5px;color:var(--text-2);
@@ -121,6 +122,9 @@ body.start main{flex:0 0 auto;overflow:visible}
 /* Der leere Gespraechsbereich hat unten Platz fuer die schwebende Eingabe --
    auf dem Startbildschirm wuerde der nur eine Luecke aufreissen. */
 body.start .thread{display:none}
+/* Nur im Startzustand sichtbar -- geloescht wird sie nicht, sonst liesse
+   sich fuer einen neuen Chat nicht wieder dorthin zurueck. */
+body:not(.start) .hello{display:none}
 .thread{max-width:46rem;margin:0 auto;padding:8px 24px 200px}
 
 /* =========================== Startbildschirm ============================ */
@@ -469,7 +473,17 @@ input:focus,select:focus{border-color:var(--accent)}
         </div>
         <div class="inline">
           <div class="meter" id="storage-meter"><span></span></div>
-          <button type="button" class="btn" id="btn-usage">Auslastung</button>
+        </div>
+        <div class="note" id="storage-note"></div>
+      </fieldset>
+
+      <fieldset><legend>Auslastung</legend>
+        <div class="check">
+          <input type="checkbox" id="showload">
+          <label for="showload" style="margin:0">Auslastung des Rechners anzeigen
+            <span class="why">Prozessor, Arbeitsspeicher, Festplatte, Grafikkarte und
+              wie voll der Speicher ist. Wird alle paar Sekunden aufgefrischt,
+              solange dieses Fenster offen ist.</span></label>
         </div>
         <div class="note" id="usage-note"></div>
       </fieldset>
@@ -640,7 +654,7 @@ function md(text){
 }
 
 /* ---------- Nachrichten ---------- */
-function leaveStart(){ document.body.classList.remove("start"); $("#hello")?.remove(); }
+function leaveStart(){ document.body.classList.remove("start"); }
 function addUser(text, files = []){
   leaveStart();
   const el = document.createElement("div");
@@ -958,8 +972,14 @@ $(".pane").addEventListener("click", (e) => {
   }
 }, true);
 $("#btn-new").addEventListener("click", async () => {
-  await api("/api/clear", { method:"POST" });
-  location.reload();
+  const res = await api("/api/clear", { method:"POST" });
+  try { currentChat = (await res.json()).current || ""; } catch {}
+  thread.innerHTML = "";
+  document.body.classList.add("start");
+  greet();
+  loadRecents();
+  if (narrow()) document.body.classList.add("collapsed");
+  input.value = ""; input.style.height = "auto"; input.focus();
 });
 $("#btn-notes").addEventListener("click", () => {
   if (narrow()) document.body.classList.add("collapsed");
@@ -981,36 +1001,54 @@ try {
     document.documentElement.setAttribute("data-theme", "dark");
 } catch {}
 
+let currentChat = "";
+
 async function loadRecents(){
   try {
-    const data = await (await api("/api/history")).json();
+    const data = await (await api("/api/chats")).json();
+    currentChat = data.current || "";
     const box = $("#recents");
     box.innerHTML = "";
-    // Mehrfaches "hallo" oder Wiederholungen direkt hintereinander sind
-    // keine eigene Erinnerung wert -- nur der neueste Versuch zaehlt.
-    let last = null;
-    // Der Verlauf kommt aeltester zuerst -- in der Liste soll der juengste
-    // Chat oben stehen, so wie man es von Chat-Oberflaechen kennt.
-    const entries = (data.history || []).slice().reverse().flatMap(entry => {
-      const label = entry.question.replace(/\s+/g, " ").trim();
-      if (label === last) return [];
-      last = label;
-      return [{ entry, label }];
-    });
-    entries.slice(0, 25).forEach(({ entry, label }) => {
+    // Ein Eintrag ist ein Chat, keine einzelne Frage. Benannt nach der
+    // ersten Frage darin -- so wie man einen Ordner nach dem benennt,
+    // weswegen man ihn angelegt hat.
+    (data.chats || []).forEach(chat => {
+      const label = (chat.title || "Ohne Titel").replace(/\s+/g, " ").trim();
       const item = document.createElement("button");
-      item.className = "recent";
+      item.className = "recent" + (chat.session_id === currentChat ? " active" : "");
       item.textContent = label;
-      item.title = label;
-      item.addEventListener("click", () => {
-        input.value = entry.question;
-        input.dispatchEvent(new Event("input"));
-        if (narrow()) document.body.classList.add("collapsed");
-        input.focus();
-      });
+      item.title = chat.turns > 1 ? `${label}  (${chat.turns} Fragen)` : label;
+      item.addEventListener("click", () => openChat(chat.session_id));
       box.appendChild(item);
     });
   } catch {}
+}
+
+async function openChat(sessionId){
+  if (narrow()) document.body.classList.add("collapsed");
+  if (busy || sessionId === currentChat) return;
+  let data;
+  try {
+    const res = await api("/api/open", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    data = await res.json();
+  } catch { return; }
+  if (!data.ok || !data.turns?.length) return;
+
+  currentChat = sessionId;
+  thread.innerHTML = "";
+  leaveStart();
+  // Den Verlauf so wieder aufbauen, wie er beim Schreiben aussah.
+  data.turns.forEach(turn => {
+    addUser(turn.question);
+    const { steps, bubble } = addBot();
+    steps.remove();
+    bubble.innerHTML = md(turn.answer || "");
+  });
+  loadRecents();
+  input.focus();
 }
 
 /* ---------- Modellauswahl ---------- */
@@ -1074,7 +1112,13 @@ $("#btn-model").addEventListener("click", () => modelBox.hidden ? openPicker() :
 $("#picker-settings").addEventListener("click", () => {
   closePicker(); $("#btn-settings").click();
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePicker(); });
+// Escape schliesst, was gerade oben liegt: erst die Modellliste, dann die
+// Einstellungen. Sonst bleibt das Fenster offen und die Auslastung fragt weiter.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!modelBox.hidden) { closePicker(); return; }
+  if (overlay.classList.contains("open")) closeSettings();
+});
 
 /* ---------- Einstellungen ---------- */
 const overlay = $("#overlay"), form = $("#settings");
@@ -1097,16 +1141,24 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#provider").value = "";
   $("#provider-note").textContent = "";
   $("#model-note").textContent = "";
-  $("#usage-note").textContent = "";
+  $("#usage-note").innerHTML = "";
   api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
+  let wanted = false;
+  try { wanted = localStorage.getItem("scoutr-showload") === "1"; } catch {}
+  $("#showload").checked = wanted;
+  if (wanted) $("#showload").dispatchEvent(new Event("change"));
   $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
   $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
   $("#savenote").textContent = ""; $("#savenote").className = "note";
   $("#ha-note").textContent = ""; $("#ha-note").className = "note";
   overlay.classList.add("open");
 });
-$("#cancel").addEventListener("click", () => overlay.classList.remove("open"));
-overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.classList.remove("open"); });
+function closeSettings(){
+  overlay.classList.remove("open");
+  stopLoad();   // sonst fragt die Auslastung im Hintergrund weiter
+}
+$("#cancel").addEventListener("click", closeSettings);
+overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSettings(); });
 
 /* ---------- Anbieter und Schluessel ---------- */
 // Wer welchen Schluessel braucht -- damit man den Anbieter waehlen kann,
@@ -1207,9 +1259,29 @@ function gauge(name, value, sub, percent){
     <div class="g-sub">${sub}</div></div>`;
 }
 
-$("#btn-usage").addEventListener("click", async () => {
+// Solange der Haken steht, frischt sich die Anzeige selbst auf.
+let loadTimer = null;
+
+function stopLoad(){
+  clearInterval(loadTimer);
+  loadTimer = null;
+}
+
+$("#showload").addEventListener("change", (e) => {
+  stopLoad();
+  const on = e.target.checked;
+  try {
+    if (on) localStorage.setItem("scoutr-showload", "1");
+    else localStorage.removeItem("scoutr-showload");
+  } catch {}
+  if (!on){ $("#usage-note").innerHTML = ""; return; }
+  showLoad();
+  loadTimer = setInterval(showLoad, 4000);
+});
+
+async function showLoad(){
   const note = $("#usage-note");
-  note.className = "note"; note.textContent = "Sehe nach …";
+  if (!note.innerHTML) note.textContent = "Sehe nach …";
   let data;
   try { data = await (await api("/api/system")).json(); }
   catch (err){ note.className = "note bad"; note.textContent = String(err); return; }
@@ -1236,14 +1308,23 @@ $("#btn-usage").addEventListener("click", async () => {
   note.innerHTML = `<div class="gauges">${parts.join("")}</div>`
     + `<div style="margin-top:8px">${data.system} · Python ${data.python}</div>`;
   showStorage(data.storage);
-});
+}
 
 function showStorage(storage){
   const meter = $("#storage-meter");
-  if (!storage){ meter.firstElementChild.style.width = "0"; return; }
+  const note = $("#storage-note");
+  if (!storage){
+    meter.firstElementChild.style.width = "0";
+    if (note) note.textContent = "Der Speicher ist ausgeschaltet.";
+    return;
+  }
   meter.firstElementChild.style.width = Math.min(100, storage.percent) + "%";
   meter.className = "meter" + (storage.percent >= 85 ? " warn" : "");
   meter.title = `${storage.used_mb} von ${storage.limit_mb} MB belegt`;
+  if (note){
+    note.textContent = `${storage.used_mb} von ${storage.limit_mb} MB belegt`
+      + ` · ${storage.entries} ${storage.entries === 1 ? "Notiz" : "Notizen"}`;
+  }
 }
 
 async function haCall(payload){
@@ -1306,7 +1387,7 @@ form.addEventListener("submit", async (e) => {
     note.textContent = "Gespeichert in " + data.path + " — sofort aktiv.";
     note.className = "note ok";
     refreshHeader();
-    setTimeout(() => overlay.classList.remove("open"), 1100);
+    setTimeout(closeSettings, 1100);
   } else {
     note.textContent = data.error || "Das hat nicht geklappt."; note.className = "note bad";
   }

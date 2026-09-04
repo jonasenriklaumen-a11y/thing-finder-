@@ -201,6 +201,49 @@ class Cache:
     # -- Merkzettel -------------------------------------------------------
     MAX_NOTE_LENGTH = 500
 
+    def recent_chats(self, limit: int = 30) -> list[dict[str, Any]]:
+        """Die letzten Chats, juengster zuerst.
+
+        Ein Chat ist eine Sitzung, kein einzelner Austausch. Benannt wird er
+        nach der ERSTEN Frage darin -- so wie man einen Ordner nach dem
+        benennt, weswegen man ihn angelegt hat.
+        """
+        query = """
+            SELECT session_id,
+                   MIN(id)   AS first_id,
+                   MAX(id)   AS last_id,
+                   COUNT(*)  AS turns,
+                   MAX(created_at) AS touched
+            FROM history
+            GROUP BY session_id
+            ORDER BY last_id DESC
+            LIMIT ?
+        """
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            rows = cur.execute(query, (limit,)).fetchall()
+            chats = []
+            for row in rows:
+                title = cur.execute(
+                    "SELECT question FROM history WHERE id = ?", (row["first_id"],)
+                ).fetchone()
+                chats.append(
+                    {
+                        "session_id": row["session_id"],
+                        "title": str(title["question"] if title else "").strip(),
+                        "turns": int(row["turns"]),
+                        "touched": str(row["touched"] or ""),
+                    }
+                )
+        return chats
+
+    def chat_history(self, session_id: str, limit: int = 100) -> list[HistoryEntry]:
+        """Alle Fragen und Antworten eines Chats, aelteste zuerst.
+
+        `recent_history` liefert schon in dieser Reihenfolge -- ein zweites
+        Umdrehen wuerde den Chat rueckwaerts anzeigen.
+        """
+        return self.recent_history(limit=limit, session_id=session_id)
+
     def add_note(self, text: str) -> int:
         """Merkt sich *text* dauerhaft -- ueber Sitzungen hinweg."""
         text = " ".join(str(text).split())[: self.MAX_NOTE_LENGTH]

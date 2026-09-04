@@ -7,6 +7,7 @@ import difflib
 import os
 import re
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -1368,6 +1369,10 @@ def chat_command(
         # einmaligen Durchlauf oben laeuft niemand mit -- da soll der Agent
         # eine Annahme treffen statt ins Leere zu fragen.
         agent.set_ask_handler(_console_ask)
+        # LiteLLM zieht beim ersten Import gut vier Sekunden -- die sollen
+        # nicht an der ersten Frage haengen, sondern waehrend der Nutzer
+        # noch tippt.
+        threading.Thread(target=_preload_llm, daemon=True).start()
         console.print(_banner(settings))
         if prefix:
             result = _run_turn(agent, renderer, prefix, stream, show_images)
@@ -1644,6 +1649,12 @@ def _console_ask(question: str, options: list[str]) -> str:
     if options and answer.isdigit() and 1 <= int(answer) <= len(options):
         return options[int(answer) - 1]
     return answer
+
+
+def _preload_llm() -> None:
+    """Laedt LiteLLM im Hintergrund, damit die erste Frage nicht wartet."""
+    with contextlib.suppress(Exception):
+        import litellm  # noqa: F401
 
 
 def _enable_readline() -> None:

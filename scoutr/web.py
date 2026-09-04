@@ -176,10 +176,36 @@ class ChatSession:
         return self._agent
 
     def reset(self) -> None:
-        """Verwirft den Verlauf, behaelt aber den Merkzettel."""
+        """Beginnt einen neuen Chat. Der Merkzettel bleibt."""
         with self._lock:
-            if self._agent is not None:
-                self._agent.clear()
+            self.agent().clear()
+
+    def chat_id(self) -> str:
+        """Kennung des Chats, in dem gerade geschrieben wird."""
+        return str(getattr(self.agent(), "session_id", ""))
+
+    def open_chat(self, session_id: str) -> dict[str, Any]:
+        """Oeffnet einen frueheren Chat wieder -- samt Verlauf.
+
+        Der Verlauf geht an den Agenten zurueck, damit Nachfragen wie "und
+        davon nur die guenstigen" auch nach Tagen noch funktionieren.
+        """
+        settings = self.settings()
+        cache = Cache(settings.db_path, settings.cache_ttl_hours)
+        entries = cache.chat_history(session_id)
+        if not entries:
+            return {"turns": [], "title": "", "note": "Diesen Chat gibt es nicht mehr."}
+        with self._lock:
+            self.agent().resume(
+                session_id, [(entry.question, entry.answer) for entry in entries]
+            )
+        return {
+            "session_id": session_id,
+            "title": entries[0].question,
+            "turns": [
+                {"question": entry.question, "answer": entry.answer} for entry in entries
+            ],
+        }
 
     def reload(self) -> None:
         """Nach dem Speichern neuer Einstellungen alles neu aufbauen."""
@@ -787,6 +813,15 @@ class Handler(BaseHTTPRequestHandler):
                     "ha_connected": bool(settings.ha_url and settings.ha_token),
                 }
             )
+        elif route == "/api/chats":
+            settings = SESSION.settings()
+            cache = Cache(settings.db_path, settings.cache_ttl_hours)
+            self._json(
+                {
+                    "chats": cache.recent_chats(limit=40),
+                    "current": SESSION.chat_id(),
+                }
+            )
         elif route == "/api/models":
             from scoutr.system import available_models
 
@@ -828,7 +863,13 @@ class Handler(BaseHTTPRequestHandler):
             self._chat()
         elif route == "/api/clear":
             SESSION.reset()
-            self._json({"ok": True})
+            self._json({"ok": True, "current": SESSION.chat_id()})
+        elif route == "/api/open":
+            wanted = str(self._read_json().get("session_id", "")).strip()
+            if not wanted:
+                self._json({"ok": False, "error": "keine Chat-Kennung"}, 400)
+                return
+            self._json({"ok": True, **SESSION.open_chat(wanted)})
         elif route == "/api/ha":
             self._json(self._ha_probe(self._read_json()))
         elif route == "/api/answer":

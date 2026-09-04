@@ -267,9 +267,17 @@ def test_local_models_run_two_subagents() -> None:
     assert settings.effective_parallel == 2
 
 
-def test_cloud_models_run_four_subagents(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cloud_models_use_the_full_subagent_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In der Cloud kostet Warten nur Zeit, kein RAM -- also alle auf einmal."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-    assert config.Settings(model="anthropic/claude-sonnet-4-6").effective_parallel == 4
+    settings = config.Settings(model="anthropic/claude-sonnet-4-6", max_subagents=12)
+    assert settings.effective_parallel == 12
+
+
+def test_parallelism_never_drops_below_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    settings = config.Settings(model="anthropic/claude-sonnet-4-6", max_subagents=0)
+    assert settings.effective_parallel == 1
 
 
 def test_parallelism_follows_the_subagent_model(monkeypatch: pytest.MonkeyPatch) -> None:

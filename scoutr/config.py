@@ -167,6 +167,39 @@ def suggest_model(model: str) -> str:
     return ""
 
 
+#: Der Port, auf dem Ollama lauscht. Eine Adresse mit diesem Port gehoert zu
+#: Ollama -- und damit nie zu einem Anbieter in der Cloud.
+OLLAMA_PORT = 11434
+
+
+def is_ollama_base(url: str) -> bool:
+    """Zeigt *url* auf eine Ollama-Instanz?"""
+    from urllib.parse import urlparse
+
+    if not url:
+        return False
+    parsed = urlparse(url if "://" in url else f"http://{url}")
+    return parsed.port == OLLAMA_PORT
+
+
+def base_fits(url: str, model: str) -> bool:
+    """Passt die eigene Adresse zu diesem Modell?
+
+    Wer von Ollama auf einen Cloud-Anbieter wechselt, laesst leicht
+    `SCOUTR_API_BASE=http://localhost:11434` stehen. LiteLLM schickt die
+    Anfrage dann brav dorthin, und Ollama antwortet mit "404 page not found"
+    -- was wie ein Fehler des Anbieters aussieht, aber keiner ist.
+
+    Geprueft wird nur der Ollama-Port, nicht "irgendwas Lokales": ein
+    LiteLLM-Proxy auf localhost oder im Heimnetz ist ein voellig
+    berechtigter Weg zu einem Cloud-Modell, und den wollen wir nicht
+    versehentlich zusperren.
+    """
+    if not url or provider_of(model) in ("ollama", "ollama_chat"):
+        return True
+    return not is_ollama_base(url)
+
+
 def model_problem(model: str) -> str:
     """Menschenlesbare Meldung, wenn *model* so nicht benutzbar ist."""
     if resolve_model(model):
@@ -274,14 +307,20 @@ class Settings:
     def effective_parallel(self) -> int:
         """Wie viele Subagenten gleichzeitig laufen duerfen.
 
-        Ohne eigene Angabe: zwei bei lokalen Modellen (die GPU rechnet
-        ohnehin nacheinander, mehr bringt nur Speicherdruck), vier in der
-        Cloud, wo die Aufrufe wirklich nebenlaeufig sind.
+        Ohne eigene Angabe: zwei bei lokalen Modellen -- die GPU rechnet
+        ohnehin nacheinander, mehr bringt nur Speicherdruck. In der Cloud
+        alle auf einmal, denn dort ist Warten reine Netzwerklatenz.
         """
         if self.subagent_parallel > 0:
             return self.subagent_parallel
         local = provider_of(self.effective_subagent_model) in ("ollama", "ollama_chat")
-        return 2 if local else 4
+        if local:
+            return 2
+        # In der Cloud laufen die Aufrufe wirklich nebeneinander. Ein Deckel
+        # von vier hiesse bei zwoelf Teilfragen: drei Wellen hintereinander,
+        # also dreimal warten statt einmal -- gemessen 6,2s statt 3,7s.
+        # Eine Ratenbegrenzung faengt der Wiederholungsversuch ab.
+        return max(1, self.max_subagents)
 
     @property
     def effective_subagent_model(self) -> str:
@@ -316,7 +355,7 @@ class Settings:
         """
         kwargs: dict[str, object] = {}
         if provider_of(model) == provider_of(self.model):
-            if self.api_base:
+            if self.api_base and base_fits(self.api_base, model):
                 kwargs["api_base"] = self.api_base
             if self.api_key:
                 kwargs["api_key"] = self.api_key

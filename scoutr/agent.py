@@ -220,6 +220,14 @@ Antwort nennen, weiterarbeiten.
 - Frag VOR der Recherche, nicht mittendrin, und hoechstens zweimal je Anfrage. Gib \
 zwei bis vier Antwortmoeglichkeiten mit, wenn es klar abgrenzbare gibt."""
 
+def new_session_id() -> str:
+    """Eine neue Chat-Kennung: nach Zeit sortierbar und eindeutig."""
+    import time
+    import uuid
+
+    return f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
+
+
 #: Beginn der internen Nachricht mit den Vorrecherche-Ergebnissen.
 PRE_RESEARCH_PREFIX = "Zu deiner Unterstuetzung wurde die Anfrage"
 
@@ -302,6 +310,10 @@ class Agent:
         self.settings = settings
         self.cache = cache
         self.on_event = on_event
+        #: Alle Fragen eines Chats teilen sich diese Kennung. Frueher war das
+        #: die Objektadresse -- damit gehoerte jeder Neustart zu einem neuen
+        #: "Chat", und ein Chat liess sich nie wieder oeffnen.
+        self.session_id = new_session_id()
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt(cache, self._home_prompt())}
         ]
@@ -489,14 +501,35 @@ class Agent:
     def close(self) -> None:
         self.toolbox.close()
 
-    def clear(self) -> None:
-        """Verwirft den Gespraechsverlauf, behaelt aber die Konfiguration."""
+    def clear(self, *, new_chat: bool = True) -> None:
+        """Verwirft den Gespraechsverlauf, behaelt aber die Konfiguration.
+
+        Mit *new_chat* beginnt zugleich ein neuer Chat: die naechste Frage
+        gehoert dann nicht mehr zum vorherigen, sondern benennt einen neuen.
+        """
         self.messages = [
             {"role": "system", "content": self._system_prompt(self.cache, self._home_prompt())}
         ]
         if self.toolbox.ask_handler is not None:
             self.messages[0]["content"] += ASK_PROMPT
         self.last_result = None
+        if new_chat:
+            self.session_id = new_session_id()
+
+    def resume(self, session_id: str, turns: list[tuple[str, str]]) -> None:
+        """Setzt einen frueheren Chat fort.
+
+        Der Verlauf wird aus Frage und Antwort wieder aufgebaut -- damit
+        weiss das Modell, worueber gesprochen wurde, ohne dass wir jeden
+        Werkzeugaufruf von damals aufheben muessten.
+        """
+        self.clear(new_chat=False)
+        self.session_id = session_id
+        for question, answer in turns:
+            if question:
+                self.messages.append({"role": "user", "content": question})
+            if answer:
+                self.messages.append({"role": "assistant", "content": answer})
 
     def _home_prompt(self) -> str:
         """Die Absaetze zu Heimnetz und Zuhause -- nur, was freigegeben ist."""
@@ -986,7 +1019,7 @@ class Agent:
         self._emit("done", tool_calls=result.tool_calls, hit_limit=result.hit_limit)
         if self.cache and result.answer:
             self.cache.add_history(
-                session_id=str(id(self)),
+                session_id=self.session_id,
                 question=question,
                 answer=result.answer,
                 meta=result.meta(),
