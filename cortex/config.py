@@ -285,6 +285,11 @@ class Settings:
     #: Zugangsdaten der eigenen Google-Cloud-Anwendung (Typ "Desktop").
     google_client_id: str = ""
     google_client_secret: str = ""
+    #: Adresse der Lagerverwaltung im eigenen Netz (leer = keine).
+    storage_url: str = ""
+    #: Was Cortex dort darf: "off", "read" oder "write". Geloescht wird in
+    #: keiner Stufe -- siehe cortex/storage.py.
+    storage_access: str = "read"
     #: Darf cortex das eigene Netz durchsuchen?
     lan_enabled: bool = True
     #: Netz, das dabei durchsucht wird. Leer = das eigene automatisch erkennen.
@@ -467,6 +472,8 @@ def get_settings() -> Settings:
         fetch_timeout=float(_env_int("CORTEX_FETCH_TIMEOUT", 15)),
         cache_ttl_hours=_env_int("CORTEX_CACHE_TTL_HOURS", 24),
         search_variants=_env_int("CORTEX_SEARCH_VARIANTS", 3),
+        storage_url=_env_str("CORTEX_STORAGE_URL"),
+        storage_access=_env_str("CORTEX_STORAGE_ACCESS", "read"),
         google_enabled=_env_bool("CORTEX_GOOGLE", False),
         google_client_id=_env_str("GOOGLE_CLIENT_ID"),
         google_client_secret=_env_str("GOOGLE_CLIENT_SECRET"),

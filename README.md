@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 7.5.0                                      │
+│ Cortex AI 7.5.1                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -341,6 +341,10 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   sammelt alles Weitere, bis du den nächsten startest. Klick auf einen Eintrag holt
   ihn zurück — samt Verlauf, an den der Agent wieder anknüpft. Neueste oben.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
+* **Abbrechen:** Sobald eine Anfrage läuft, wird aus *Anhängen* ein
+  *Abbrechen*. Ein Klick beendet den Lauf wirklich — nicht nur die Anzeige:
+  der Browser hört auf zuzuhören *und* der Agent hört auf zu arbeiten. Was bis
+  dahin da war, bleibt stehen. Danach ist der Knopf wieder das Anhängen.
 * **Mitlesen** unter *Einstellungen → Mitlesen*: Der Haken „Gedanken und Aktionen
   mitlesen" zeigt während der Antwort, was Cortex AI gerade denkt und tut — jede
   Suchanfrage im Wortlaut, jeden Werkzeugaufruf mit seinen Argumenten, was
@@ -380,7 +384,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 7.5.0                                                   │
+│ Cortex AI 7.5.1                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -522,6 +526,68 @@ CORTEX_MEMORY_KEY="ein langes Passwort" cortex web
 
 Dann wird der Schlüssel bei jedem Start neu abgeleitet und liegt nirgends auf der
 Platte. Der Preis: ohne die Passphrase ist der Speicher unwiederbringlich weg.
+
+## Die Lagerverwaltung
+
+„Wo liegt das Ladekabel", „habe ich noch 4×40er Schrauben", „was ist alles im
+Keller" — dafür gibt es kein Suchergebnis im Web. Cortex kann diese Fragen aus der
+[Lagerverwaltung](https://github.com/jonasenriklaumen-a11y/storage-system) beantworten,
+wenn sie im selben Netz läuft: **Räume → Möbel → Artikel**, jeder Artikel mit einer
+eindeutigen Nummer wie `B42`.
+
+### Einrichten
+
+*Einstellungen → Zuhause & Netz → Lagerverwaltung*. **Suchen** klopft das eigene Netz
+ab und trägt die Adresse ein; **Testen** sagt, was dort steht. Von Hand geht auch:
+`192.168.1.5:3000`.
+
+> Gesucht wird nicht „irgendwas auf Port 3000" — jeder Kandidat wird gefragt, ob er
+> sich als Lagerverwaltung zu erkennen gibt (`GET /api/config` nennt `app`, `name` und
+> `version`). Auf Port 3000 läuft in vielen Haushalten irgendein anderer
+> Entwicklungsserver.
+
+### Was Cortex dort darf
+
+Drei Stufen, einzustellen unter *Was Cortex dort darf*:
+
+| Stufe | Was geht |
+|---|---|
+| **Nichts** | Abgeschaltet. Die Werkzeuge existieren für das Modell gar nicht. |
+| **Nur lesen** | Suchen, stöbern, zählen. |
+| **Lesen und schreiben** | Zusätzlich Artikel, Möbel und Räume anlegen und ändern. |
+
+Die Stufe wirkt an zwei Stellen, nicht an einer: Was nicht erlaubt ist, wird dem Modell
+**gar nicht erst angeboten** — und der Client lehnt es zusätzlich ab, falls es doch
+danach fragt. Ein Werkzeug, das nicht existiert, kann nicht falsch benutzt werden; das
+ist verlässlicher als eine Bitte im Prompt.
+
+**Gelöscht wird in keiner Stufe.** Ein versehentlich angelegter Artikel ist in zehn
+Sekunden wieder weg; ein gelöschter Raum nimmt alle Möbel und Artikel darin mit, und
+das lässt sich nicht rückgängig machen. Diese Entscheidung gehört einem Menschen vor
+der Oberfläche.
+
+> **Und eine Ehrlichkeit dazu:** Die Lagerverwaltung selbst kennt keine Anmeldung — sie
+> ist fürs Heimnetz gebaut, wer drin ist, darf schreiben. „Nur lesen" ist damit eine
+> Fessel für Cortex, **kein Schloss am Server**. Wer ihn über das Heimnetz hinaus
+> erreichbar macht, braucht davor einen Reverse Proxy mit Anmeldung.
+
+### Was danach geht
+
+```
+> ich habe 8 Schrauben entnommen, trag das ein
+
+  [Lager] suchen schraub
+  [Lager] 2 Einträge
+  [Lager] ändern Artikel 2
+  Eingetragen: A2 „Schrauben 4×40" steht jetzt bei 230 (vorher 238),
+  Keller › Regal links.
+```
+
+Vier Werkzeuge: `storage_find` (Nummer oder Name), `storage_browse` (Räume → Möbel →
+Artikel), `storage_add` und `storage_edit`. Beim Ändern des Bestands nimmt Cortex
+bewusst die *relative* Änderung (`delta`), nicht den gesetzten Wert: Wenn zwei Leute
+gleichzeitig eine Schraube entnehmen, kommen so beide Entnahmen an — ein gesetzter Wert
+würde eine davon überschreiben.
 
 ## Gmail und Google Kalender
 
@@ -1096,6 +1162,8 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `CORTEX_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
 | `CORTEX_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
 | `CORTEX_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
+| `CORTEX_STORAGE_URL` | Adresse der Lagerverwaltung im Netz | — |
+| `CORTEX_STORAGE_ACCESS` | `off`, `read` oder `write` | `read` |
 | `CORTEX_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | eigene Google-Anwendung | — |
 

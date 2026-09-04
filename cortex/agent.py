@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +20,7 @@ from typing import Any
 from cortex.cache import Cache
 from cortex.config import Settings
 from cortex.models import Product
+from cortex.storage import normalize_access as storage_access
 from cortex.tools import (
     ASK_SCHEMA,
     CALENDAR_SCHEMA,
@@ -31,6 +33,10 @@ from cortex.tools import (
     MEMORY_READ_SCHEMA,
     MEMORY_SCHEMA,
     MEMORY_WRITE_SCHEMA,
+    STORAGE_ADD_SCHEMA,
+    STORAGE_BROWSE_SCHEMA,
+    STORAGE_EDIT_SCHEMA,
+    STORAGE_FIND_SCHEMA,
     SUBAGENT_SCHEMA,
     TOOL_SCHEMAS,
     EventHook,
@@ -233,6 +239,36 @@ Schalte nur, worum der Nutzer wirklich gebeten hat, und nur eine Sache auf einma
 Schloessern, Alarmanlagen, Toren und Heizung wird er ohnehin noch einmal gefragt. Sag \
 hinterher in einem Satz, was du getan hast."""
 
+#: Wird angehaengt, wenn das Lager freigegeben ist. %(rechte)s wird ersetzt.
+STORAGE_PROMPT = """\
+
+Der Nutzer fuehrt sein Hab und Gut in einer Lagerverwaltung: Raeume enthalten \
+Moebel, Moebel enthalten Artikel, jeder Artikel hat eine eindeutige Nummer wie \
+"B42". Du kannst darin %(rechte)s:
+- `storage_find(query, limit)` -- nach Nummer oder Name suchen. Jeder Treffer \
+nennt Raum, Moebel, Nummer und Bestand.
+- `storage_browse(room_id, furniture_id)` -- ohne Angabe die Raeume, mit \
+`room_id` die Moebel darin, mit `furniture_id` die Artikel darin.
+So gehst du damit um:
+- "Wo ist X", "habe ich noch Y", "was liegt im Keller" beantwortest du hieraus, \
+nicht aus dem Web.
+- Rate NIE eine Kennung. Erst suchen oder stoebern, dann damit arbeiten.
+- Findest du nichts, sagst du "nicht eingetragen" -- nicht "hast du nicht". Das \
+Lager kennt nur, was jemand eingetragen hat."""
+
+#: Der zusaetzliche Absatz, wenn Cortex dort auch schreiben darf.
+STORAGE_WRITE_PROMPT = """\
+- `storage_add(name, furniture_id, room_id, quantity)` -- Artikel, Moebel oder \
+Raum anlegen. Die Nummer vergibt der Server, nie du.
+- `storage_edit(item_id, name, quantity, delta)` -- umbenennen oder Bestand \
+aendern. Nimm `delta`, wenn etwas dazukommt oder weggeht (-1 = einer \
+entnommen), und `quantity` nur beim Nachzaehlen: ein gesetzter Wert \
+ueberschreibt, was jemand anderes gerade geaendert hat.
+- Leg nur an, worum der Nutzer wirklich gebeten hat, und sag hinterher in \
+einem Satz, was du eingetragen hast -- mit der vergebenen Nummer.
+- Loeschen kannst du nicht. Fragt jemand danach, sagst du, dass er das selbst \
+in der Lagerverwaltung macht: ein geloeschter Raum nimmt alles darin mit."""
+
 #: Wird angehaengt, wenn Gmail und Kalender freigegeben sind.
 GOOGLE_PROMPT = """\
 
@@ -391,6 +427,8 @@ class AgentResult:
     skipped: dict[str, str] = field(default_factory=dict)
     products: list[Product] = field(default_factory=list)
     hit_limit: bool = False
+    #: Jemand hat den Durchlauf abgebrochen -- die Antwort ist unvollstaendig.
+    stopped: bool = False
     error: str = ""
 
     def meta(self) -> dict[str, Any]:
@@ -420,6 +458,10 @@ class Agent:
         #: die Objektadresse -- damit gehoerte jeder Neustart zu einem neuen
         #: "Chat", und ein Chat liess sich nie wieder oeffnen.
         self.session_id = new_session_id()
+        #: Wird gesetzt, wenn jemand abbricht. Geprueft wird an den Naehten
+        #: zwischen zwei Schritten -- einen laufenden Seitenabruf reisst
+        #: niemand mitten entzwei, aber danach ist Schluss.
+        self._stop = threading.Event()
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt(cache, self._home_prompt())}
         ]
@@ -459,6 +501,14 @@ class Agent:
         # verbunden hat -- sonst sieht es sie gar nicht erst.
         if self.settings.google_enabled and self.settings.google_client_id:
             extra.extend((CALENDAR_SCHEMA, MAIL_SEARCH_SCHEMA, MAIL_READ_SCHEMA))
+        # Die Rechtestufe entscheidet, was das Modell ueberhaupt sieht. Ein
+        # Werkzeug, das nicht angeboten wird, kann auch nicht falsch benutzt
+        # werden -- das ist verlaesslicher als eine Bitte im Prompt.
+        storage = storage_access(self.settings.storage_access)
+        if self.settings.storage_url and storage != "off":
+            extra.extend((STORAGE_FIND_SCHEMA, STORAGE_BROWSE_SCHEMA))
+            if storage == "write":
+                extra.extend((STORAGE_ADD_SCHEMA, STORAGE_EDIT_SCHEMA))
         if self.settings.ha_url and self.settings.ha_token:
             extra.append(HA_STATES_SCHEMA)
             if self.settings.ha_control:
@@ -568,6 +618,8 @@ class Agent:
                 self._emit("error", message=f"Planung fehlgeschlagen: {exc}")
                 return 0
 
+        if self.stopped:
+            return 0
         results = self._run_subagents(tasks)
         spent = sum(int(result.get("tool_calls", 0) or 0) for result in results)
 
@@ -600,6 +652,7 @@ class Agent:
             cache=self.cache,
             on_event=self.on_event,
             parallel=self.settings.effective_parallel,
+            stop=self._stop,
         )
         for result in results:
             self.toolbox.stats.sources.extend(result.sources)
@@ -652,6 +705,14 @@ class Agent:
             parts.append(MEMORY_PROMPT)
         if self.settings.lan_enabled:
             parts.append(LAN_PROMPT)
+        storage = storage_access(self.settings.storage_access)
+        if self.settings.storage_url and storage != "off":
+            parts.append(
+                STORAGE_PROMPT
+                % {"rechte": "lesen und schreiben" if storage == "write" else "nur lesen"}
+            )
+            if storage == "write":
+                parts.append(STORAGE_WRITE_PROMPT)
         if self.settings.google_enabled and self.settings.google_client_id:
             parts.append(GOOGLE_PROMPT)
         if self.settings.ha_url and self.settings.ha_token:
@@ -862,6 +923,7 @@ class Agent:
     def ask(self, question: str, *, stream: bool = True) -> AgentResult:
         """Beantwortet *question* -- sucht, liest und wertet aus."""
         question = question.strip()
+        self._stop.clear()
         self.toolbox.stats.reset()
         result = AgentResult(answer="")
         if not question:
@@ -885,6 +947,9 @@ class Agent:
             used += self._auto_research(question, budget)
 
         while True:
+            if self.stopped:
+                result.stopped = True
+                break
             remaining = budget - used
             if remaining <= 0:
                 result.hit_limit = True
@@ -917,6 +982,11 @@ class Agent:
 
             used += len(tool_calls)
             self._run_round(tool_calls)
+            if self.stopped:
+                # Die Ergebnisse der Runde stehen im Verlauf -- der Turn ist
+                # also vollstaendig und die naechste Frage bleibt moeglich.
+                result.stopped = True
+                break
 
             # Auf abgeschnittene Calls muss trotzdem geantwortet werden.
             answered = {call["id"] for call in tool_calls}
@@ -934,6 +1004,21 @@ class Agent:
                     )
 
         return self._finish(result, question)
+
+    def cancel(self) -> None:
+        """Bricht den laufenden Durchlauf ab.
+
+        Ein Thread laesst sich in Python nicht von aussen beenden, und das
+        waere auch keine gute Idee: mitten im Verlauf abgebrochen bliebe ein
+        Werkzeugaufruf ohne Antwort stehen, und die naechste Frage wuerde von
+        der Schnittstelle abgelehnt. Stattdessen wird hier eine Marke gesetzt,
+        die der Durchlauf an jeder Naht pruefen kann und dann sauber endet.
+        """
+        self._stop.set()
+
+    @property
+    def stopped(self) -> bool:
+        return self._stop.is_set()
 
     def _history_chars(self) -> int:
         return sum(len(str(message.get("content") or "")) for message in self.messages)
@@ -1093,6 +1178,16 @@ class Agent:
     def _tool_result(self, call: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt einen Tool-Call aus und gibt die Antwortnachricht zurueck."""
         name = call["function"]["name"]
+        if self.stopped:
+            # Abgebrochen, bevor dieser Aufruf dran war. Eine Antwort MUSS
+            # trotzdem her -- ein Tool-Call ohne Antwort macht den Verlauf
+            # ungueltig und die naechste Frage wuerde abgelehnt.
+            return {
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "name": name,
+                "content": json.dumps({"error": "Abgebrochen."}, ensure_ascii=False),
+            }
         raw_args = call["function"].get("arguments") or "{}"
         try:
             arguments = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)

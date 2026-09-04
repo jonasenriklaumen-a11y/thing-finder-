@@ -1700,3 +1700,157 @@ def test_a_broken_stream_is_explained_in_plain_words() -> None:
     assert "Die Verbindung ist mittendrin abgerissen" in html
     assert "Keine Verbindung zu Cortex" in html
     assert "err instanceof TypeError" in html
+
+
+# ---------------------------------------------------------------------------
+# Abbrechen
+# ---------------------------------------------------------------------------
+def test_the_upload_button_turns_into_a_stop_button() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="stop"' in html and "Abbrechen" in html
+    assert '$("#clip").hidden = on;' in html, "waehrend der Anfrage weg"
+    assert '$("#stop").hidden = !on;' in html, "und der Abbruch da"
+
+
+def test_hidden_actually_hides() -> None:
+    """`.tool` setzt ein eigenes display -- ohne diese Regel bleibt der Knopf da.
+
+    Genau das war der Fall: beide Knoepfe standen nebeneinander, obwohl einer
+    das hidden-Attribut trug.
+    """
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "[hidden]{display:none!important}" in html
+
+
+def test_stopping_reports_that_nothing_was_running(client, session: web.ChatSession) -> None:
+    status, body = client("POST", "/api/stop")
+    assert status == 200
+    assert json.loads(body) == {"ok": False}
+
+
+def test_stopping_cancels_the_running_agent(
+    client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Lauf soll wirklich enden, nicht nur im Browser verschwinden."""
+    started = threading.Event()
+    cancelled = threading.Event()
+
+    class Slow:
+        on_event = None
+        toolbox = None
+
+        def set_ask_handler(self, handler):
+            pass
+
+        def cancel(self):
+            cancelled.set()
+
+        def ask(self, message, stream=True):
+            started.set()
+            for _ in range(100):
+                if cancelled.is_set():
+                    break
+                time.sleep(0.02)
+            self.on_event("done", {"tool_calls": 0, "hit_limit": False})
+            return SimpleNamespace(answer="abgebrochen")
+
+    slow = Slow()
+    slow.toolbox = slow
+    monkeypatch.setattr(session, "agent", lambda: slow)
+    # Im Betrieb fuellt `agent()` dieses Feld; der Abbruch liest es absichtlich
+    # ohne die Sperre, weil er sonst auf das Ende des Laufs warten wuerde.
+    monkeypatch.setattr(session, "_agent", slow)
+
+    worker = threading.Thread(
+        target=lambda: client("POST", "/api/chat", {"message": "dauert"}), daemon=True
+    )
+    worker.start()
+    assert started.wait(timeout=5), "die Anfrage muss erst laufen"
+
+    status, body = client("POST", "/api/stop")
+    assert status == 200
+    assert json.loads(body) == {"ok": True}
+    assert cancelled.wait(timeout=5)
+    worker.join(timeout=5)
+    assert not worker.is_alive(), "der Durchlauf endet danach von selbst"
+
+
+# ---------------------------------------------------------------------------
+# Lagerverwaltung in den Einstellungen
+# ---------------------------------------------------------------------------
+def test_the_storage_is_set_up_in_the_network_section() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'name="CORTEX_STORAGE_URL"' in html
+    assert 'name="CORTEX_STORAGE_ACCESS"' in html
+    for level in ('value="off"', 'value="read"', 'value="write"'):
+        assert level in html, level
+    assert 'id="storage-find"' in html and 'id="storage-test"' in html
+    # Der Abschnitt gehoert zu "Zuhause & Netz", nicht in ein eigenes Feld.
+    section = html[html.index("Zuhause &amp; Netz") :]
+    assert "Lagerverwaltung" in section[: section.index("</fieldset>")]
+
+
+def test_the_settings_say_that_read_only_is_no_lock() -> None:
+    """Der Server selbst kennt keine Anmeldung -- das darf nicht verschwiegen werden."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "keine Anmeldung" in html
+    assert "kein Schloss am" in html
+
+
+def test_the_storage_probe_reports_what_it_found(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Fake:
+        url = "http://192.168.1.5:3000"
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def info(self):
+            return {"app": "storage-system", "name": "Lagerverwaltung", "version": "1.0.0"}
+
+        def rooms(self):
+            return [{"id": 1, "name": "Keller", "itemCount": 12}]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("cortex.storage.Storage", Fake)
+    status, body = client("POST", "/api/storage", {"url": "192.168.1.5:3000"})
+    data = json.loads(body)
+    assert status == 200 and data["ok"] is True
+    assert data["rooms"] == 1 and data["items"] == 12
+
+
+def test_the_storage_probe_only_reads(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein Verbindungstest darf nichts anlegen -- auch nicht versehentlich."""
+    seen: dict[str, Any] = {}
+
+    class Fake:
+        url = "http://x"
+
+        def __init__(self, url, access="read", **kwargs):
+            seen["access"] = access
+
+        def info(self):
+            return {"app": "storage-system"}
+
+        def rooms(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("cortex.storage.Storage", Fake)
+    client("POST", "/api/storage", {"url": "192.168.1.5:3000"})
+    assert seen["access"] == "read"
+
+
+def test_searching_the_network_says_so_when_nothing_answers(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("cortex.storage.discover", lambda subnet: [])
+    _, body = client("POST", "/api/storage", {})
+    data = json.loads(body)
+    assert data["ok"] is False
+    assert "Nichts gefunden" in data["error"]

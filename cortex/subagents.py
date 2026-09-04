@@ -13,6 +13,7 @@ Hauptkontext -- parallel bleibt der Hauptverlauf kurz und uebersichtlich.
 from __future__ import annotations
 
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -215,6 +216,7 @@ def _run_one(
     cache: Cache | None,
     on_event: EventHook | None,
     toolbox: Toolbox | None = None,
+    stop: threading.Event | None = None,
 ) -> SubagentResult:
     """Fuehrt einen Subagenten aus -- eigene Toolbox, eigenes Budget."""
     import litellm
@@ -236,6 +238,11 @@ def _run_one(
 
     try:
         while used < budget:
+            if stop is not None and stop.is_set():
+                # Abgebrochen. Was bis hierher gefunden wurde, geht mit --
+                # der Hauptagent kann es noch verwenden.
+                result.error = result.error or "Abgebrochen."
+                break
             try:
                 response = litellm.completion(
                     model=model_in_use,
@@ -361,6 +368,7 @@ def run_subagents(
     cache: Cache | None = None,
     on_event: EventHook | None = None,
     parallel: int = 2,
+    stop: threading.Event | None = None,
 ) -> list[SubagentResult]:
     """Bearbeitet *tasks* nebenlaeufig und gibt die Ergebnisse in Reihenfolge zurueck.
 
@@ -371,6 +379,8 @@ def run_subagents(
         on_event: Callback fuer die Live-Anzeige.
         parallel: Wie viele gleichzeitig. Bei lokalen Modellen bringt mehr als
             zwei wenig, weil sie ohnehin nacheinander rechnen.
+        stop: Wird sie gesetzt, brechen noch nicht begonnene Teilfragen ab und
+            laufende enden nach ihrem naechsten Schritt.
     """
     clean = [task.strip() for task in tasks if task and task.strip()]
     clean = clean[: max(1, settings.max_subagents)]
@@ -397,12 +407,12 @@ def run_subagents(
         workers = max(1, min(parallel, len(clean)))
         if workers == 1:
             return [
-                _run_one(task, settings, cache, on_event, toolbox=box)
+                _run_one(task, settings, cache, on_event, toolbox=box, stop=stop)
                 for task, box in zip(clean, boxes, strict=True)
             ]
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(_run_one, task, settings, cache, on_event, toolbox=box)
+                pool.submit(_run_one, task, settings, cache, on_event, toolbox=box, stop=stop)
                 for task, box in zip(clean, boxes, strict=True)
             ]
             return [future.result() for future in futures]

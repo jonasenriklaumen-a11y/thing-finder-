@@ -1679,3 +1679,148 @@ def test_a_mixed_round_runs_in_order(
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent.ask("Lies und merk dir was", stream=False)
     assert order == ["fetch", "remember"]
+
+
+# ---------------------------------------------------------------------------
+# Abbrechen
+# ---------------------------------------------------------------------------
+def test_a_cancelled_run_stops_before_the_next_round(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Nach dem Abbruch wird kein Modellaufruf mehr geschickt."""
+    calls: list[int] = []
+
+    def fetch(url: str):
+        agent.cancel()      # mitten in der Runde abgebrochen
+        return {"url": url}
+
+    monkeypatch.setattr(toolbox, "fetch_page", fetch)
+
+    def llm(**kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            return _message(tool_calls=[_tool_call("fetch_page", {"url": "https://a.de/1"})])
+        raise AssertionError("nach dem Abbruch darf nichts mehr rausgehen")
+
+    monkeypatch.setattr("litellm.completion", llm)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Lies eine Seite", stream=False)
+
+    assert result.stopped is True
+    assert len(calls) == 1
+
+
+def test_a_cancelled_run_leaves_a_usable_history(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Zu jedem Aufruf muss eine Antwort im Verlauf stehen.
+
+    Sonst lehnt die Schnittstelle die naechste Frage ab -- ein Tool-Call ohne
+    Antwort macht den ganzen Verlauf ungueltig. Der Abbruch faellt hier mitten
+    in die Runde: die erste Seite laeuft noch, die zweite nicht mehr.
+    """
+
+    def fetch(url: str):
+        agent.cancel()
+        return {"url": url}
+
+    monkeypatch.setattr(toolbox, "fetch_page", fetch)
+    monkeypatch.setattr(
+        "litellm.completion",
+        ScriptedLLM(
+            _message(
+                tool_calls=[
+                    _tool_call("fetch_page", {"url": "https://a.de/1"}, "c1"),
+                    _tool_call("fetch_page", {"url": "https://b.de/1"}, "c2"),
+                ]
+            )
+        ),
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Lies zwei Seiten", stream=False)
+    assert result.stopped is True
+
+    answered = [m["tool_call_id"] for m in agent.messages if m.get("role") == "tool"]
+    assert answered == ["c1", "c2"], "auch der abgebrochene Aufruf bekommt eine Antwort"
+
+
+def test_a_cancel_belongs_to_one_question_only(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Wer abbricht, bricht diese Frage ab -- nicht alle folgenden.
+
+    Deshalb loescht `ask` die Marke zu Beginn: ein Abbruch, der liegen bliebe,
+    wuerde die naechste Frage still verschlucken.
+    """
+    monkeypatch.setattr(
+        "litellm.completion", ScriptedLLM(_message(content="Erste."), _message(content="Zweite."))
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.cancel()
+
+    first = agent.ask("erste Frage", stream=False)
+    assert first.answer == "Erste.", "ein Abbruch vor der Frage zaehlt nicht"
+    assert agent.stopped is False
+
+    second = agent.ask("zweite Frage", stream=False)
+    assert second.answer == "Zweite."
+    assert second.stopped is False
+
+
+# ---------------------------------------------------------------------------
+# Lagerverwaltung: die Rechtestufe entscheidet, was das Modell sieht
+# ---------------------------------------------------------------------------
+def _names(agent: Agent) -> set[str]:
+    return {schema["function"]["name"] for schema in agent.tools}
+
+
+def test_without_an_address_there_are_no_storage_tools(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert not {name for name in _names(agent) if name.startswith("storage_")}
+    assert "Lagerverwaltung" not in agent.messages[0]["content"]
+
+
+def test_read_only_offers_no_way_to_write(settings: Settings, toolbox: Toolbox) -> None:
+    """Ein Werkzeug, das gar nicht angeboten wird, kann auch nicht falsch benutzt werden."""
+    settings.storage_url = "http://192.168.1.5:3000"
+    settings.storage_access = "read"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    names = _names(agent)
+    assert {"storage_find", "storage_browse"} <= names
+    assert "storage_add" not in names
+    assert "storage_edit" not in names
+    assert "nur lesen" in agent.messages[0]["content"]
+
+
+def test_write_access_offers_all_four(settings: Settings, toolbox: Toolbox) -> None:
+    settings.storage_url = "http://192.168.1.5:3000"
+    settings.storage_access = "write"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert {"storage_find", "storage_browse", "storage_add", "storage_edit"} <= _names(agent)
+    assert "lesen und schreiben" in agent.messages[0]["content"]
+
+
+def test_switching_it_off_hides_everything(settings: Settings, toolbox: Toolbox) -> None:
+    settings.storage_url = "http://192.168.1.5:3000"
+    settings.storage_access = "off"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert not {name for name in _names(agent) if name.startswith("storage_")}
+
+
+def test_an_unknown_right_is_treated_as_off(settings: Settings, toolbox: Toolbox) -> None:
+    """Ein Tippfehler in der .env darf nicht versehentlich alles erlauben."""
+    settings.storage_url = "http://192.168.1.5:3000"
+    settings.storage_access = "vollzugriff"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert not {name for name in _names(agent) if name.startswith("storage_")}
+
+
+def test_the_prompt_forbids_guessing_ids(settings: Settings, toolbox: Toolbox) -> None:
+    settings.storage_url = "http://192.168.1.5:3000"
+    settings.storage_access = "write"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    prompt = agent.messages[0]["content"]
+    assert "Rate NIE eine Kennung" in prompt
+    assert "Loeschen kannst du nicht" in prompt

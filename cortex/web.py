@@ -79,6 +79,8 @@ SETTING_KEYS: tuple[str, ...] = (
     "CORTEX_HA_URL",
     "CORTEX_HA_CONTROL",
     "CORTEX_GOOGLE",
+    "CORTEX_STORAGE_URL",
+    "CORTEX_STORAGE_ACCESS",
     "CORTEX_LAN_ENABLED",
     "CORTEX_LAN_SUBNET",
     "CORTEX_MEMORY",
@@ -239,6 +241,23 @@ class ChatSession:
             self._agent = None
             self._settings = None
             reset_settings_cache()
+
+    def stop(self) -> bool:
+        """Bricht den laufenden Durchlauf ab. `False` = es lief gerade keiner.
+
+        Gelesen wird hier absichtlich OHNE die Sperre: `agent()` wuerde auf
+        das Ende des laufenden Durchlaufs warten, und ein Abbruch, der auf
+        das Ende wartet, waere keiner.
+
+        Eine offene Rueckfrage wird gleich mit geschlossen -- sonst haengt der
+        Durchlauf noch bis zum Zeitlimit an ihr fest, obwohl er enden soll.
+        """
+        agent = self._agent
+        if agent is None or not self.busy():
+            return False
+        agent.cancel()
+        self.answer("")
+        return True
 
     def busy(self) -> bool:
         """Laeuft gerade eine Anfrage?"""
@@ -614,6 +633,8 @@ def current_values() -> dict[str, str]:
         "CORTEX_HA_URL": settings.ha_url,
         "CORTEX_HA_CONTROL": "true" if settings.ha_control else "false",
         "CORTEX_GOOGLE": "true" if settings.google_enabled else "false",
+        "CORTEX_STORAGE_URL": settings.storage_url,
+        "CORTEX_STORAGE_ACCESS": settings.storage_access,
         "CORTEX_LAN_ENABLED": "true" if settings.lan_enabled else "false",
         "CORTEX_LAN_SUBNET": settings.lan_subnet,
         "CORTEX_MEMORY": "true" if settings.memory_enabled else "false",
@@ -966,6 +987,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._probe(self._read_json()))
         elif route == "/api/google":
             self._json(self._google(self._read_json()))
+        elif route == "/api/storage":
+            self._json(self._storage_probe(self._read_json()))
+        elif route == "/api/stop":
+            self._json({"ok": SESSION.stop()})
         elif route == "/api/answer":
             text = str(self._read_json().get("text", "")).strip()
             self._json({"ok": SESSION.answer(text)})
@@ -1050,6 +1075,43 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def _storage_probe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Sucht die Lagerverwaltung im Netz oder testet eine eingetippte Adresse."""
+        from cortex.storage import Storage, StorageError, discover
+
+        settings = SESSION.settings()
+        url = str(payload.get("url", "")).strip()
+        if not url:
+            found = discover(settings.lan_subnet)
+            if not found:
+                return {
+                    "ok": False,
+                    "error": (
+                        "Nichts gefunden. Laeuft die Lagerverwaltung? Sonst die Adresse "
+                        "von Hand eintragen, z.B. 192.168.1.5:3000."
+                    ),
+                }
+            return {"ok": True, "url": found[0], "found": found}
+
+        # Getestet wird immer lesend -- ein Verbindungstest soll nichts anlegen.
+        client = Storage(url, access="read")
+        try:
+            info = client.info()
+            rooms = client.rooms()
+        except StorageError as exc:
+            return {"ok": False, "error": str(exc)}
+        finally:
+            client.close()
+        items = sum(int(room.get("itemCount") or 0) for room in rooms)
+        return {
+            "ok": True,
+            "url": client.url,
+            "name": str(info.get("name") or "Lagerverwaltung"),
+            "version": str(info.get("version") or ""),
+            "rooms": len(rooms),
+            "items": items,
+        }
 
     def _google(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Verbindet, trennt oder meldet den Stand des Google-Kontos.

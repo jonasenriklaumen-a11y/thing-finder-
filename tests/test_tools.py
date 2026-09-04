@@ -871,3 +871,143 @@ def test_reading_mail_counts_against_the_budget(settings: Settings) -> None:
     before = box.stats.tool_calls
     box.mail_search()
     assert box.stats.tool_calls == before + 1
+
+
+# ---------------------------------------------------------------------------
+# Lagerverwaltung
+# ---------------------------------------------------------------------------
+class FakeStorage:
+    """Steht fuer die Lagerverwaltung -- ohne Netz."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def search(self, query, limit=20):
+        self.calls.append(("search", {"query": query, "limit": limit}))
+        return [{"id": 2, "number": "A2", "name": "Schrauben", "roomName": "Keller"}]
+
+    def rooms(self):
+        self.calls.append(("rooms", {}))
+        return [{"id": 1, "name": "Keller", "itemCount": 2}]
+
+    def furniture(self, room_id):
+        self.calls.append(("furniture", {"room_id": room_id}))
+        return [{"id": 1, "name": "Regal"}]
+
+    def items(self, furniture_id):
+        self.calls.append(("items", {"furniture_id": furniture_id}))
+        return [{"id": 2, "number": "A2", "name": "Schrauben"}]
+
+    def add_item(self, furniture_id, name, quantity=1):
+        self.calls.append(("add_item", {"furniture_id": furniture_id, "name": name}))
+        return {"id": 9, "number": "A3", "name": name, "quantity": quantity}
+
+    def add_room(self, name):
+        self.calls.append(("add_room", {"name": name}))
+        return {"id": 4, "name": name}
+
+    def add_furniture(self, room_id, name):
+        self.calls.append(("add_furniture", {"room_id": room_id, "name": name}))
+        return {"id": 7, "name": name}
+
+    def update_item(self, item_id, name="", quantity=None):
+        self.calls.append(("update_item", {"item_id": item_id, "name": name}))
+        return {"id": item_id, "name": name or "unverändert"}
+
+    def change_quantity(self, item_id, delta):
+        self.calls.append(("change_quantity", {"item_id": item_id, "delta": delta}))
+        return {"id": item_id, "quantity": 238}
+
+    def close(self) -> None:
+        pass
+
+
+def _storage_box(settings: Settings, access: str = "write") -> tuple[Toolbox, FakeStorage]:
+    settings.storage_url = "http://192.168.1.5:3000"
+    settings.storage_access = access
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    fake = FakeStorage()
+    box._storage_client = fake
+    return box, fake
+
+
+def test_the_storage_is_off_until_an_address_is_entered(settings: Settings) -> None:
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    assert "keine Lagerverwaltung eingetragen" in box.storage_find("schraube")["error"]
+
+
+def test_switching_the_storage_off_blocks_even_reading(settings: Settings) -> None:
+    box, _ = _storage_box(settings, access="off")
+    assert "abgeschaltet" in box.storage_find("schraube")["error"]
+    assert "abgeschaltet" in box.storage_browse()["error"]
+
+
+def test_finding_an_item_returns_its_place(settings: Settings) -> None:
+    box, fake = _storage_box(settings, access="read")
+    result = box.storage_find("schraube", limit=5)
+    assert result["items"][0]["number"] == "A2"
+    assert fake.calls == [("search", {"query": "schraube", "limit": 5})]
+    assert box.stats.storage_reads == 1
+
+
+def test_an_empty_result_says_not_recorded_not_not_owned(settings: Settings) -> None:
+    """"Hast du nicht" waere eine Behauptung, die das Lager gar nicht hergibt."""
+    box, _ = _storage_box(settings, access="read")
+    empty = FakeStorage()
+    empty.search = lambda query, limit=20: []
+    box._storage_client = empty
+    assert "nicht eingetragen" in box.storage_find("gibtesnicht")["note"]
+
+
+def test_browsing_walks_the_three_levels(settings: Settings) -> None:
+    box, fake = _storage_box(settings, access="read")
+    assert box.storage_browse()["level"] == "rooms"
+    assert box.storage_browse(room_id=1)["level"] == "furniture"
+    assert box.storage_browse(furniture_id=1)["level"] == "items"
+    assert [name for name, _ in fake.calls] == ["rooms", "furniture", "items"]
+
+
+def test_adding_picks_the_level_from_the_given_id(settings: Settings) -> None:
+    box, fake = _storage_box(settings)
+    assert box.storage_add("Schraube", furniture_id=3)["created"] == "Artikel"
+    assert box.storage_add("Regal", room_id=1)["created"] == "Moebel"
+    assert box.storage_add("Dachboden")["created"] == "Raum"
+    assert [name for name, _ in fake.calls] == ["add_item", "add_furniture", "add_room"]
+
+
+def test_editing_prefers_delta_over_setting(settings: Settings) -> None:
+    """Gesetzt wuerde ueberschreiben, was jemand anderes gerade geaendert hat."""
+    box, fake = _storage_box(settings)
+    box.storage_edit(item_id=5, delta=-12, quantity=999)
+    assert fake.calls == [("change_quantity", {"item_id": 5, "delta": -12})]
+
+
+def test_writes_count_against_the_budget(settings: Settings) -> None:
+    box, _ = _storage_box(settings)
+    before = box.stats.tool_calls
+    box.storage_add("Dachboden")
+    assert box.stats.tool_calls == before + 1
+
+
+def test_a_storage_failure_is_reported_not_raised(settings: Settings) -> None:
+    from cortex.storage import StorageError
+
+    box, _ = _storage_box(settings)
+    broken = FakeStorage()
+    broken.search = lambda query, limit=20: (_ for _ in ()).throw(StorageError("Server weg"))
+    box._storage_client = broken
+    assert "Server weg" in box.storage_find("x")["error"]
+
+
+def test_the_storage_tools_are_dispatched(settings: Settings) -> None:
+    box, fake = _storage_box(settings)
+    box.call("storage_find", {"query": "schraube"})
+    box.call("storage_browse", {"room_id": 1})
+    box.call("storage_add", {"name": "Kiste", "room_id": 1})
+    box.call("storage_edit", {"item_id": 2, "delta": 1})
+    assert [name for name, _ in fake.calls] == [
+        "search",
+        "furniture",
+        "add_furniture",
+        "change_quantity",
+    ]

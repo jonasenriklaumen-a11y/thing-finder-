@@ -222,6 +222,14 @@ textarea{width:100%;background:transparent;border:0;color:var(--text);resize:non
 textarea::placeholder{color:var(--text-3)}
 .crow{display:flex;align-items:center;gap:6px;margin-top:6px}
 .crow .spacer{flex:1}
+/* Ein eigenes `display` schlaegt sonst das `hidden`-Attribut, und der
+   Knopf bleibt sichtbar, obwohl er versteckt sein soll. Gilt fuer die
+   ganze Seite, nicht nur fuer die Knoepfe. */
+[hidden]{display:none!important}
+/* Zwischenueberschrift in einem Feld -- trennt zwei Themen, ohne dass
+   daraus gleich ein eigener Kasten werden muss. */
+.sub-title{font:600 11px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;
+  color:var(--text-3);margin:22px 0 -2px;padding-top:14px;border-top:1px solid var(--line)}
 .tool{background:transparent;border:1px solid var(--line);border-radius:999px;padding:5px 10px;
   cursor:pointer;font-size:13px;color:var(--text-3);display:flex;align-items:center;gap:6px}
 .tool:hover{border-color:var(--accent);color:var(--accent-text)}
@@ -229,6 +237,10 @@ textarea::placeholder{color:var(--text-3)}
   cursor:pointer;font-size:15px;flex:0 0 auto;display:grid;place-items:center}
 :root[data-theme="dark"] .send{color:#14251b}
 .send:disabled{background:var(--surface-2);color:var(--text-3);cursor:default}
+/* Der Abbruch steht an der Stelle des Anhaengens -- waehrend eine Anfrage
+   laeuft, ist das der Knopf, den man sucht. */
+.tool.stop{color:var(--warn);border-color:var(--warn)}
+.tool.stop:hover{background:var(--warn);color:#fff}
 .hint{max-width:46rem;margin:8px auto 0;color:var(--text-3);font-size:11.5px;text-align:center}
 body.dragging::after{content:"Datei hier ablegen";position:fixed;inset:14px;z-index:40;
   border:2px dashed var(--accent);border-radius:20px;background:var(--bg);opacity:.94;
@@ -433,6 +445,7 @@ input:focus,select:focus{border-color:var(--accent)}
              accept="image/*,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml">
       <div class="crow">
         <button class="tool" id="clip" title="Bild oder PDF anhängen">📎 Anhängen</button>
+        <button class="tool stop" id="stop" title="Anfrage abbrechen" hidden>◼ Abbrechen</button>
         <span class="spacer"></span>
         <button class="send" id="send" title="Senden (Enter)">↑</button>
       </div>
@@ -599,6 +612,28 @@ input:focus,select:focus{border-color:var(--accent)}
         </div>
         <label><span class="lbl">Netz (leer = automatisch erkennen)</span>
           <input type="text" name="CORTEX_LAN_SUBNET" placeholder="192.168.1.0/24"></label>
+
+        <div class="sub-title">Lagerverwaltung</div>
+        <div class="inline">
+          <label><span class="lbl">Adresse
+            <span class="why">Räume → Möbel → Artikel, mit Artikelnummern. Cortex kann
+              dann sagen, wo etwas liegt und wie viel noch da ist.</span></span>
+            <input type="text" name="CORTEX_STORAGE_URL" placeholder="192.168.1.5:3000"></label>
+          <button type="button" class="btn" id="storage-find">Suchen</button>
+          <button type="button" class="btn" id="storage-test">Testen</button>
+        </div>
+        <label><span class="lbl">Was Cortex dort darf</span>
+          <select name="CORTEX_STORAGE_ACCESS">
+            <option value="off">Nichts — abgeschaltet</option>
+            <option value="read">Nur lesen — suchen und nachsehen</option>
+            <option value="write">Lesen und schreiben — auch anlegen und ändern</option>
+          </select></label>
+        <div class="note" id="storage-note"></div>
+        <div class="note">Gelöscht wird in keiner Stufe. Ein versehentlich angelegter
+          Artikel ist schnell wieder weg; ein gelöschter Raum nimmt alles darin mit —
+          das bleibt beim Menschen. Und zur Ehrlichkeit: die Lagerverwaltung selbst hat
+          keine Anmeldung. „Nur lesen" ist eine Fessel für Cortex, kein Schloss am
+          Server — wer im Netz ist, darf dort weiterhin alles.</div>
       </fieldset>
 
       <fieldset><legend>Suche</legend>
@@ -689,6 +724,20 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
+// Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
+// soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
+// eines allein reicht nicht.
+let running = null;
+
+function setBusy(on){
+  busy = on;
+  $("#send").disabled = on;
+  // Waehrend eine Anfrage laeuft, steht an der Stelle des Anhaengens der
+  // Abbruch: das ist der Knopf, den man dann sucht.
+  $("#clip").hidden = on;
+  $("#stop").hidden = !on;
+  if (!on) running = null;
+}
 let currentModel = "";
 
 /* ---------- Zugangswort (nur im Netzbetrieb) ----------
@@ -863,6 +912,12 @@ async function addFiles(list){
 }
 
 $("#clip").addEventListener("click", () => picker.click());
+$("#stop").addEventListener("click", () => {
+  // Erst dem Server sagen, dass Schluss ist -- sonst rechnet er weiter,
+  // waehrend hier schon niemand mehr zuhoert.
+  api("/api/stop", { method:"POST" }).catch(() => {});
+  if (running) running.abort();
+});
 picker.addEventListener("change", () => { addFiles(picker.files); picker.value = ""; });
 
 let dragDepth = 0;
@@ -935,7 +990,7 @@ function askCard(bubble, question, options){
 
 /* ---------- Slash-Befehle ---------- */
 async function runCommand(line){
-  busy = true; send.disabled = true;
+  setBusy(true);
   addUser(line); input.value = ""; input.style.height = "auto";
   const { steps, bubble } = addBot();
   steps.remove();
@@ -952,7 +1007,7 @@ async function runCommand(line){
     bubble.innerHTML = md("**Fehler:** " + String(err));
   }
   scroll();
-  busy = false; send.disabled = false; input.focus();
+  setBusy(false); input.focus();
 }
 
 /* ---------- Senden ---------- */
@@ -964,7 +1019,7 @@ async function ask(text){
   if (text.trim().startsWith("/") && !text.trim().startsWith("/image")){
     return runCommand(text.trim());
   }
-  busy = true; send.disabled = true;
+  setBusy(true);
   const attachments = pending;
   pending = []; drawFiles();
   addUser(text, attachments); input.value = ""; input.style.height = "auto";
@@ -975,9 +1030,11 @@ async function ask(text){
   let answer = "", reading = null, readCount = 0, planning = null, thinking = null;
 
   try {
+    running = new AbortController();
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ message: text, attachments })
+      body: JSON.stringify({ message: text, attachments }),
+      signal: running.signal,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -1001,6 +1058,12 @@ async function ask(text){
     // Ein abgerissener Strom ist etwas anderes als ein Programmfehler: die
     // Recherche laeuft auf dem Rechner weiter, nur die Leitung ist weg.
     // "TypeError: network error" waere hier eine nutzlose Auskunft.
+    if (err && err.name === "AbortError"){
+      step(steps, "[Abgebrochen]", answer ? "Oben steht, was bis dahin da war." : "");
+      if (answer) bubble.innerHTML = md(answer);
+      setBusy(false); input.focus();
+      return;
+    }
     const broken = err instanceof TypeError
       || /network|fetch|load failed|abgebrochen/i.test(String(err.message || err));
     if (broken){
@@ -1060,6 +1123,9 @@ async function ask(text){
       case "lan_done": step(steps, "[Netz]",
         `${ev.found} ${ev.found === 1 ? "Gerät" : "Geräte"} erreichbar`); break;
       case "lan_check": step(steps, "[Netz]", ev.host); break;
+      case "storage": step(steps, "[Lager]", `${ev.action} ${ev.detail || ""}`.trim()); break;
+      case "storage_done": step(steps, "[Lager]", ev.action
+        || `${ev.found} ${ev.found === 1 ? "Eintrag" : "Einträge"}`); break;
       case "calendar": step(steps, "[Termine]", ev.query || `${ev.days || 7} Tage`); break;
       case "calendar_done": step(steps, "[Termine]",
         `${ev.found} ${ev.found === 1 ? "Termin" : "Termine"}`); break;
@@ -1101,7 +1167,7 @@ async function ask(text){
         bubble.innerHTML = md(answer || "(keine Antwort)"); scroll(); loadRecents(); break;
     }
   }
-  busy = false; send.disabled = false; input.focus();
+  setBusy(false); input.focus();
 }
 
 /* ---------- Eingabe ---------- */
@@ -1313,6 +1379,7 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#probe-note").textContent = ""; $("#probe-note").className = "note";
   $("#google-step").hidden = true;
   showGoogle(cfg.google);
+  $("#storage-note").textContent = ""; $("#storage-note").className = "note";
   $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
   $("#savenote").textContent = ""; $("#savenote").className = "note";
   $("#ha-note").textContent = ""; $("#ha-note").className = "note";
@@ -1617,6 +1684,37 @@ $("#google-off").addEventListener("click", async () => {
     showGoogle(data);
   }
 });
+
+/* ---------- Lagerverwaltung ---------- */
+async function storageCall(url){
+  try {
+    return await (await api("/api/storage", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ url }),
+    })).json();
+  } catch { return null; }
+}
+
+async function storageProbe(url, searching){
+  const note = $("#storage-note");
+  note.className = "note";
+  note.textContent = searching ? "Suche im Netz …" : "Frage nach …";
+  const data = await storageCall(url);
+  if (!data){ note.className = "note bad"; note.textContent = "Keine Antwort vom Server."; return; }
+  if (!data.ok){ note.className = "note bad"; note.textContent = data.error; return; }
+  form.elements["CORTEX_STORAGE_URL"].value = data.url;
+  note.className = "note ok";
+  note.textContent = data.rooms === undefined
+    ? `Gefunden: ${data.url}. Zum Übernehmen unten speichern.`
+    : `${data.name} ${data.version} unter ${data.url} — `
+      + `${data.rooms} ${data.rooms === 1 ? "Raum" : "Räume"}, `
+      + `${data.items} ${data.items === 1 ? "Artikel" : "Artikel"}. `
+      + "Zum Übernehmen unten speichern.";
+}
+
+$("#storage-find").addEventListener("click", () => storageProbe("", true));
+$("#storage-test").addEventListener("click", () =>
+  storageProbe(form.elements["CORTEX_STORAGE_URL"].value.trim(), false));
 
 /* ---------- Verbindungstest ---------- */
 // Dasselbe, was `cortex setup` am Ende macht: eine winzige Anfrage ans Modell

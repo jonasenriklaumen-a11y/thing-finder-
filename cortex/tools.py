@@ -497,6 +497,104 @@ MAIL_READ_SCHEMA: dict[str, Any] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Lagerverwaltung -- Raum > Moebel > Artikel
+# ---------------------------------------------------------------------------
+STORAGE_FIND_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "storage_find",
+        "description": (
+            "Sucht im Lager des Nutzers nach einem Artikel -- ueber die Nummer "
+            "('B42', auch Teiltreffer wie 'B4') oder den Namen. Jeder Treffer nennt "
+            "den vollen Ort: Raum, Moebel, Artikelnummer und Bestand. Nimm das fuer "
+            "Fragen wie 'wo liegt das Ladekabel' oder 'wie viele Schrauben habe ich'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Artikelnummer oder Name."},
+                "limit": {"type": "integer", "description": "Hoechstzahl Treffer (1-50)."},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+STORAGE_BROWSE_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "storage_browse",
+        "description": (
+            "Sieht sich das Lager an, ohne zu suchen. Ohne Angabe kommen die Raeume "
+            "mit ihren Kennzahlen; mit 'room_id' die Moebel darin; mit "
+            "'furniture_id' die Artikel darin. So findest du die Kennungen, die du "
+            "zum Anlegen oder Aendern brauchst -- rate sie nie."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "room_id": {"type": "integer", "description": "Kennung eines Raums."},
+                "furniture_id": {"type": "integer", "description": "Kennung eines Moebels."},
+            },
+        },
+    },
+}
+
+STORAGE_ADD_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "storage_add",
+        "description": (
+            "Legt etwas im Lager an: einen Artikel in einem Moebel (mit "
+            "'furniture_id'), ein Moebel in einem Raum (mit 'room_id'), oder einen "
+            "Raum (nur mit 'name'). Die Artikelnummer vergibt der Server, nie du. "
+            "Hol dir die Kennungen vorher mit storage_browse."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Name des neuen Eintrags."},
+                "furniture_id": {
+                    "type": "integer",
+                    "description": "In dieses Moebel -- ergibt einen Artikel.",
+                },
+                "room_id": {
+                    "type": "integer",
+                    "description": "In diesen Raum -- ergibt ein Moebel.",
+                },
+                "quantity": {"type": "integer", "description": "Anfangsbestand (Default 1)."},
+            },
+            "required": ["name"],
+        },
+    },
+}
+
+STORAGE_EDIT_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "storage_edit",
+        "description": (
+            "Aendert einen vorhandenen Artikel: 'name' benennt ihn um, 'quantity' "
+            "setzt den Bestand auf einen Wert, 'delta' zaehlt hoch oder runter "
+            "(-1 = einer entnommen). Nimm 'delta', wenn etwas dazukommt oder "
+            "weggeht, und 'quantity' nur beim Nachzaehlen -- sonst ueberschreibst "
+            "du, was jemand anderes gerade geaendert hat. Geloescht wird nie."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "integer", "description": "Kennung aus storage_find."},
+                "name": {"type": "string", "description": "Neuer Name."},
+                "quantity": {"type": "integer", "description": "Bestand auf diesen Wert setzen."},
+                "delta": {"type": "integer", "description": "Bestand um diesen Wert aendern."},
+            },
+            "required": ["item_id"],
+        },
+    },
+}
+
+
 TOOL_SCHEMAS.extend([NEWS_SCHEMA, CALC_SCHEMA])
 
 
@@ -520,6 +618,8 @@ class ToolStats:
     ha_reads: int = 0
     ha_calls: int = 0
     google_reads: int = 0
+    storage_reads: int = 0
+    storage_writes: int = 0
 
     @property
     def tool_calls(self) -> int:
@@ -535,6 +635,8 @@ class ToolStats:
             + self.ha_reads
             + self.ha_calls
             + self.google_reads
+            + self.storage_reads
+            + self.storage_writes
         )
 
     def reset(self) -> None:
@@ -552,6 +654,8 @@ class ToolStats:
         self.ha_reads = 0
         self.ha_calls = 0
         self.google_reads = 0
+        self.storage_reads = 0
+        self.storage_writes = 0
 
 
 class Toolbox:
@@ -590,11 +694,15 @@ class Toolbox:
         #: Der Google-Zugriff wird erst beim ersten Aufruf gebaut -- ohne
         #: verbundenes Konto soll gar nichts davon geladen werden.
         self._google_client: Any = None
+        #: Ebenso das Lager -- ohne eingetragene Adresse wird nichts gebaut.
+        self._storage_client: Any = None
 
     def close(self) -> None:
         self._fetcher.close()
         if self._google_client is not None:
             self._google_client.close()
+        if self._storage_client is not None:
+            self._storage_client.close()
 
     def _emit(self, event: str, **payload: Any) -> None:
         if self.on_event:
@@ -886,6 +994,140 @@ class Toolbox:
         self._emit("mail_done", found=1)
         return mail
 
+    # -- Werkzeug: Lagerverwaltung ----------------------------------------
+    def _storage(self) -> Any:
+        """Der Zugriff aufs Lager, einmal je Toolbox aufgebaut."""
+        from cortex.storage import Storage
+
+        if self._storage_client is None:
+            self._storage_client = Storage(
+                self.settings.storage_url, self.settings.storage_access
+            )
+        return self._storage_client
+
+    def _storage_ready(self) -> str:
+        """Leerer String heisst "kann losgehen", sonst steht da der Grund."""
+        from cortex.storage import normalize_access
+
+        if normalize_access(self.settings.storage_access) == "off":
+            return (
+                "Der Zugriff auf die Lagerverwaltung ist abgeschaltet. Der Nutzer "
+                "schaltet ihn in den Einstellungen unter 'Zuhause & Netz' ein."
+            )
+        if not self.settings.storage_url:
+            return (
+                "Es ist keine Lagerverwaltung eingetragen. Der Nutzer traegt sie in "
+                "den Einstellungen unter 'Zuhause & Netz' ein -- der Knopf 'Suchen' "
+                "findet sie im eigenen Netz."
+            )
+        return ""
+
+    def storage_find(self, query: str, limit: int = 20) -> dict[str, Any]:
+        """Sucht einen Artikel im Lager."""
+        from cortex.storage import StorageError
+
+        problem = self._storage_ready()
+        if problem:
+            return {"error": problem}
+        self._emit("storage", action="suchen", detail=query)
+        try:
+            hits = self._storage().search(query, limit=limit)
+        except StorageError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.storage_reads += 1
+        self._emit("storage_done", found=len(hits))
+        return {
+            "query": query,
+            "count": len(hits),
+            "items": hits,
+            "note": (
+                "Nichts gefunden. Das heisst nicht, dass es der Nutzer nicht hat -- "
+                "nur, dass es nicht eingetragen ist."
+                if not hits
+                else ""
+            ),
+        }
+
+    def storage_browse(self, room_id: int = 0, furniture_id: int = 0) -> dict[str, Any]:
+        """Zeigt Raeume, die Moebel eines Raums oder die Artikel eines Moebels."""
+        from cortex.storage import StorageError
+
+        problem = self._storage_ready()
+        if problem:
+            return {"error": problem}
+        client = self._storage()
+        try:
+            if furniture_id:
+                self._emit("storage", action="ansehen", detail=f"Moebel {furniture_id}")
+                rows, kind = client.items(furniture_id), "items"
+            elif room_id:
+                self._emit("storage", action="ansehen", detail=f"Raum {room_id}")
+                rows, kind = client.furniture(room_id), "furniture"
+            else:
+                self._emit("storage", action="ansehen", detail="Uebersicht")
+                rows, kind = client.rooms(), "rooms"
+        except StorageError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.storage_reads += 1
+        self._emit("storage_done", found=len(rows))
+        return {"level": kind, "count": len(rows), kind: rows}
+
+    def storage_add(
+        self, name: str, furniture_id: int = 0, room_id: int = 0, quantity: int = 1
+    ) -> dict[str, Any]:
+        """Legt einen Artikel, ein Moebel oder einen Raum an."""
+        from cortex.storage import StorageError
+
+        problem = self._storage_ready()
+        if problem:
+            return {"error": problem}
+        client = self._storage()
+        try:
+            if furniture_id:
+                created = client.add_item(furniture_id, name, quantity)
+                kind = "Artikel"
+            elif room_id:
+                created = client.add_furniture(room_id, name)
+                kind = "Moebel"
+            else:
+                created = client.add_room(name)
+                kind = "Raum"
+        except StorageError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.storage_writes += 1
+        self._emit("storage_done", found=1, action=f"{kind} angelegt")
+        return {"created": kind, "entry": created}
+
+    def storage_edit(
+        self,
+        item_id: int,
+        name: str = "",
+        quantity: int | None = None,
+        delta: int = 0,
+    ) -> dict[str, Any]:
+        """Aendert Name oder Bestand eines Artikels."""
+        from cortex.storage import StorageError
+
+        problem = self._storage_ready()
+        if problem:
+            return {"error": problem}
+        client = self._storage()
+        self._emit("storage", action="aendern", detail=f"Artikel {item_id}")
+        try:
+            if delta:
+                entry = client.change_quantity(item_id, delta)
+            else:
+                entry = client.update_item(item_id, name=name, quantity=quantity)
+        except StorageError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.storage_writes += 1
+        self._emit("storage_done", found=1, action="geaendert")
+        return {"changed": entry}
+
     # -- Dispatch ---------------------------------------------------------
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt den Tool-Call *name* mit *arguments* aus."""
@@ -919,6 +1161,31 @@ class Toolbox:
             return self.lan_scan(
                 subnet=str(arguments.get("subnet") or ""),
                 thorough=bool(arguments.get("thorough")),
+            )
+        if name == "storage_find":
+            return self.storage_find(
+                query=str(arguments.get("query", "")),
+                limit=int(arguments.get("limit") or 0),
+            )
+        if name == "storage_browse":
+            return self.storage_browse(
+                room_id=int(arguments.get("room_id") or 0),
+                furniture_id=int(arguments.get("furniture_id") or 0),
+            )
+        if name == "storage_add":
+            return self.storage_add(
+                name=str(arguments.get("name", "")),
+                furniture_id=int(arguments.get("furniture_id") or 0),
+                room_id=int(arguments.get("room_id") or 0),
+                quantity=int(arguments.get("quantity") or 1),
+            )
+        if name == "storage_edit":
+            raw_quantity = arguments.get("quantity")
+            return self.storage_edit(
+                item_id=int(arguments.get("item_id") or 0),
+                name=str(arguments.get("name") or ""),
+                quantity=None if raw_quantity is None else int(raw_quantity),
+                delta=int(arguments.get("delta") or 0),
             )
         if name == "calendar_events":
             return self.calendar_events(
