@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 7.5.2                                      │
+│ Cortex AI 8.0.0                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -350,6 +350,19 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   *Abbrechen*. Ein Klick beendet den Lauf wirklich — nicht nur die Anzeige:
   der Browser hört auf zuzuhören *und* der Agent hört auf zu arbeiten. Was bis
   dahin da war, bleibt stehen. Danach ist der Knopf wieder das Anhängen.
+* **Zwei Arbeitsweisen**, umschaltbar unten neben *Anhängen*:
+  **Normal** antwortet ausführlich — Vergleiche, Fazit, ein Abschnitt „Nicht
+  gefunden". **Code** dreht das um: der Codeblock steht zuerst, Erklärungen nur
+  wenn sie etwas hinzufügen, das nicht im Code steht. Vollständiger, lauffähiger
+  Code statt Ausschnitten mit „…", Kommentare sagen *warum* statt *was*. Die
+  Quellenpflicht bleibt: erfundene Funktionsnamen sind hier der teuerste Fehler
+  überhaupt — sie sehen richtig aus und laufen nicht.
+* **Denken an oder aus**, in der Modellauswahl oben. Mit Denken zerlegt Cortex die
+  Frage erst in Teilfragen und plant — gründlicher, aber es kostet zwei Runden zum
+  Modell, bevor die erste Suche losgeht. Ohne Denken entfallen Vorprüfung und
+  Planung: die Agenten gehen direkt mit deiner Frage los, und auch das Modell selbst
+  überlegt nicht mehr seitenlang vor. Bei einem Denk-Modell in der Cloud ist das der
+  größte Zeitgewinn, den es hier gibt. Steht es aus, sagt es die Kopfzeile.
 * **Einstellungen im Gespräch ändern:** „Mach den Hintergrund weiß", „such lieber
   auf Englisch", „nimm weniger Teilfragen" — das erledigt Cortex direkt, statt dich
   ins Formular zu schicken. Änderbar sind Erscheinungsbild, Ort, Sprache, Land,
@@ -401,7 +414,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 7.5.2                                                   │
+│ Cortex AI 8.0.0                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

@@ -23,6 +23,8 @@ class FakeToolbox:
     def __init__(self) -> None:
         self.on_event: Any = None
         self.ask_handler: Any = None
+        self.mode = ""
+        self.thinking: bool | None = None
 
 
 class FakeAgent:
@@ -42,8 +44,17 @@ class FakeAgent:
         self.ask_handler = handler
         self.toolbox.ask_handler = handler
 
-    def ask(self, question: str, *, stream: bool = True) -> AgentResult:
+    def ask(
+        self,
+        question: str,
+        *,
+        stream: bool = True,
+        mode: str = "",
+        thinking: bool | None = None,
+    ) -> AgentResult:
         self.asked.append(question)
+        self.mode = mode
+        self.thinking = thinking
         if self.raise_error is not None:
             raise self.raise_error
         for name, payload in self.script:
@@ -76,6 +87,14 @@ def session(monkeypatch: pytest.MonkeyPatch, web_settings: Settings) -> web.Chat
     fresh._settings = web_settings
     monkeypatch.setattr(web, "SESSION", fresh)
     return fresh
+
+
+@pytest.fixture
+def agent(session: web.ChatSession) -> FakeAgent:
+    """Eine Attrappe, die in der Sitzung steckt -- fuer Tests, die sie befragen."""
+    fake = FakeAgent()
+    session._agent = fake
+    return fake
 
 
 @pytest.fixture
@@ -573,7 +592,7 @@ def test_a_waiting_device_is_told_so(session: web.ChatSession) -> None:
     started, release = threading.Event(), threading.Event()
 
     class Slow(FakeAgent):
-        def ask(self, question: str, *, stream: bool = True):
+        def ask(self, question: str, *, stream: bool = True, mode="", thinking=None):
             started.set()
             release.wait(timeout=5)
             return AgentResult(answer="fertig")
@@ -678,7 +697,14 @@ class AskingAgent(FakeAgent):
         super().__init__()
         self.got: str | None = None
 
-    def ask(self, question: str, *, stream: bool = True) -> AgentResult:
+    def ask(
+        self,
+        question: str,
+        *,
+        stream: bool = True,
+        mode: str = "",
+        thinking: bool | None = None,
+    ) -> AgentResult:
         self.asked.append(question)
         self.on_event("ask", {"question": "Welches Budget?", "options": ["bis 800", "egal"]})
         self.got = self.ask_handler("Welches Budget?", ["bis 800", "egal"])
@@ -1211,8 +1237,8 @@ def test_the_trace_state_is_declared_before_the_read_loop() -> None:
     "Cannot access 'thinking' before initialization" ab.
     """
     html = web.UI_FILE.read_text(encoding="utf-8")
-    declared = html.index("thinking = null")
-    used = html.index("if (!thinking) thinking = trace(")
+    declared = html.index("thoughtLine = null")
+    used = html.index("if (!thoughtLine) thoughtLine = trace(")
     assert declared < used
 
 
@@ -1671,7 +1697,7 @@ def test_a_silent_model_does_not_kill_the_connection(
         def set_ask_handler(self, handler):
             pass
 
-        def ask(self, message, stream=True):
+        def ask(self, message, stream=True, mode='', thinking=None):
             time.sleep(0.4)
             self.on_event("answer_chunk", {"text": "Da bin ich."})
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -1749,7 +1775,7 @@ def test_stopping_cancels_the_running_agent(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True):
+        def ask(self, message, stream=True, mode='', thinking=None):
             started.set()
             for _ in range(100):
                 if cancelled.is_set():
@@ -1883,7 +1909,7 @@ def test_a_closed_tab_ends_the_run(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True):
+        def ask(self, message, stream=True, mode='', thinking=None):
             started.set()
             for _ in range(200):
                 if cancelled.is_set():
@@ -1937,7 +1963,7 @@ def test_the_waiting_notice_does_not_invent_another_device(
         def cancel(self):
             release.set()
 
-        def ask(self, message, stream=True):
+        def ask(self, message, stream=True, mode='', thinking=None):
             running.set()
             release.wait(timeout=10)
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -2055,3 +2081,87 @@ def test_deleting_a_chat_asks_first() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "confirm(" in html
     assert "nicht rückgängig" in html
+
+
+def test_no_element_name_is_used_twice() -> None:
+    """Zwei gleiche Namen, und `$()` trifft den falschen.
+
+    Genau das ist passiert: der Hinweis der Lagerverwaltung hiess wie der des
+    Speichers. Der Text landete oben im Speicher-Feld, und wer unten auf
+    "Testen" drueckte, sah nichts -- der Knopf schien kaputt.
+    """
+    import re
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    names = re.findall(r'\bid="([^"]+)"', html)
+    doubled = sorted({name for name in names if names.count(name) > 1})
+    assert doubled == [], f"mehrfach vergeben: {doubled}"
+
+
+# ---------------------------------------------------------------------------
+# Arbeitsweise und Denken kommen aus dem Browser
+# ---------------------------------------------------------------------------
+def test_the_mode_reaches_the_agent(client, session: web.ChatSession, agent: FakeAgent) -> None:
+    client("POST", "/api/chat", {"message": "Sortierfunktion", "mode": "code"})
+    assert agent.mode == "code"
+
+
+def test_the_thinking_switch_reaches_the_agent(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    client("POST", "/api/chat", {"message": "Frage", "thinking": False})
+    assert agent.thinking is False
+
+
+def test_without_a_choice_nothing_is_forced(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    """Ein alter Browser ohne die neuen Felder soll weiterlaufen wie bisher."""
+    client("POST", "/api/chat", {"message": "Frage"})
+    assert agent.mode == ""
+    assert agent.thinking is None
+
+
+def test_the_composer_offers_both_modes() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'data-mode="normal"' in html and 'data-mode="code"' in html
+    # Neben Anhaengen und Abbrechen -- beides gehoert zur Frage, die man
+    # gerade schreibt.
+    row = html[html.index('<div class="crow">') :]
+    row = row[: row.index("</div>")]
+    assert 'id="clip"' in row and 'id="modes"' in row
+
+
+def test_the_picker_offers_the_thinking_switch() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    picker = html[html.index('id="picker-models"') :]
+    picker = picker[: picker.index("picker-foot")]
+    assert 'id="think"' in picker
+    assert "Denken" in picker
+
+
+def test_both_choices_are_sent_with_every_question() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "message: text, attachments, mode, thinking" in html
+
+
+def test_switched_off_thinking_is_visible_in_the_header() -> None:
+    """Es aendert das Ergebnis spuerbar -- man soll es sehen."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert '"ohne Denken"' in html
+
+
+def test_the_thinking_switch_is_not_shadowed_by_a_local_name() -> None:
+    """Eine gleichnamige lokale Variable hat den Schalter verdeckt.
+
+    In `ask()` hiess die Zeile fuer die Denkschritte einmal `thinking` -- und
+    damit ging beim Absenden `null` statt `false` an den Server. Der Schalter
+    stand auf aus, der Server sah nichts davon.
+    """
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    body = html[html.index("async function ask(text){") :]
+    body = body[: body.index("/* ---------- Eingabe ---------- */")]
+    assert "thoughtLine" in body, "die Zeile heisst anders als der Schalter"
+    assert "let answer" in body
+    declared = body[body.index("let answer") : body.index("\n", body.index("let answer"))]
+    assert "thinking" not in declared, f"verdeckt den Schalter: {declared}"

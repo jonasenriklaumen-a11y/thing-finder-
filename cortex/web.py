@@ -277,7 +277,14 @@ class ChatSession:
             return False
         return True
 
-    def ask(self, message: str, emit: Any, attachments: list[dict[str, Any]] | None = None) -> Any:
+    def ask(
+        self,
+        message: str,
+        emit: Any,
+        attachments: list[dict[str, Any]] | None = None,
+        mode: str = "",
+        thinking: bool | None = None,
+    ) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
         Das abschliessende "done" kommt vom Agenten selbst -- hier noch eines
@@ -311,7 +318,7 @@ class ChatSession:
                 elif attachments:
                     context = self.attachments_text(agent, attachments, emit)
                     message = f"{context}\n\n{message}" if context else message
-                return agent.ask(message, stream=True)
+                return agent.ask(message, stream=True, mode=mode, thinking=thinking)
             finally:
                 agent.on_event = None
                 agent.toolbox.on_event = None
@@ -1332,6 +1339,12 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         attachments = (
             [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
         )
+        # Arbeitsweise und Denken gehoeren zur einzelnen Frage, nicht zur
+        # Sitzung: dieselbe Person will mal eine ausfuehrliche Recherche und
+        # im naechsten Satz nur den Code. Der Browser schickt beides mit.
+        mode = str(payload.get("mode", "")).strip()
+        thinking = payload.get("thinking")
+        thinking = None if thinking is None else bool(thinking)
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return
@@ -1362,7 +1375,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
 
         def run() -> None:
             try:
-                SESSION.ask(message, emit, attachments)
+                SESSION.ask(message, emit, attachments, mode=mode, thinking=thinking)
             except Exception as exc:
                 events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
             finally:

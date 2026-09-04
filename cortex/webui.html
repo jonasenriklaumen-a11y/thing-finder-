@@ -267,6 +267,20 @@ textarea::placeholder{color:var(--text-3)}
 .send:disabled{background:var(--surface-2);color:var(--text-3);cursor:default}
 /* Der Abbruch steht an der Stelle des Anhaengens -- waehrend eine Anfrage
    laeuft, ist das der Knopf, den man sucht. */
+/* Die Arbeitsweise steht neben dem Anhaengen: beides gehoert zur Frage, die
+   man gerade schreibt, nicht in die Einstellungen. */
+.modes{display:flex;gap:2px;background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:2px}
+.mode{background:transparent;border:0;border-radius:999px;padding:4px 11px;
+  cursor:pointer;font-size:12.5px;color:var(--text-3);line-height:1.5}
+.mode:hover{color:var(--text)}
+.mode.on{background:var(--bg);color:var(--accent-text);font-weight:600;
+  box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.picker-think{display:flex;gap:9px;align-items:flex-start;padding:11px 16px;
+  border-top:1px solid var(--line);cursor:pointer;font-size:13px}
+.picker-think input{margin-top:2px;flex:0 0 auto;accent-color:var(--accent)}
+.picker-think .why{display:block;color:var(--text-3);font-size:11.5px;
+  line-height:1.5;margin-top:2px}
 .tool.stop{color:var(--warn);border-color:var(--warn)}
 .tool.stop:hover{background:var(--warn);color:#fff}
 .hint{max-width:46rem;margin:8px auto 0;color:var(--text-3);font-size:11.5px;text-align:center}
@@ -450,6 +464,13 @@ input:focus,select:focus{border-color:var(--accent)}
   <div class="picker" id="picker-models" hidden>
     <div class="picker-head">Modell wählen</div>
     <div class="picker-list" id="model-list"></div>
+    <label class="picker-think" for="think">
+      <input type="checkbox" id="think" checked>
+      <span><b>Denken</b>
+        <span class="why">Zerlegt die Frage erst in Teilfragen und plant.
+          Gründlicher. Ausgeschaltet gehen die Agenten direkt mit deiner Frage
+          los — deutlich schneller.</span></span>
+    </label>
     <div class="picker-foot">Weitere Anbieter und Schlüssel unter
       <button class="linkish" id="picker-settings">Einstellungen</button>.</div>
   </div>
@@ -474,6 +495,11 @@ input:focus,select:focus{border-color:var(--accent)}
       <div class="crow">
         <button class="tool" id="clip" title="Bild oder PDF anhängen">📎 Anhängen</button>
         <button class="tool stop" id="stop" title="Anfrage abbrechen" hidden>◼ Abbrechen</button>
+        <div class="modes" id="modes" role="group" aria-label="Arbeitsweise">
+          <button class="mode on" data-mode="normal" title="Ausführliche Antworten">
+            Normal</button>
+          <button class="mode" data-mode="code" title="Code statt Prosa">Code</button>
+        </div>
         <span class="spacer"></span>
         <button class="send" id="send" title="Senden (Enter)">↑</button>
       </div>
@@ -656,7 +682,7 @@ input:focus,select:focus{border-color:var(--accent)}
             <option value="read">Nur lesen — suchen und nachsehen</option>
             <option value="write">Lesen und schreiben — auch anlegen und ändern</option>
           </select></label>
-        <div class="note" id="storage-note"></div>
+        <div class="note" id="lager-note"></div>
         <div class="note">Gelöscht wird in keiner Stufe. Ein versehentlich angelegter
           Artikel ist schnell wieder weg; ein gelöschter Raum nimmt alles darin mit —
           das bleibt beim Menschen. Und zur Ehrlichkeit: die Lagerverwaltung selbst hat
@@ -752,6 +778,38 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
+
+/* ---------- Arbeitsweise und Denken ---------- */
+// Beides gehoert zur Frage, nicht zur Sitzung -- es geht bei jeder Anfrage
+// mit. Gemerkt wird es trotzdem, damit man es nicht jedes Mal neu einstellt.
+let mode = "normal";
+let thinking = true;
+
+function setMode(wanted){
+  mode = wanted === "code" ? "code" : "normal";
+  document.querySelectorAll(".mode").forEach(button =>
+    button.classList.toggle("on", button.dataset.mode === mode));
+  document.body.classList.toggle("code-mode", mode === "code");
+  $("#input").placeholder = mode === "code"
+    ? "Was soll ich bauen?" : "Frag etwas …";
+  try { localStorage.setItem("cortex-mode", mode); } catch {}
+}
+
+function setThinking(on){
+  thinking = !!on;
+  $("#think").checked = thinking;
+  try { localStorage.setItem("cortex-think", thinking ? "1" : "0"); } catch {}
+  refreshHeader();
+}
+
+document.querySelectorAll(".mode").forEach(button =>
+  button.addEventListener("click", () => setMode(button.dataset.mode)));
+$("#think").addEventListener("change", (e) => setThinking(e.target.checked));
+
+try {
+  setMode(localStorage.getItem("cortex-mode") || "normal");
+  setThinking(localStorage.getItem("cortex-think") !== "0");
+} catch { setMode("normal"); setThinking(true); }
 // Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
 // soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
 // eines allein reicht nicht.
@@ -1053,16 +1111,18 @@ async function ask(text){
   addUser(text, attachments); input.value = ""; input.style.height = "auto";
   noteChat(text.trim() || "Angehängte Datei");
   const { steps, bubble } = addBot();
-  // `thinking` gehoert hier hoch und nicht zu seiner Funktion: die
-  // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile
-  // ueberhaupt ausgefuehrt waere -- das gaebe einen ReferenceError.
-  let answer = "", reading = null, readCount = 0, planning = null, thinking = null;
+  // `thoughtLine` gehoert hier hoch und nicht zu seiner Funktion: die
+  // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile ueberhaupt
+  // ausgefuehrt waere -- das gaebe einen ReferenceError. Und sie heisst
+  // nicht `thinking`: so hiess sie einmal, und sie verdeckte damit den
+  // Schalter gleichen Namens -- der ging dann als `null` an den Server.
+  let answer = "", reading = null, readCount = 0, planning = null, thoughtLine = null;
 
   try {
     running = new AbortController();
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ message: text, attachments }),
+      body: JSON.stringify({ message: text, attachments, mode, thinking }),
       signal: running.signal,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1111,13 +1171,13 @@ async function ask(text){
   // Denkschritte kommen tokenweise. Jedes Token als eigene Zeile waere
   // unlesbar -- sie wachsen deshalb in derselben.
   function thought(box, text){
-    if (!thinking) thinking = trace(box, "[Denkt]", "", "think");
-    thinking.querySelector(".txt").textContent += text;
+    if (!thoughtLine) thoughtLine = trace(box, "[Denkt]", "", "think");
+    thoughtLine.querySelector(".txt").textContent += text;
     if (document.body.classList.contains("tracing")) scroll();
   }
 
   function handle(ev){
-    if (ev.type !== "thought") thinking = null;
+    if (ev.type !== "thought") thoughtLine = null;
     switch (ev.type){
       case "planning":
         planning = step(steps, "[Plane]", "sichte die Anfrage …"); break;
@@ -1590,7 +1650,7 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#probe-note").textContent = ""; $("#probe-note").className = "note";
   $("#google-step").hidden = true;
   showGoogle(cfg.google);
-  $("#storage-note").textContent = ""; $("#storage-note").className = "note";
+  $("#lager-note").textContent = ""; $("#lager-note").className = "note";
   $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
   $("#savenote").textContent = ""; $("#savenote").className = "note";
   $("#ha-note").textContent = ""; $("#ha-note").className = "note";
@@ -1907,7 +1967,7 @@ async function storageCall(url){
 }
 
 async function storageProbe(url, searching){
-  const note = $("#storage-note");
+  const note = $("#lager-note");
   note.className = "note";
   note.textContent = searching ? "Suche im Netz …" : "Frage nach …";
   const data = await storageCall(url);
@@ -2007,6 +2067,9 @@ async function refreshHeader(){
     // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
     // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.
     const bits = [cfg.values.CORTEX_LOCATION || "kein Ortsfilter"];
+    // Ausgeschaltetes Denken sieht man sonst nirgends -- und es aendert das
+    // Ergebnis spuerbar. Angeschaltet ist der Normalfall und braucht nichts.
+    if (!thinking) bits.push("ohne Denken");
     if (cfg.ha_connected) bits.push("Zuhause verbunden");
     if (cfg.values.CORTEX_MEMORY === "true") bits.push("Speicher an");
     $("#status").textContent = bits.join(" · ");

@@ -1252,20 +1252,20 @@ def test_earlier_questions_survive_a_normal_conversation(
 # ---------------------------------------------------------------------------
 # Ausfuehrlichkeit und Kontext-Sparsamkeit
 # ---------------------------------------------------------------------------
-def test_system_prompt_asks_for_thorough_answers() -> None:
+def test_the_normal_mode_asks_for_thorough_answers() -> None:
     """Der Prompt hat frueher zur Knappheit gedraengt ("knapp", "hoechstens
     ein Satz") -- genau das machte die Antworten duenn."""
-    from cortex.agent import SYSTEM_PROMPT
+    from cortex.agent import ANSWER_PROMPT
 
-    assert "ausfuehrlich" in SYSTEM_PROMPT.lower()
-    assert "GROSSZUEGIG" in SYSTEM_PROMPT
-    assert "Fazit" in SYSTEM_PROMPT
-    assert "Nicht gefunden:" in SYSTEM_PROMPT
+    assert "ausfuehrlich" in ANSWER_PROMPT.lower()
+    assert "GROSSZUEGIG" in ANSWER_PROMPT
+    assert "Fazit" in ANSWER_PROMPT
+    assert "Nicht gefunden:" in ANSWER_PROMPT
     # Die alten Bremsen sind weg.
-    assert "Deutsch, knapp" not in SYSTEM_PROMPT
-    assert "hoechstens ein Satz" not in SYSTEM_PROMPT
+    assert "Deutsch, knapp" not in ANSWER_PROMPT
+    assert "hoechstens ein Satz" not in ANSWER_PROMPT
     # Vollstaendigkeit darf Genauigkeit nie ersetzen.
-    assert "Vollstaendigkeit ersetzt niemals Genauigkeit" in SYSTEM_PROMPT
+    assert "Vollstaendigkeit ersetzt niemals Genauigkeit" in ANSWER_PROMPT
 
 
 def test_budget_prompt_still_wants_everything() -> None:
@@ -1831,3 +1831,130 @@ def test_the_prompt_forbids_guessing_ids(settings: Settings, toolbox: Toolbox) -
     prompt = agent.messages[0]["content"]
     assert "Rate NIE eine Kennung" in prompt
     assert "Loeschen kannst du nicht" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Arbeitsweise: normal und Code
+# ---------------------------------------------------------------------------
+def test_the_code_mode_replaces_the_verbose_answer_format(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Eine Seite Prosa vor dem Codeblock ist kein Service."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert "sei ausfuehrlich" in agent.messages[0]["content"]
+
+    agent._apply_mode("code")
+    prompt = agent.messages[0]["content"]
+    assert "Code-Modus" in prompt
+    assert "sei ausfuehrlich" not in prompt
+    assert "Der Code ist die Antwort" in prompt
+
+
+def test_the_mode_can_change_between_two_questions(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Dieselbe Person will mal eine Recherche und im naechsten Satz nur Code."""
+    monkeypatch.setattr(
+        "litellm.completion", ScriptedLLM(_message(content="A"), _message(content="B"))
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Was kostet ein Lastenrad?", stream=False, mode="normal")
+    assert agent.mode == "normal"
+    agent.ask("Schreib mir eine Sortierfunktion", stream=False, mode="code")
+    assert agent.mode == "code"
+    assert "Code-Modus" in agent.messages[0]["content"]
+
+
+def test_an_unknown_mode_falls_back_to_normal(settings: Settings, toolbox: Toolbox) -> None:
+    """Lieber ausfuehrlich als versehentlich knapp."""
+    from cortex.agent import clean_mode
+
+    assert clean_mode("quatsch") == "normal"
+    assert clean_mode("") == "normal"
+    assert clean_mode("CODE") == "code"
+
+
+def test_the_identity_survives_the_code_mode(settings: Settings, toolbox: Toolbox) -> None:
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("code")
+    assert "Ich bin Cortex" in agent.messages[0]["content"]
+
+
+def test_the_code_mode_still_demands_sources(settings: Settings, toolbox: Toolbox) -> None:
+    """Erfundene Funktionsnamen sehen richtig aus und laufen nicht."""
+    from cortex.agent import CODE_PROMPT
+
+    assert "Quelle" in CODE_PROMPT
+    assert "Erfundene Funktionsnamen" in CODE_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Denken an und aus
+# ---------------------------------------------------------------------------
+def test_without_thinking_there_is_no_planning_call(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Der Planungsaufruf ist eine ganze Netzrunde -- die faellt hier weg."""
+    planned: list[str] = []
+    for name in ("plan_request", "plan_subtasks"):
+        monkeypatch.setattr(
+            f"cortex.subagents.{name}",
+            lambda *args, **kwargs: planned.append("geplant") or (True, ["a", "b"]),
+        )
+    monkeypatch.setattr("cortex.subagents.run_subagents", lambda tasks, *a, **k: [])
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False)
+    assert planned == [], "kein Planungsaufruf"
+
+
+def test_without_thinking_the_agents_get_the_question_as_it_was_asked(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    seen: list[list[str]] = []
+
+    def fake_run(tasks, *args, **kwargs):
+        seen.append(list(tasks))
+        return []
+
+    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Was kostet ein gebrauchtes Lastenrad in Bremen?", stream=False, thinking=False)
+    assert seen == [["Was kostet ein gebrauchtes Lastenrad in Bremen?"]]
+
+
+def test_without_thinking_the_model_does_not_reason_either(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Bei einem Denk-Modell ist das der groesste Zeitgewinn ueberhaupt."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert "reasoning_effort" not in agent._llm_kwargs()
+
+    agent.thinking = False
+    kwargs = agent._llm_kwargs()
+    assert kwargs["reasoning_effort"] == "low"
+    assert kwargs["drop_params"] is True, "Anbieter ohne den Wunsch duerfen ihn weglassen"
+
+
+def test_thinking_stays_on_unless_someone_turns_it_off(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert agent.thinking is True
+
+
+def test_thinking_can_be_turned_back_on(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    monkeypatch.setattr(
+        "litellm.completion", ScriptedLLM(_message(content="A"), _message(content="B"))
+    )
+    monkeypatch.setattr("cortex.subagents.run_subagents", lambda tasks, *a, **k: [])
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("erste", stream=False, thinking=False)
+    assert agent.thinking is False
+    agent.ask("zweite", stream=False, thinking=True)
+    assert agent.thinking is True

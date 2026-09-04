@@ -117,6 +117,20 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 - Kommt `fetch_page` mit strukturierten `products`-Daten zurueck, verwende deren Werte \
 (inklusive `image_url`) woertlich.
 
+"""
+
+#: Die beiden Arbeitsweisen. "normal" schreibt aus, "code" schreibt Code.
+MODES = ("normal", "code")
+
+
+def clean_mode(mode: str) -> str:
+    """Unbekanntes wird "normal" -- lieber ausfuehrlich als versehentlich knapp."""
+    mode = (mode or "").strip().lower()
+    return mode if mode in MODES else "normal"
+
+
+#: Der ausfuehrliche Antwortteil -- der Normalmodus.
+ANSWER_PROMPT = """\
 Antwortformat -- sei ausfuehrlich:
 - Deutsch, ohne Vorrede und ohne Wiederholung der Frage, aber GROSSZUEGIG im Inhalt. \
 Gib alles wieder, was du gefunden hast und was fuer die Entscheidung des Nutzers zaehlt.
@@ -133,6 +147,30 @@ Begruendung.
 samt Grund (blockiert, nicht oeffentlich, nirgends genannt).
 - Lieber zu viel Information als zu wenig. Kuerze nur, wenn du sonst etwas erfinden \
 muesstest -- Vollstaendigkeit ersetzt niemals Genauigkeit.
+"""
+
+#: Der Code-Modus. Ersetzt den ausfuehrlichen Antwortteil, wenn jemand
+#: programmiert -- dann ist eine Seite Prosa vor dem Codeblock kein Service,
+#: sondern etwas, das man wegscrollen muss.
+CODE_PROMPT = """\
+Antwortformat -- du bist im Code-Modus:
+- Der Code ist die Antwort. Schreib ihn zuerst, in einem Block mit Sprachangabe. \
+Erklaerungen kommen danach, kurz, und nur wenn sie etwas hinzufuegen, das nicht \
+im Code steht.
+- Keine Vorrede, keine Zusammenfassung der Frage, kein "Gerne!", kein Fazit.
+- Vollstaendiger, lauffaehiger Code statt Ausschnitten mit "..." -- Importe, \
+Fehlerbehandlung und Randfaelle gehoeren dazu. Wo etwas fehlen MUSS, steht ein \
+Kommentar an genau der Stelle.
+- Nenne die Version oder das Jahr, wenn es fuer die Antwort zaehlt (Sprachversion, \
+Bibliotheksfassung, veraltete Schnittstelle).
+- Kommentare im Code sagen WARUM, nicht was. Was dasteht, liest man ohnehin.
+- Aenderst du bestehenden Code, zeig nur die geaenderten Stellen mit genug \
+Umgebung, um sie einzuordnen -- nicht die ganze Datei noch einmal.
+- Fehlermeldungen: erst die Ursache in einem Satz, dann die Korrektur als Code.
+- Was du im Web nachschlaegst -- Schnittstellen, Signaturen, Versionen -- \
+belegst du weiterhin mit der Quelle. Erfundene Funktionsnamen sind hier der \
+teuerste Fehler ueberhaupt: sie sehen richtig aus und laufen nicht.
+- Musst du raten, sag es in einer Zeile ueber dem Block, statt es auszuschmuecken.
 """
 
 BUDGET_PROMPT = """\
@@ -475,6 +513,11 @@ class Agent:
         #: zwischen zwei Schritten -- einen laufenden Seitenabruf reisst
         #: niemand mitten entzwei, aber danach ist Schluss.
         self._stop = threading.Event()
+        #: Arbeitsweise dieses Turns: "normal" schreibt aus, "code" schreibt Code.
+        self.mode = "normal"
+        #: Denkt Cortex vor der Recherche? Aus heisst: kein Planen, keine
+        #: Teilfragen -- die Agenten bekommen die Frage, wie sie gestellt wurde.
+        self.thinking = True
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt(cache, self._home_prompt())}
         ]
@@ -738,8 +781,39 @@ class Agent:
                 parts.append(HA_CONTROL_PROMPT)
         return "".join(parts)
 
+    def _llm_kwargs(self) -> dict[str, Any]:
+        """Aufrufargumente fuer das Hauptmodell -- mit oder ohne Denken.
+
+        Ist das Denken aus, wird auch dem Modell selbst gesagt, dass es nicht
+        erst seitenlang ueberlegen soll. Bei einem Denk-Modell ist das der
+        groesste Zeitgewinn ueberhaupt; Anbieter, die den Wunsch nicht kennen,
+        lassen ihn dank `drop_params` einfach weg.
+        """
+        kwargs = dict(self.settings.llm_kwargs())
+        if not self.thinking:
+            kwargs.setdefault("reasoning_effort", "low")
+            kwargs["drop_params"] = True
+        return kwargs
+
+    def _apply_mode(self, mode: str) -> None:
+        """Tauscht den Antwortteil des Systemprompts fuer diesen Turn.
+
+        Der Modus gehoert zur Frage, nicht zur Sitzung: dieselbe Person will
+        mal eine ausfuehrliche Recherche und im naechsten Satz nur den Code.
+        Deshalb wird hier die Systemnachricht neu geschrieben statt der Agent
+        neu gebaut.
+        """
+        mode = clean_mode(mode)
+        if mode == self.mode and self.messages:
+            return
+        self.mode = mode
+        if self.messages and self.messages[0].get("role") == "system":
+            self.messages[0]["content"] = self._system_prompt(
+                self.cache, self._home_prompt(), mode=mode
+            )
+
     @staticmethod
-    def _system_prompt(cache: Cache | None, extras: str = "") -> str:
+    def _system_prompt(cache: Cache | None, extras: str = "", mode: str = "normal") -> str:
         """Systemprompt plus Tagesdatum und Merkzettel.
 
         Lokale Modelle mit altem Wissensstand suchen sonst nach "Test 2024",
@@ -752,8 +826,10 @@ class Agent:
             "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"
         )
         today = date.today()
+        # Der Antwortteil wechselt mit dem Modus, alles davor bleibt gleich.
+        answer = CODE_PROMPT if clean_mode(mode) == "code" else ANSWER_PROMPT
         prompt = (
-            f"{SYSTEM_PROMPT}{extras}\n"
+            f"{SYSTEM_PROMPT}{answer}{extras}\n"
             f"Heute ist {weekdays[today.weekday()]}, der {today.strftime('%d.%m.%Y')}. "
             f"Richte Suchanfragen nach Aktualitaet daran aus, nicht an deinem "
             f"Wissensstand."
@@ -853,14 +929,13 @@ class Agent:
         import litellm
 
         litellm.suppress_debug_info = True
-        kwargs = self.settings.llm_kwargs()
         response = litellm.completion(
             model=self.settings.model,
             messages=messages,
             tools=self.tools,
             tool_choice="auto",
             stream=stream,
-            **kwargs,
+            **self._llm_kwargs(),
         )
         if not stream:
             message = response.choices[0].message
@@ -937,9 +1012,28 @@ class Agent:
         }
 
     # -- Hauptschleife ----------------------------------------------------
-    def ask(self, question: str, *, stream: bool = True) -> AgentResult:
-        """Beantwortet *question* -- sucht, liest und wertet aus."""
+    def ask(
+        self,
+        question: str,
+        *,
+        stream: bool = True,
+        mode: str = "",
+        thinking: bool | None = None,
+    ) -> AgentResult:
+        """Beantwortet *question* -- sucht, liest und wertet aus.
+
+        Args:
+            question: Die Frage.
+            stream: Antwort Wort fuer Wort ausgeben.
+            mode: "normal" oder "code". Leer laesst den bisherigen stehen.
+            thinking: Vor der Recherche planen und zerlegen. `None` laesst den
+                bisherigen Stand stehen.
+        """
         question = question.strip()
+        if mode:
+            self._apply_mode(mode)
+        if thinking is not None:
+            self.thinking = bool(thinking)
         self._stop.clear()
         self.toolbox.stats.reset()
         result = AgentResult(answer="")
@@ -960,7 +1054,14 @@ class Agent:
         # Automatische Vorrecherche: die Anfrage wird zerlegt und die Teile
         # laufen parallel, bevor der Hauptagent uebernimmt. Was die
         # Subagenten schon gefunden haben, steht ihm dann zur Verfuegung.
-        if self._auto_subagents_wanted() and self._needs_research(question):
+        if not self.thinking:
+            # Denken aus: kein Planungsaufruf, keine Zerlegung. Die Agenten
+            # bekommen die Frage so, wie sie gestellt wurde -- das spart die
+            # Runde fuer die Vorpruefung und die fuer den Plan.
+            self._planned_tasks = [question]
+            if self.use_subagents:
+                used += self._auto_research(question, budget)
+        elif self._auto_subagents_wanted() and self._needs_research(question):
             used += self._auto_research(question, budget)
 
         while True:
@@ -1248,7 +1349,7 @@ class Agent:
                 model=self.settings.model,
                 messages=self.messages,
                 stream=stream,
-                **self.settings.llm_kwargs(),
+                **self._llm_kwargs(),
             )
         except Exception as exc:
             self._emit("error", message=f"{type(exc).__name__}: {exc}")
@@ -1363,7 +1464,7 @@ class Agent:
                     }
                 ],
                 max_tokens=700,
-                **self.settings.llm_kwargs(),
+                **self._llm_kwargs(),
             )
             raw = (response.choices[0].message.content or "").strip()
         except Exception:
