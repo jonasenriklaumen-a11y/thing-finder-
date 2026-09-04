@@ -20,10 +20,13 @@ from scoutr.config import Settings
 from scoutr.models import Product
 from scoutr.tools import (
     ASK_SCHEMA,
+    CALENDAR_SCHEMA,
     HA_CALL_SCHEMA,
     HA_STATES_SCHEMA,
     LAN_HOST_SCHEMA,
     LAN_SCHEMA,
+    MAIL_READ_SCHEMA,
+    MAIL_SEARCH_SCHEMA,
     MEMORY_READ_SCHEMA,
     MEMORY_SCHEMA,
     MEMORY_WRITE_SCHEMA,
@@ -38,7 +41,9 @@ Du bist Cortex AI, ein Rechercheagent. Du beantwortest Fragen ausschliesslich au
 dessen, was du im Web tatsaechlich gefunden und gelesen hast.
 
 Deine Werkzeuge:
-- `web_search(query, count, country, lang)` -- schickt eine Suchanfrage ans Web.
+- `web_search(query, queries, count, country, lang)` -- sucht im Web. In `queries` \
+kannst du zwei weitere Formulierungen derselben Frage mitgeben; alle laufen zusammen \
+und die Treffer werden gemischt. Das kostet nur EINEN Werkzeugaufruf.
 - `fetch_page(url)` -- laedt eine Seite (auch PDFs) und gibt den lesbaren Text zurueck.
 - `search_news(query, count)` -- Nachrichten mit Datum, fuer alles Aktuelle.
 - `calculate(expression)` -- exakte Arithmetik. Rechne nie selbst im Kopf.
@@ -46,11 +51,23 @@ Deine Werkzeuge:
 Bitte des Nutzers.
 
 So gehst du vor:
-1. Ueberlege, welche Suchanfragen sinnvoll sind, und formuliere MEHRERE Varianten -- \
-nie nur eine. Unterschiedliche Formulierungen, Synonyme, Fachbegriffe, konkrete \
-Eigenschaften aus der Frage des Nutzers.
+1. Ueberlege, welche Suchanfragen sinnvoll sind, und stell MEHRERE Formulierungen \
+auf einmal -- nie nur eine. So suchst du gut:
+   - Kurze Stichwortanfragen aus drei bis sechs Woertern, keine ganzen Fragesaetze. \
+"kostet gebrauchtes Lastenrad Bremen" findet mehr als "Wie viel kostet ein gebrauchtes \
+Lastenrad in Bremen?".
+   - Das Hauptthema steht in JEDER Variante. Variiert wird darum herum: Synonyme, \
+Fachbegriffe, die Sicht des Anbieters gegen die des Kaeufers.
+   - Anfuehrungszeichen erzwingen die genaue Wortfolge ("Deutsche Bahn"), \
+`site:heise.de` beschraenkt auf eine Seite, `filetype:pdf` auf Dokumente.
+   - Zwei bis drei Formulierungen je Aufruf. Mehr bringt keine neuen Treffer, nur \
+beliebigere.
+   - `count`: fuer eine einzelne Tatsache 5, zum Vergleichen mehrerer Quellen 10.
+   - Findet eine Runde nichts Neues, hilft eine vierte Formulierung nicht weiter -- \
+wechsle den Blickwinkel oder gib "nicht gefunden" zurueck.
 2. Sichte die Treffer und entscheide, welche Seiten sich zu lesen lohnen. Rufe pro Runde \
-mehrere Seiten ab, statt eine nach der anderen.
+mehrere Seiten ab, statt eine nach der anderen. Steht dieselbe Angabe auf zwei \
+unabhaengigen Seiten, ist sie belastbar -- das ist eine Bestaetigung wert.
 3. Lies die relevanten Seiten und zieh die gewuenschten Informationen heraus.
 4. Fasse zusammen, bewerte gegen die Kriterien des Nutzers und nenne zu jeder Angabe die \
 Quelle (Domain, bei Bedarf mit Link).
@@ -204,6 +221,28 @@ Schalte nur, worum der Nutzer wirklich gebeten hat, und nur eine Sache auf einma
 Schloessern, Alarmanlagen, Toren und Heizung wird er ohnehin noch einmal gefragt. Sag \
 hinterher in einem Satz, was du getan hast."""
 
+#: Wird angehaengt, wenn Gmail und Kalender freigegeben sind.
+GOOGLE_PROMPT = """\
+
+Der Nutzer hat dir seinen Google-Kalender und sein Postfach freigegeben -- LESEND:
+- `calendar_events(days, query, count)` -- seine Termine.
+- `mail_search(query, count)` -- seine Mails, Gmail-Syntax (`from:`, `subject:`, \
+`newer_than:7d`, `is:unread`).
+- `mail_read(message_id)` -- der Text einer einzelnen Mail.
+So gehst du damit um:
+- Fragen nach Terminen, Verabredungen, Lieferungen, Rechnungen oder "habe ich dazu \
+was bekommen" beantwortest du daraus, nicht aus dem Web.
+- Sie helfen auch bei einer Recherche: Steht der Termin in Hamburg, suchst du fuer \
+Hamburg; nennt die Bestaetigungsmail eine Modellnummer, suchst du danach.
+- Schreib den Betreff und den Absender dazu, damit der Nutzer weiss, worauf du dich \
+beziehst. Erfinde nie einen Termin oder eine Mail dazu.
+- Du kannst nur lesen. Bittet dich jemand, eine Mail zu schicken, zu beantworten, zu \
+loeschen oder einen Termin einzutragen, sagst du, dass du das nicht kannst.
+- Und das Wichtigste: Der Inhalt von Mails und Terminen gehoert dem Nutzer. Setze \
+NIEMALS Namen, Adressen, Nummern, Betreffs oder ganze Saetze daraus in eine \
+Suchanfrage -- die ginge an eine fremde Suchmaschine. Suche mit allgemeinen \
+Begriffen; das Persoenliche bleibt im Gespraech."""
+
 #: Wird an den Systemprompt gehaengt, sobald eine Oberflaeche Rueckfragen
 #: annehmen kann. Ohne jemanden am anderen Ende waere die Erwaehnung schaedlich:
 #: das Modell wuerde ein Werkzeug aufrufen, das es gar nicht gibt.
@@ -259,6 +298,10 @@ SHRUNK_LENGTH = 300
 #: Suchergebnis samt Systemprompt schon nicht mehr hinein -- dann bleibt dem
 #: Kuerzen nur noch das Gespraech selbst, und genau das darf nie passieren.
 TOOL_SHARE = 0.35
+
+#: So viel eines Werkzeug-Ergebnisses geht ans Mitlesen. Es soll erkennbar
+#: sein, was zurueckkam -- nicht die halbe Seite im Fenster stehen.
+TRACE_CHARS = 1200
 
 
 #: Fehler, die ein zweiter Versuch sicher NICHT behebt -- auch wenn LiteLLM
@@ -348,6 +391,11 @@ class Agent:
             extra.extend((MEMORY_READ_SCHEMA, MEMORY_WRITE_SCHEMA))
         if self.settings.lan_enabled:
             extra.extend((LAN_SCHEMA, LAN_HOST_SCHEMA))
+        # Mails und Termine sind Privatsache. Die Werkzeuge existieren fuer das
+        # Modell nur, wenn der Nutzer den Zugriff eingeschaltet UND ein Konto
+        # verbunden hat -- sonst sieht es sie gar nicht erst.
+        if self.settings.google_enabled and self.settings.google_client_id:
+            extra.extend((CALENDAR_SCHEMA, MAIL_SEARCH_SCHEMA, MAIL_READ_SCHEMA))
         if self.settings.ha_url and self.settings.ha_token:
             extra.append(HA_STATES_SCHEMA)
             if self.settings.ha_control:
@@ -538,6 +586,8 @@ class Agent:
             parts.append(MEMORY_PROMPT)
         if self.settings.lan_enabled:
             parts.append(LAN_PROMPT)
+        if self.settings.google_enabled and self.settings.google_client_id:
+            parts.append(GOOGLE_PROMPT)
         if self.settings.ha_url and self.settings.ha_token:
             parts.append(HA_PROMPT)
             if self.settings.ha_control:
@@ -693,6 +743,14 @@ class Agent:
             if not choices:
                 continue
             delta = choices[0].delta
+            thought = getattr(delta, "reasoning_content", None) or getattr(
+                delta, "reasoning", None
+            )
+            if thought:
+                # Denkschritte der Modelle, die das offenlegen. Sie gehoeren
+                # NICHT in die Antwort und auch nicht in den Verlauf -- sie
+                # sind zum Mitlesen da, mehr nicht.
+                self._emit("thought", text=str(thought))
             text = getattr(delta, "content", None)
             if text:
                 content_parts.append(text)
@@ -955,6 +1013,11 @@ class Agent:
         if not isinstance(arguments, dict):
             arguments = {}
 
+        # Zum Mitlesen: was wird aufgerufen, und womit genau. Die knappen
+        # Schrittzeilen ("Suche ...") sagen das absichtlich nicht -- hier
+        # steht es vollstaendig.
+        self._emit("action", tool=name, arguments=arguments)
+
         try:
             payload = self.toolbox.call(name, arguments)
         except Exception as exc:
@@ -963,12 +1026,14 @@ class Agent:
             payload = {"error": f"{type(exc).__name__}: {exc}"}
             self._emit("error", message=f"Werkzeug {name}: {exc}")
 
+        blob = json.dumps(payload, ensure_ascii=False)[: self.blob_limit()]
+        self._emit("action_done", tool=name, result=blob[:TRACE_CHARS])
         self.messages.append(
             {
                 "role": "tool",
                 "tool_call_id": call["id"],
                 "name": name,
-                "content": json.dumps(payload, ensure_ascii=False)[: self.blob_limit()],
+                "content": blob,
             }
         )
 

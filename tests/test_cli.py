@@ -33,7 +33,7 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 def test_version() -> None:
     result = runner.invoke(cli.app, ["version"])
     assert result.exit_code == 0
-    assert "scoutr" in result.output
+    assert "cortex" in result.output
 
 
 def test_config_reports_complete_setup() -> None:
@@ -314,7 +314,7 @@ def test_version_flag(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFix
     monkeypatch.setattr(sys, "argv", ["scoutr", "--version"])
     monkeypatch.setattr(cli, "app", lambda: pytest.fail("app haette nicht laufen duerfen"))
     cli.main()
-    assert "scoutr" in capsys.readouterr().out
+    assert "cortex" in capsys.readouterr().out
 
 
 def test_help_is_not_rerouted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -500,14 +500,14 @@ def test_real_questions_are_never_blocked(monkeypatch: pytest.MonkeyPatch) -> No
 def test_hyphenated_single_word_question_needs_quotes(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """Preis der Eindeutigkeit: `scoutr e-bike` wird abgefangen, mit Hinweis."""
+    """Preis der Eindeutigkeit: `cortex e-bike` wird abgefangen, mit Hinweis."""
     import sys
 
     monkeypatch.setattr(sys, "argv", ["scoutr", "e-bike"])
     monkeypatch.setattr(cli, "app", lambda: pytest.fail("haette nicht starten duerfen"))
     with pytest.raises(SystemExit):
         cli.main()
-    assert 'scoutr "e-bike"' in capsys.readouterr().out
+    assert 'cortex "e-bike"' in capsys.readouterr().out
 
 
 def test_install_model_adds_a_vision_model(
@@ -968,3 +968,51 @@ def test_web_rejects_a_token_with_umlauts(monkeypatch: pytest.MonkeyPatch) -> No
     result = runner.invoke(cli.app, ["web", "--lan", "--token", "grün", "--no-open"])
     assert result.exit_code == 2
     assert "gruen" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Der Befehl heisst cortex
+# ---------------------------------------------------------------------------
+def test_both_command_names_start_the_same_program() -> None:
+    """`scoutr` bleibt neben `cortex` bestehen -- Skripte sollen weiterlaufen."""
+    import tomllib
+    from pathlib import Path
+
+    data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    scripts = data["project"]["scripts"]
+    assert scripts["cortex"] == "scoutr.cli:main"
+    assert scripts["scoutr"] == scripts["cortex"]
+
+
+def test_the_texts_name_the_new_command() -> None:
+    """Wer 'scoutr setup' liest, tippt 'scoutr setup' -- also muss es stimmen."""
+    from pathlib import Path
+
+    for name in ("scoutr/cli.py", "scoutr/web.py", "scoutr/search.py", "scoutr/config.py"):
+        text = Path(name).read_text(encoding="utf-8")
+        for command in ("setup", "web", "install-model", "notes", "export", "lan"):
+            assert f"scoutr {command}" not in text, f"{name}: 'scoutr {command}'"
+
+
+def test_every_subcommand_is_recognised_as_one() -> None:
+    """Sonst landet ein neuer Befehl im Chat, statt ausgefuehrt zu werden.
+
+    Genau das ist mit `cortex google` passiert: die Liste stand von Hand im
+    Code und ging beim ersten neuen Befehl auseinander.
+    """
+    registered = {
+        command.name or command.callback.__name__.replace("_", "-")
+        for command in cli.app.registered_commands
+    }
+    assert registered == cli.COMMANDS
+    assert "google" in cli.COMMANDS
+
+
+def test_a_subcommand_is_not_treated_as_a_question(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    seen: list[list[str]] = []
+    monkeypatch.setattr(sys, "argv", ["cortex", "google", "--help"])
+    monkeypatch.setattr(cli, "app", lambda: seen.append(list(sys.argv)))
+    cli.main()
+    assert seen == [["cortex", "google", "--help"]], "kein eingeschobenes 'chat'"

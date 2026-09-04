@@ -1366,3 +1366,166 @@ def test_setting_the_handler_keeps_the_notes_in_the_prompt(tmp_path) -> None:
     agent.set_ask_handler(lambda question, options: "ja")
     agent.set_ask_handler(None)
     assert "Bremen" in agent.messages[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Mitlesen: Gedanken und Aktionen
+# ---------------------------------------------------------------------------
+def test_every_tool_call_is_announced_with_its_arguments(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Die knappen Schrittzeilen verschweigen die Argumente -- hier stehen sie."""
+    events: list[tuple[str, dict[str, Any]]] = []
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("web_search", {"query": "cafés mit wlan"})]),
+        _message(content="Fertig."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.on_event = lambda name, payload: events.append((name, payload))
+    agent.ask("Finde Cafés", stream=False)
+
+    actions = [payload for name, payload in events if name == "action"]
+    assert actions and actions[0]["tool"] == "web_search"
+    assert actions[0]["arguments"] == {"query": "cafés mit wlan"}
+
+
+def test_the_tool_result_is_reported_back(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("web_search", {"query": "cafés"})]),
+        _message(content="Fertig."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.on_event = lambda name, payload: events.append((name, payload))
+    agent.ask("Finde Cafés", stream=False)
+
+    done = [payload for name, payload in events if name == "action_done"]
+    assert done and "cafe-sonntag.de" in done[0]["result"]
+
+
+def test_a_long_tool_result_is_shortened_for_reading_along(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Mitlesen soll erkennbar machen, was zurueckkam -- nicht die halbe Seite."""
+    from scoutr import agent as agent_module
+
+    monkeypatch.setattr(
+        "scoutr.tools.search_web",
+        lambda query, **kwargs: [
+            SearchResult(title="T" * 400, url=f"https://a.de/{i}", snippet="S" * 400)
+            for i in range(20)
+        ],
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("web_search", {"query": "viel"})]),
+        _message(content="Fertig."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.on_event = lambda name, payload: events.append((name, payload))
+    agent.ask("Finde etwas", stream=False)
+
+    done = [payload for name, payload in events if name == "action_done"]
+    assert len(done[0]["result"]) <= agent_module.TRACE_CHARS
+
+
+def test_reasoning_tokens_are_passed_on_but_never_answered(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Denkschritte sind zum Mitlesen da. In der Antwort haben sie nichts verloren."""
+    thinking = iter(
+        [
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None, tool_calls=None, reasoning_content="Erst mal "
+                        )
+                    )
+                ]
+            ),
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(
+                            content=None, tool_calls=None, reasoning_content="nachdenken."
+                        )
+                    )
+                ]
+            ),
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(delta=SimpleNamespace(content="Die Antwort.", tool_calls=None))
+                ]
+            ),
+        ]
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(thinking))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.on_event = lambda name, payload: events.append((name, payload))
+    result = agent.ask("Was ist zwei plus zwei?", stream=True)
+
+    thoughts = "".join(payload["text"] for name, payload in events if name == "thought")
+    assert thoughts == "Erst mal nachdenken."
+    assert result.answer == "Die Antwort."
+    assert "nachdenken" not in result.answer
+
+
+# ---------------------------------------------------------------------------
+# Gmail und Kalender: nur, wenn freigegeben
+# ---------------------------------------------------------------------------
+def test_the_model_never_sees_the_mail_tools_by_default(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Was aus ist, existiert fuer das Modell gar nicht."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    names = {schema["function"]["name"] for schema in agent.tools}
+    assert "mail_search" not in names
+    assert "calendar_events" not in names
+    assert "Gmail" not in agent.messages[0]["content"]
+
+
+def test_switching_it_on_offers_the_tools(settings: Settings, toolbox: Toolbox) -> None:
+    settings.google_enabled = True
+    settings.google_client_id = "id.apps.googleusercontent.com"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    names = {schema["function"]["name"] for schema in agent.tools}
+    assert {"calendar_events", "mail_search", "mail_read"} <= names
+
+
+def test_without_credentials_it_stays_off(settings: Settings, toolbox: Toolbox) -> None:
+    """Der Haken allein reicht nicht -- ohne Anwendung geht ohnehin nichts."""
+    settings.google_enabled = True
+    settings.google_client_id = ""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    names = {schema["function"]["name"] for schema in agent.tools}
+    assert "mail_search" not in names
+
+
+def test_the_prompt_forbids_private_content_in_search_queries(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ein Betreff in einer Suchanfrage ginge an eine fremde Suchmaschine."""
+    settings.google_enabled = True
+    settings.google_client_id = "id.apps.googleusercontent.com"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    prompt = agent.messages[0]["content"]
+    assert "NIEMALS" in prompt
+    assert "Suchanfrage" in prompt
+
+
+def test_the_prompt_says_it_cannot_send_mail(settings: Settings, toolbox: Toolbox) -> None:
+    settings.google_enabled = True
+    settings.google_client_id = "id.apps.googleusercontent.com"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert "nur lesen" in agent.messages[0]["content"].lower()

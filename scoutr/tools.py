@@ -16,7 +16,14 @@ from scoutr.config import Settings
 from scoutr.extract import extract_product, has_spec_heading
 from scoutr.fetch import Fetcher, load_rules
 from scoutr.models import PageResult, Product, SearchResult, domain_of
-from scoutr.search import OPEN_BACKEND_NAMES, SearchError, search_news, search_web
+from scoutr.queries import MAX_VARIANTS, variants
+from scoutr.search import (
+    OPEN_BACKEND_NAMES,
+    SearchError,
+    search_broadly,
+    search_news,
+    search_web,
+)
 
 #: Callback fuer die Live-Anzeige: (event, payload)
 EventHook = Callable[[str, dict[str, Any]], None]
@@ -66,18 +73,36 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "web_search",
             "description": (
-                "Schickt eine Suchanfrage ans Web und liefert Titel, URL und Snippet je Treffer. "
-                "Formuliere mehrere unterschiedliche Anfragen statt nur einer. "
-                "Baue Ort, Stadt oder Region direkt in die Anfrage ein, wenn der Nutzer einen "
-                "Ort genannt hat."
+                "Sucht im Web und liefert Titel, URL und Snippet je Treffer. "
+                "Du kannst in EINEM Aufruf mehrere Formulierungen derselben Frage "
+                "mitgeben (Feld 'queries'); die Trefferlisten werden zusammengefuehrt, "
+                "und was mehrere Anfragen uebereinstimmend oben haben, steht vorn. "
+                "Das kostet nur einen Werkzeugaufruf statt drei. "
+                "Schreibe kurze Stichwortanfragen aus drei bis sechs Woertern, keine "
+                "ganzen Fragesaetze, und lass das Hauptthema in jeder Variante stehen. "
+                "Anfuehrungszeichen erzwingen die genaue Wortfolge, 'site:domain.de' "
+                "beschraenkt auf eine Seite. Baue Ort, Stadt oder Region direkt ein, "
+                "wenn der Nutzer einen Ort genannt hat."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Die Suchanfrage."},
+                    "queries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Weitere Formulierungen derselben Frage (hoechstens zwei "
+                            "zusaetzliche). Andere Woerter, anderer Blickwinkel -- nicht "
+                            "dieselbe Anfrage zweimal."
+                        ),
+                    },
                     "count": {
                         "type": "integer",
-                        "description": "Gewuenschte Trefferzahl (1-20, Default 8).",
+                        "description": (
+                            "Gewuenschte Trefferzahl (1-20). Fuer eine einzelne Tatsache "
+                            "reichen 5, zum Vergleichen mehrerer Quellen nimm 10."
+                        ),
                     },
                     "country": {
                         "type": "string",
@@ -402,6 +427,76 @@ MEMORY_SCHEMA: dict[str, Any] = {
 
 # News-Suche und Rechner gehoeren zum Kern -- auch Subagenten sollen aktuelle
 # Meldungen finden und richtig rechnen koennen.
+# ---------------------------------------------------------------------------
+# Gmail und Kalender -- nur lesen, und nur wenn eingeschaltet
+# ---------------------------------------------------------------------------
+CALENDAR_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "calendar_events",
+        "description": (
+            "Liest Termine aus dem Google Kalender des Nutzers -- nur lesend, "
+            "es wird nie etwas eingetragen oder geaendert. Nimm das fuer Fragen "
+            "nach Terminen ('was habe ich morgen vor', 'wann ist der Zahnarzt') "
+            "und um Zeitangaben einzuordnen, bevor du im Web suchst."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "description": "Wie viele Tage im Voraus (1-365, Default 7).",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optionaler Suchbegriff im Titel oder Ort.",
+                },
+                "count": {"type": "integer", "description": "Hoechstzahl Termine (1-20)."},
+            },
+        },
+    },
+}
+
+MAIL_SEARCH_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "mail_search",
+        "description": (
+            "Sucht in den Mails des Nutzers und liefert Absender, Betreff, Datum "
+            "und die ersten Zeilen -- nur lesend, es wird nie etwas verschickt, "
+            "beantwortet oder geloescht. Die Anfrage nutzt die Gmail-Syntax: "
+            "'from:dhl', 'subject:Rechnung', 'newer_than:7d', 'is:unread', "
+            "'has:attachment'. Fuer den vollen Text danach mail_read benutzen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Gmail-Suchanfrage."},
+                "count": {"type": "integer", "description": "Hoechstzahl Mails (1-20)."},
+            },
+        },
+    },
+}
+
+MAIL_READ_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "mail_read",
+        "description": (
+            "Liest den Text einer einzelnen Mail. Die Kennung kommt aus "
+            "mail_search."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string", "description": "Kennung aus mail_search."},
+            },
+            "required": ["message_id"],
+        },
+    },
+}
+
+
 TOOL_SCHEMAS.extend([NEWS_SCHEMA, CALC_SCHEMA])
 
 
@@ -424,6 +519,7 @@ class ToolStats:
     lan_scans: int = 0
     ha_reads: int = 0
     ha_calls: int = 0
+    google_reads: int = 0
 
     @property
     def tool_calls(self) -> int:
@@ -438,6 +534,7 @@ class ToolStats:
             + self.lan_scans
             + self.ha_reads
             + self.ha_calls
+            + self.google_reads
         )
 
     def reset(self) -> None:
@@ -454,6 +551,7 @@ class ToolStats:
         self.lan_scans = 0
         self.ha_reads = 0
         self.ha_calls = 0
+        self.google_reads = 0
 
 
 class Toolbox:
@@ -489,84 +587,129 @@ class Toolbox:
         )
         #: Suchtreffer nach URL, damit blockierte Seiten wenigstens als Link taugen.
         self.seen_results: dict[str, SearchResult] = {}
+        #: Der Google-Zugriff wird erst beim ersten Aufruf gebaut -- ohne
+        #: verbundenes Konto soll gar nichts davon geladen werden.
+        self._google_client: Any = None
 
     def close(self) -> None:
         self._fetcher.close()
+        if self._google_client is not None:
+            self._google_client.close()
 
     def _emit(self, event: str, **payload: Any) -> None:
         if self.on_event:
             self.on_event(event, payload)
 
     # -- Werkzeug 1 -------------------------------------------------------
+    def _plan_queries(self, query: str, extra: list[str] | None) -> list[str]:
+        """Welche Anfragen wirklich rausgehen.
+
+        Zuerst, was das Modell selbst formuliert hat -- semantische Varianten
+        kann es besser als jede Wortliste. Dazu die Stichwortfassung der
+        ersten Anfrage. Mehr als drei werden es nicht: ab der vierten
+        Formulierung nehmen die Treffer nicht mehr zu, nur noch der Streuung.
+        """
+        wanted: list[str] = []
+        for candidate in [query, *(extra or [])]:
+            candidate = " ".join((candidate or "").split())
+            if candidate and candidate.lower() not in {q.lower() for q in wanted}:
+                wanted.append(candidate)
+        if not wanted:
+            return []
+        limit = max(1, min(int(self.settings.search_variants or 1), MAX_VARIANTS))
+        if len(wanted) < limit:
+            for candidate in variants(wanted[0], extra=limit - len(wanted)):
+                if candidate.lower() not in {q.lower() for q in wanted}:
+                    wanted.append(candidate)
+        return wanted[:limit]
+
     def web_search(
         self,
         query: str,
         count: int = 0,
         country: str = "",
         lang: str = "",
+        queries: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Sucht im Web und liefert Treffer als einfache Dicts."""
+        """Sucht im Web und liefert Treffer als einfache Dicts.
+
+        Gesucht wird nicht mit einer Formulierung, sondern mit bis zu drei --
+        den eigenen des Modells und einer Stichwortfassung. Die Listen werden
+        anschliessend zusammengemischt, wobei zaehlt, was mehrere Anfragen
+        uebereinstimmend weit oben haben.
+        """
         query = (query or "").strip()
         count = int(count or self.settings.max_results_default)
         country = (country or self.settings.country or "de").lower()
         lang = (lang or self.settings.lang or "de").lower()
 
-        self.stats.searches.append(query)
-        self._emit("search", query=query, count=count)
+        wanted = self._plan_queries(query, queries)
+        label = query or (wanted[0] if wanted else "")
+        self.stats.searches.append(label)
+        self._emit("search", query=label, count=count, queries=wanted)
 
-        if not query:
+        if not wanted:
             return {"query": query, "results": [], "error": "Leere Suchanfrage."}
 
         key = cache_key(
             "search",
             self.settings.search_backend,
             self.settings.search_engines,
-            query,
+            "|".join(wanted),
             count,
             country,
             lang,
         )
         cached = self.cache.get(key) if self.cache else None
+        used = wanted
         if cached is not None:
             results = [SearchResult(**item) for item in cached]
         else:
-            try:
-                results = search_web(
-                    query,
-                    count=count,
+            def configured(query_text: str, wanted_count: int) -> list[SearchResult]:
+                return search_web(
+                    query_text,
+                    count=wanted_count,
                     country=country,
                     lang=lang,
                     backend=self.settings.search_backend,
                     engines=self.settings.search_engines,
                     instance_url=self.settings.searxng_url,
                 )
+
+            def plain(query_text: str, wanted_count: int) -> list[SearchResult]:
+                """Die offene Metasuche -- ohne Key, praktisch immer erreichbar."""
+                return search_web(query_text, count=wanted_count, country=country, lang=lang)
+
+            try:
+                results, used = search_broadly(wanted, count, configured)
             except SearchError as exc:
                 # Fallback: faellt das konfigurierte Backend aus (SearXNG down,
                 # API-Limit), uebernimmt die offene Metasuche -- die braucht
                 # nichts und ist praktisch immer da.
                 if self.settings.search_backend in OPEN_BACKEND_NAMES:
                     self._emit("error", message=str(exc))
-                    return {"query": query, "results": [], "error": str(exc)}
+                    return {"query": label, "results": [], "error": str(exc)}
                 self._emit("fallback", source=self.settings.search_backend, target="metasuche")
                 try:
-                    results = search_web(query, count=count, country=country, lang=lang)
+                    results, used = search_broadly(wanted, count, plain)
                 except SearchError as second:
                     self._emit("error", message=str(second))
-                    return {"query": query, "results": [], "error": str(second)}
+                    return {"query": label, "results": [], "error": str(second)}
             if self.cache:
                 self.cache.set(
                     key,
                     [result.model_dump() for result in results],
                     kind="search",
-                    label=query,
+                    label=label,
                 )
 
         for result in results:
             self.seen_results.setdefault(result.url, result)
 
-        self._emit("search_done", query=query, hits=len(results))
+        self._emit("search_done", query=label, hits=len(results), queries=used)
         return {
-            "query": query,
+            "query": label,
+            "queries": used,
             "country": country,
             "lang": lang,
             "results": [result.as_tool_dict() for result in results],
@@ -643,15 +786,118 @@ class Toolbox:
                 )
             ]
 
+    # -- Werkzeug: Gmail und Kalender -------------------------------------
+    def _google(self) -> Any:
+        """Der Zugriff auf das verbundene Konto, einmal je Toolbox aufgebaut."""
+        from scoutr.google import Google, TokenStore
+
+        if self._google_client is None:
+            self._google_client = Google(
+                self.settings.google_client_id,
+                self.settings.google_client_secret,
+                TokenStore(self.settings.data_dir, self.settings.memory_key),
+            )
+        return self._google_client
+
+    def _google_ready(self) -> str:
+        """Leerer String heisst "kann losgehen", sonst steht da der Grund."""
+        if not self.settings.google_enabled:
+            return (
+                "Der Zugriff auf Gmail und Kalender ist abgeschaltet. Der Nutzer "
+                "schaltet ihn in den Einstellungen unter 'Gmail & Kalender' ein."
+            )
+        if not self.settings.google_client_id:
+            return (
+                "Es fehlen die Zugangsdaten der Google-Anwendung (GOOGLE_CLIENT_ID). "
+                "Die Einrichtung steht in der README unter 'Gmail und Kalender'."
+            )
+        if not self._google().connected():
+            return (
+                "Es ist kein Google-Konto verbunden. Der Nutzer klickt in den "
+                "Einstellungen auf 'Verbinden' -- oder `cortex google` im Terminal."
+            )
+        return ""
+
+    def calendar_events(
+        self, days: int = 7, query: str = "", count: int = 10
+    ) -> dict[str, Any]:
+        """Liest Termine aus dem Google Kalender."""
+        from scoutr.google import GoogleError
+
+        problem = self._google_ready()
+        if problem:
+            return {"error": problem}
+        self._emit("calendar", days=days, query=query)
+        try:
+            events = self._google().events(days=days, query=query, count=count)
+        except GoogleError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.google_reads += 1
+        self._emit("calendar_done", found=len(events))
+        return {
+            "days": days,
+            "count": len(events),
+            "events": events,
+            "note": (
+                "Nur der Hauptkalender. Ein leeres Ergebnis heisst 'nichts eingetragen', "
+                "nicht 'nichts los'."
+                if not events
+                else ""
+            ),
+        }
+
+    def mail_search(self, query: str = "", count: int = 8) -> dict[str, Any]:
+        """Sucht in den Mails des Nutzers -- Kopfzeilen, kein Volltext."""
+        from scoutr.google import GoogleError
+
+        problem = self._google_ready()
+        if problem:
+            return {"error": problem}
+        self._emit("mail", query=query or "neueste")
+        try:
+            mails = self._google().search_mail(query=query, count=count)
+        except GoogleError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.google_reads += 1
+        self._emit("mail_done", found=len(mails))
+        return {
+            "query": query,
+            "count": len(mails),
+            "mails": mails,
+            "note": "Fuer den vollen Text mail_read mit der jeweiligen id aufrufen.",
+        }
+
+    def mail_read(self, message_id: str) -> dict[str, Any]:
+        """Liest eine einzelne Mail."""
+        from scoutr.google import GoogleError
+
+        problem = self._google_ready()
+        if problem:
+            return {"error": problem}
+        self._emit("mail", query=f"Mail {message_id}")
+        try:
+            mail = self._google().read_mail(message_id)
+        except GoogleError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.google_reads += 1
+        self._emit("mail_done", found=1)
+        return mail
+
     # -- Dispatch ---------------------------------------------------------
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt den Tool-Call *name* mit *arguments* aus."""
         if name == "web_search":
+            more = arguments.get("queries") or []
             return self.web_search(
                 query=str(arguments.get("query", "")),
                 count=int(arguments.get("count") or 0),
                 country=str(arguments.get("country") or ""),
                 lang=str(arguments.get("lang") or ""),
+                # Manche Modelle schicken einen String statt einer Liste.
+                queries=[str(item) for item in more] if isinstance(more, list) else [str(more)],
             )
         if name == "fetch_page":
             return self.fetch_page(url=str(arguments.get("url", "")))
@@ -674,6 +920,19 @@ class Toolbox:
                 subnet=str(arguments.get("subnet") or ""),
                 thorough=bool(arguments.get("thorough")),
             )
+        if name == "calendar_events":
+            return self.calendar_events(
+                days=int(arguments.get("days") or 0),
+                query=str(arguments.get("query") or ""),
+                count=int(arguments.get("count") or 0),
+            )
+        if name == "mail_search":
+            return self.mail_search(
+                query=str(arguments.get("query") or ""),
+                count=int(arguments.get("count") or 0),
+            )
+        if name == "mail_read":
+            return self.mail_read(message_id=str(arguments.get("message_id", "")))
         if name == "lan_check":
             return self.lan_check(host=str(arguments.get("host", "")))
         if name == "ha_states":

@@ -1,6 +1,6 @@
 [project]
 name = "scoutr"
-version = "7.3.3"
+version = "7.4.5"
 description = "Ein KI-Agent fuer Kommandozeile und Browser, der eigenstaendig das Web durchsucht, Seiten liest und die Ergebnisse ausgewertet zurueckgibt."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,6 +40,10 @@ dev = [
 ]
 
 [project.scripts]
+# Der Befehl heisst cortex. `scoutr` bleibt daneben bestehen -- es steht in
+# Skripten, Diensten und Notizen, und ein Umbenennen, das die alten Aufrufe
+# stumm zerbricht, waere kein guter Tausch.
+cortex = "scoutr.cli:main"
 scoutr = "scoutr.cli:main"
 
 [project.urls]

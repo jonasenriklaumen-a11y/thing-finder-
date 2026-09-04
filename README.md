@@ -6,13 +6,14 @@ ausgewertet zurück, mit Quelle zu jeder Angabe. **Und er kennt dein Zuhause:** 
 ins eigene Netz und liest Home Assistant, beantwortet also auch Fragen, die im Web gar
 nicht stehen können.
 
-Installiert und gestartet wird er über das Kommandozeilenwerkzeug `scoutr` — im
-Terminal (`scoutr`), im Browser (`scoutr web`) und vom Handy aus (`scoutr web --lan`),
-überall derselbe Agent mit denselben Einstellungen. `scoutr` ist der Name des
-Werkzeugs; **Cortex AI** ist der Name, mit dem der Agent sich selbst vorstellt.
+Installiert und gestartet wird er über das Kommandozeilenwerkzeug `cortex` — im
+Terminal (`cortex`), im Browser (`cortex web`) und vom Handy aus (`cortex web --lan`),
+überall derselbe Agent mit denselben Einstellungen. Der alte Name `scoutr` funktioniert
+weiter: beide Befehle starten dasselbe Programm, damit bestehende Skripte und Dienste
+nicht kaputtgehen.
 
 ```
-$ scoutr
+$ cortex
 
 > Finde mir gute Cafés in Mönchengladbach mit WLAN
 
@@ -42,13 +43,13 @@ cd thing-finder-
 uv tool install .
 
 # 2. Einrichten -- fragt nach Modell und API-Key, testet beide
-scoutr setup
+cortex setup
 
 # 3. Loslegen -- im Terminal
-scoutr
+cortex
 
 # ... oder im Browser (oeffnet sich von selbst)
-scoutr web
+cortex web
 ```
 
 **Aktualisieren** — beide Befehle müssen *im Repo-Verzeichnis* laufen, nicht im
@@ -58,12 +59,12 @@ Home-Verzeichnis:
 cd ~/thing-finder-          # dorthin, wo du geklont hast
 git pull
 uv tool install . --force --reinstall
-scoutr --version            # zeigt, ob die neue Version aktiv ist
+cortex --version            # zeigt, ob die neue Version aktiv ist
 ```
 
 > Voraussetzungen: Python 3.11+ und [uv](https://docs.astral.sh/uv/). Sobald das Paket
 > veröffentlicht ist, genügt `uv tool install scoutr`. Zum Entwickeln stattdessen
-> `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run scoutr ...` aufrufen.
+> `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run cortex ...` aufrufen.
 
 ### Windows
 
@@ -79,19 +80,19 @@ cd thing-finder-
 uv tool install .
 uv tool update-shell        # danach PowerShell neu öffnen
 
-scoutr install-model        # holt Ollama per winget und lädt die Modelle
+cortex install-model        # holt Ollama per winget und lädt die Modelle
 ```
 
 Unterschiede zu Linux und macOS:
 
 * Ollama kommt per `winget install Ollama.Ollama`; ohne winget lädst du den Installer von
-  [ollama.com/download](https://ollama.com/download) und startest `scoutr install-model`
+  [ollama.com/download](https://ollama.com/download) und startest `cortex install-model`
   danach erneut.
-* Pfade mit Backslash und Anführungszeichen: `scoutr --image "C:\Users\du\Bilder"`
+* Pfade mit Backslash und Anführungszeichen: `cortex --image "C:\Users\du\Bilder"`
 * Pfeiltasten-History im Chat gibt es nur mit `pip install pyreadline3`.
 * Der Ollama-Server läuft im Hintergrund, ohne dass ein Konsolenfenster aufgeht.
 
-`scoutr setup` fragt genau zwei Dinge ab:
+`cortex setup` fragt genau zwei Dinge ab:
 
 | Was | Wo bekommt man es | Pflicht? |
 |---|---|---|
@@ -104,16 +105,16 @@ Beide werden direkt mit einem Probe-Request getestet, bevor die `.env` geschrieb
 Ohne Chat, für einen einzelnen Durchlauf:
 
 ```bash
-scoutr "welche Bahnstrecken in NRW sind gerade gesperrt?"
+cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 ```
 
 ## Beispiel-Session
 
 ```
-$ scoutr --location "Mönchengladbach" --lang de
+$ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ scoutr 0.1.0                                         │
+│ Cortex AI 7.4.5                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -165,7 +166,7 @@ so oft er will:
 4. `calculate(expression)` — exakte Arithmetik (auch `1.099,99`), damit Preisvergleiche
    nie auf Kopfrechnen kleiner Modelle beruhen.
 5. `remember(text)` — schreibt auf einen dauerhaften Merkzettel, aber nur auf
-   ausdrückliche Bitte („merk dir …"). Anzeigen mit `/notes` bzw. `scoutr notes`.
+   ausdrückliche Bitte („merk dir …"). Anzeigen mit `/notes` bzw. `cortex notes`.
 
 Ob Instagram, Amazon, ein Branchenbuch oder die Website eines Ladens: Alles sind einfach
 Suchtreffer, die gelesen werden können. Es gibt bewusst keine plattformspezifischen
@@ -247,7 +248,7 @@ bisherige Gespräch als Zusammenhang mit, damit die Teilfragen für sich verstä
 Der Hauptagent darf zusätzlich jederzeit selbst weitere Teilfragen abgeben
 (`research_subtasks`), wenn ihm im Verlauf etwas fehlt.
 
-**Abschalten** fragt `scoutr setup` direkt ab, oder von Hand:
+**Abschalten** fragt `cortex setup` direkt ab, oder von Hand:
 
 ```bash
 SCOUTR_SUBAGENTS_AUTO=false     # nur noch auf Wunsch des Modells
@@ -257,7 +258,7 @@ SCOUTR_MAX_SUBAGENTS=0          # ganz aus, zurück zu zwei Werkzeugen
 #### Eigenes Modell für die Subagenten
 
 Teilfragen sind eng umrissen — dafür reicht ein kleines Modell, das neben dem
-Hauptmodell in den Speicher passt. `scoutr install-model` fragt danach; Stand August 2026:
+Hauptmodell in den Speicher passt. `cortex install-model` fragt danach; Stand August 2026:
 
 | Modell | ca. Größe | ab VRAM |
 |---|---|---|
@@ -280,7 +281,7 @@ Was nicht gefunden wurde, wird als „nicht gefunden" gekennzeichnet — niemals
 ## Weboberfläche
 
 ```bash
-scoutr web
+cortex web
 ```
 
 Startet eine Oberfläche im Stil eines Chat-Fensters und öffnet den Browser. Es ist
@@ -290,7 +291,9 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
 
 * **Grün auf Schwarz**, per Knopf umschaltbar auf Weiß. Die Versionsnummer steht klein
   in der Kopfzeile.
-* **Einstellungen** öffnet ein Formular mit *allem*, was auch `scoutr setup` fragt:
+* **Einstellungen** öffnet ein Formular mit *allem*, was auch `cortex setup` fragt —
+  und ein Test hält das dauerhaft in Deckung: kommt im Terminal eine Frage dazu,
+  schlägt er fehl, bis das Formular nachzieht. Enthalten sind:
   Haupt-, Vision- und Subagenten-Modell, API-Key, API-Basis, Suchmaschine samt Engine-
   Liste und SearXNG-URL, Ort/Sprache/Land, Subagenten an/aus samt Budget und
   Parallelität, Werkzeug-Budget, Kontextfenster, Planungs-Zeitlimit und der
@@ -310,6 +313,16 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   sammelt alles Weitere, bis du den nächsten startest. Klick auf einen Eintrag holt
   ihn zurück — samt Verlauf, an den der Agent wieder anknüpft. Neueste oben.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
+* **Mitlesen** unter *Einstellungen → Mitlesen*: Der Haken „Gedanken und Aktionen
+  mitlesen" zeigt während der Antwort, was Cortex AI gerade denkt und tut — jede
+  Suchanfrage im Wortlaut, jeden Werkzeugaufruf mit seinen Argumenten, was
+  zurückkam, und bei Modellen, die ihre Denkschritte offenlegen, auch die. Der
+  Schalter wirkt sofort und auch rückwirkend auf die Antwort, die schon dasteht:
+  die Zeilen sind die ganze Zeit da, sie werden nur ein- und ausgeblendet.
+* **Verbindung testen** im Feld *Suche*: schickt eine winzige Anfrage ans Modell und
+  eine Testsuche los — dasselbe, was `cortex setup` am Ende macht. Geprüft wird, was
+  gerade im Formular steht, nicht der gespeicherte Stand; so sieht man vor dem
+  Speichern, ob ein Schlüssel stimmt.
 * **Auslastung** unter *Einstellungen → Auslastung*: Der Haken „Auslastung des
   Rechners anzeigen" blendet Prozessor, Arbeitsspeicher, Festplatte, Grafikkarte und
   den belegten Speicher als Kacheln ein — alle vier Sekunden aufgefrischt, solange das
@@ -321,17 +334,17 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   im Ordner nimmt er das neueste.
 
 ```bash
-scoutr web --port 9000     # anderer Port, falls 8765 belegt ist
-scoutr web --no-open       # ohne Browser zu öffnen
+cortex web --port 9000     # anderer Port, falls 8765 belegt ist
+cortex web --no-open       # ohne Browser zu öffnen
 ```
 
 Der Server läuft auf der Standardbibliothek, braucht also keine zusätzliche
 Abhängigkeit. Beenden mit <kbd>Strg</kbd>+<kbd>C</kbd>.
 
-### Vom Handy oder Tablet: `scoutr web --lan`
+### Vom Handy oder Tablet: `cortex web --lan`
 
 ```bash
-scoutr web --lan
+cortex web --lan
 ```
 
 Damit hört scoutr auf allen Netzwerkkarten und nennt dir jede Adresse, unter der
@@ -339,7 +352,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ scoutr 5.2                                                        │
+│ Cortex AI 7.4.5                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -356,8 +369,8 @@ nachschlagen. Die Tailscale-Adresse erscheint nur, wenn Tailscale auch läuft.
 Wer den Zugang trotzdem einschränken will, vergibt ein Wort:
 
 ```bash
-scoutr web --lan --token familie   # dann nur mit ?token=familie in der Adresse
-scoutr web --host 192.168.1.44     # gezielt eine Netzwerkkarte
+cortex web --lan --token familie   # dann nur mit ?token=familie in der Adresse
+cortex web --host 192.168.1.44     # gezielt eine Netzwerkkarte
 ```
 
 Das Wort hängt hinten an der Adresse. Nur der erste Aufruf braucht es — danach
@@ -388,7 +401,7 @@ ohne eine solche Freigabe — genau dafür ist es da.
 | `/export html\|md\|csv` | Recherche dieser Sitzung speichern |
 | `/image <pfad>` | Bild beschreiben lassen, danach damit recherchieren |
 | `/history` | frühere Recherchen anzeigen |
-| `/notes` | Merkzettel anzeigen (pflegen: `scoutr notes --delete N`) |
+| `/notes` | Merkzettel anzeigen (pflegen: `cortex notes --delete N`) |
 | `/clear` | Gesprächsverlauf verwerfen |
 | `/help` | Übersicht |
 | `/quit` | beenden (auch <kbd>Strg</kbd>+<kbd>D</kbd>) |
@@ -406,29 +419,29 @@ schreibt sie in die Antwort.
 ### Flags
 
 ```bash
-scoutr --location "Mönchengladbach" --lang de   # Ortsfilter vorgeben
-scoutr --model openai/gpt-4o                    # Modell für diese Sitzung
-scoutr --image foto.jpg                         # Bild als Ausgangspunkt
-scoutr --max-calls 30                           # Werkzeug-Budget ändern
-scoutr --no-stream                              # Antwort am Stück statt gestreamt
-scoutr --download-images                        # Bilder beim Export mitspeichern
+cortex --location "Mönchengladbach" --lang de   # Ortsfilter vorgeben
+cortex --model openai/gpt-4o                    # Modell für diese Sitzung
+cortex --image foto.jpg                         # Bild als Ausgangspunkt
+cortex --max-calls 30                           # Werkzeug-Budget ändern
+cortex --no-stream                              # Antwort am Stück statt gestreamt
+cortex --download-images                        # Bilder beim Export mitspeichern
 ```
 
 ### Weitere Unterbefehle
 
 ```bash
-scoutr search "cafés mönchengladbach"    # nur web_search, ohne LLM
-scoutr fetch https://example.de/         # nur fetch_page, ohne LLM
-scoutr cache                             # Cache-Statistik, --clear leert ihn
-scoutr history                           # vergangene Recherchen
-scoutr export html -n 3                  # letzte 3 Recherchen exportieren
-scoutr config                            # aktive Konfiguration prüfen
-scoutr install-model                     # lokales Modell einrichten (ohne Key)
-scoutr install-browser                   # Playwright-Fallback aktivieren
-scoutr web                               # Oberflaeche im Browser starten
-scoutr web --lan                         # auch vom Handy im heimischen Netz
-scoutr lan                               # Geraete im eigenen Netz anzeigen
-scoutr connect-ha                        # Home Assistant verbinden
+cortex search "cafés mönchengladbach"    # nur web_search, ohne LLM
+cortex fetch https://example.de/         # nur fetch_page, ohne LLM
+cortex cache                             # Cache-Statistik, --clear leert ihn
+cortex history                           # vergangene Recherchen
+cortex export html -n 3                  # letzte 3 Recherchen exportieren
+cortex config                            # aktive Konfiguration prüfen
+cortex install-model                     # lokales Modell einrichten (ohne Key)
+cortex install-browser                   # Playwright-Fallback aktivieren
+cortex web                               # Oberflaeche im Browser starten
+cortex web --lan                         # auch vom Handy im heimischen Netz
+cortex lan                               # Geraete im eigenen Netz anzeigen
+cortex connect-ha                        # Home Assistant verbinden
 ```
 
 ## Der Speicher: was Cortex AI behält
@@ -476,11 +489,97 @@ Benutzerkonto sitzt — der liest den Schlüssel einfach mit.
 Wer auch das abdecken will, setzt eine Passphrase:
 
 ```bash
-SCOUTR_MEMORY_KEY="ein langes Passwort" scoutr web
+SCOUTR_MEMORY_KEY="ein langes Passwort" cortex web
 ```
 
 Dann wird der Schlüssel bei jedem Start neu abgeleitet und liegt nirgends auf der
 Platte. Der Preis: ohne die Passphrase ist der Speicher unwiederbringlich weg.
+
+## Gmail und Google Kalender
+
+„Wann ist mein Zahnarzttermin", „ist die Rechnung schon gekommen", „was habe ich
+Donnerstag vor" — dafür muss niemand das Web durchsuchen. Cortex AI kann direkt in
+deinem Kalender und deinem Postfach nachsehen, wenn du es erlaubst.
+
+Die Angaben helfen auch bei einer Recherche: Steht der Termin in Hamburg, sucht er für
+Hamburg. Nennt die Bestellbestätigung eine Modellnummer, sucht er danach.
+
+**Nur lesen.** Angefragt werden ausschließlich die Leserechte `gmail.readonly` und
+`calendar.readonly`. Damit ist technisch ausgeschlossen, dass Cortex AI je eine Mail
+verschickt, beantwortet, löscht oder einen Termin ändert — Google lässt es schlicht
+nicht zu. Bittest du ihn trotzdem darum, sagt er, dass er das nicht kann.
+
+**Aus, bis du es einschaltest.** Ohne den Haken in den Einstellungen und ohne
+verbundenes Konto existieren die Werkzeuge für das Modell gar nicht.
+
+### Einrichten — einmal, etwa fünf Minuten
+
+Google verlangt für den Zugriff auf ein eigenes Konto eine eigene Anwendung. Das klingt
+umständlicher, als es ist, und es ist kostenlos.
+
+1. **Projekt anlegen.** Auf [console.cloud.google.com](https://console.cloud.google.com/)
+   anmelden, oben links auf die Projektauswahl, *Neues Projekt*. Der Name ist egal,
+   zum Beispiel „Cortex".
+2. **Die beiden APIs einschalten.** *APIs und Dienste → Bibliothek*, nach `Gmail API`
+   suchen, **Aktivieren**. Dasselbe mit `Google Calendar API`. Ohne diesen Schritt
+   antwortet Google später mit „has not been used in project".
+3. **Zustimmungsbildschirm.** *APIs und Dienste → OAuth-Zustimmungsbildschirm*,
+   Nutzertyp **Extern**. App-Name und deine Mailadresse eintragen. Unter
+   **Zielgruppe** dich selbst als **Testnutzer** hinzufügen — das ist der Schritt,
+   den fast alle vergessen; ohne ihn lehnt Google die Anmeldung ab.
+4. **Zugangsdaten.** *APIs und Dienste → Anmeldedaten → Anmeldedaten erstellen →
+   OAuth-Client-ID*, Anwendungstyp **Desktop-App**. Als autorisierte
+   Weiterleitungs-URI `http://localhost:8765/google` eintragen (bei anderem Port
+   entsprechend anpassen). Google zeigt dir danach **Client-ID** und
+   **Client-Secret**.
+5. **Verbinden.** Zwei Wege, beide gleichwertig:
+
+```bash
+cortex google          # fragt nach ID und Secret, führt durch die Anmeldung
+```
+
+   Oder in der Weboberfläche: *Einstellungen → Gmail & Kalender*, Haken setzen,
+   Client-ID und Secret einfügen, **speichern**, dann **Verbinden**. Du landest bei
+   Google, stimmst zu, und bist zurück.
+
+> **Vom Handy aus?** Google erlaubt für Desktop-Anwendungen nur `localhost` als
+> Rückweg. Sitzt dein Browser auf einem anderen Gerät als Cortex, zeigt er nach der
+> Zustimmung eine Fehlerseite — das ist normal. Kopiere die komplette Adresse aus der
+> Adresszeile und füge sie in das Feld unter *Verbinden* ein; der Code steht darin.
+
+### Was danach geht
+
+```
+> was habe ich diese Woche vor
+
+  [Termine] 7 Tage
+  Drei Termine:
+  1. Mi 09:30–10:00  Zahnarzt, Bremen
+  ...
+
+> habe ich eine Mail von der Bahn bekommen
+
+  [Mail] from:bahn newer_than:30d
+  Ja, zwei. Die neuere vom 3. September: „Ihre Reiseverbindung" ...
+```
+
+Der Agent bekommt drei Werkzeuge: `calendar_events` (Termine des Hauptkalenders),
+`mail_search` (Absender, Betreff, Datum, erste Zeilen — Gmail-Syntax wie `from:dhl`,
+`is:unread`, `newer_than:7d`) und `mail_read` (Text einer einzelnen Mail).
+
+### Was mit deinen Daten passiert
+
+* **Die Anmeldedaten bleiben auf deinem Rechner.** Access- und Refresh-Token liegen
+  verschlüsselt in `~/.scoutr/google.json` (dieselbe Fernet-Schlüsseldatei wie beim
+  Speicher, Rechte 600). Der Browser bekommt sie nie zu sehen — nur, *ob* ein Konto
+  verbunden ist und welche Adresse es hat.
+* **Nichts aus deinem Postfach geht an eine Suchmaschine.** Der Agent hat die
+  ausdrückliche Anweisung, niemals Namen, Adressen, Nummern oder Betreffs aus Mails
+  und Terminen in eine Suchanfrage zu setzen — die ginge an einen fremden Dienst. Er
+  sucht mit allgemeinen Begriffen; das Persönliche bleibt im Gespräch.
+* **Beenden jederzeit:** `cortex google --trennen` oder der Knopf *Trennen* in den
+  Einstellungen löscht die Anmeldedaten. Den Zugriff selbst entziehst du zusätzlich
+  unter [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ## Zuhause: Heimnetz und Home Assistant
 
@@ -491,9 +590,9 @@ nach.
 ### Das eigene Netz
 
 ```bash
-scoutr lan                      # zeigt, was erreichbar ist
-scoutr lan --thorough           # alle bekannten Ports statt der zwölf häufigsten
-scoutr lan --subnet 10.0.0.0/24
+cortex lan                      # zeigt, was erreichbar ist
+cortex lan --thorough           # alle bekannten Ports statt der zwölf häufigsten
+cortex lan --subnet 10.0.0.0/24
 ```
 
 ```
@@ -525,7 +624,7 @@ jede andere App, der du Zugriff gibst. Deine Installation bleibt unangetastet; s
 ist nur ein weiterer Client.
 
 ```bash
-scoutr connect-ha
+cortex connect-ha
 ```
 
 Das sucht die Instanz selbst im Netz (erst die üblichen Namen wie `homeassistant.local`,
@@ -561,7 +660,7 @@ Assistant selbst: dasselbe Menü, Token löschen, fertig.
 ### Im Container: die Netzwerkkarte des Rechners
 
 Läuft scoutr im Container, hängt er in Dockers eigenem Brücken-Netz — von dort ist dein
-Heimnetz **nicht** zu sehen, `scoutr lan` und `connect-ha` fänden schlicht nichts.
+Heimnetz **nicht** zu sehen, `cortex lan` und `connect-ha` fänden schlicht nichts.
 Deshalb:
 
 ```bash
@@ -581,7 +680,7 @@ offensichtlich außerhalb liegen, sortiert er aus. Zusätzlich vorgebbar per Fla
 Slash-Befehl:
 
 ```bash
-scoutr --location "Mönchengladbach" --lang de
+cortex --location "Mönchengladbach" --lang de
 ```
 ```
 /location Köln
@@ -590,9 +689,9 @@ scoutr --location "Mönchengladbach" --lang de
 ## Bild als Eingabe
 
 ```bash
-scoutr --image foto.jpg              # eine Datei
-scoutr --image ~/hallo1234           # ein Ordner -- scoutr sucht das Bild darin
-scoutr --image ~/hallo1234 "wo kann ich das kaufen?"
+cortex --image foto.jpg              # eine Datei
+cortex --image ~/hallo1234           # ein Ordner -- scoutr sucht das Bild darin
+cortex --image ~/hallo1234 "wo kann ich das kaufen?"
 ```
 
 Zeigt der Pfad auf einen **Ordner**, nimmt scoutr das einzige Bild darin; sind es mehrere,
@@ -607,10 +706,10 @@ Es wird nichts hochgeladen: scoutr liest die Datei von deiner Platte. Zuständig
 können keine Bilder sehen**. Ein lokales Vision-Modell richtest du so ein:
 
 ```bash
-scoutr install-model --vision-only
+cortex install-model --vision-only
 ```
 
-Welches Modell gerade zuständig ist, zeigt `scoutr config` in der Zeile „Vision-Modell".
+Welches Modell gerade zuständig ist, zeigt `cortex config` in der Zeile „Vision-Modell".
 
 ## Im Container laufen lassen
 
@@ -679,6 +778,32 @@ Die Suche kostet nichts und braucht **kein Konto**. Standard ist eine offene Met
 per HTML ab und mischt die Treffer. Fällt eine aus (Rate-Limit, Umbau), übernehmen die
 anderen — genau deshalb ist die Metasuche robuster als eine einzelne Engine.
 
+### Wie gesucht wird: mehrere Formulierungen statt einer
+
+Eine einzige Formulierung findet nur, was zufällig genau so im Netz steht. Cortex AI
+stellt dieselbe Frage deshalb mehrfach anders und führt die Trefferlisten zusammen —
+in der Fachsprache *query fan-out* mit *Reciprocal Rank Fusion*. Drei Regeln aus der
+Literatur stecken darin:
+
+1. **Kurze Stichwortanfragen schlagen ganze Sätze.** Aus „Wie viel kostet ein
+   gebrauchtes Lastenrad in Bremen?" wird zusätzlich „kostet gebrauchtes Lastenrad
+   Bremen". Drei bis sechs inhaltstragende Wörter, das Hauptthema in jeder Variante.
+2. **Zwei bis drei Formulierungen, nicht mehr.** Ab der vierten nehmen die Treffer
+   nicht mehr zu, nur noch die Streuung. `SCOUTR_SEARCH_VARIANTS=1` schaltet es ab.
+3. **Gemischt wird über die Plätze, nicht über Punktzahlen.** Jeder Treffer bekommt je
+   Liste `1/(60+Platz)` gutgeschrieben; was mehrere Anfragen übereinstimmend weit oben
+   haben, steht am Ende vorn. Punktzahlen verschiedener Engines lassen sich nicht
+   vergleichen, Plätze schon.
+
+Dazu kommt eine Grenze von zwei Treffern je Domain, damit nicht ein Portal die ganze
+erste Seite belegt — reicht es dann nicht, wird von hinten aufgefüllt.
+
+Das Modell kann in **einem** Werkzeugaufruf mehrere eigene Formulierungen mitgeben
+(Feld `queries`). Das kostet ein Budget statt drei, und die Ergebnisse landen in
+derselben zusammengeführten Liste. Die Anfragen laufen parallel, aber um
+Sekundenbruchteile versetzt: gleichzeitig abgefeuert quittieren die offenen Engines
+das gern mit einem Rate-Limit.
+
 Verfügbar ohne Key: `duckduckgo`, `mojeek`, `startpage`, `brave`, `yahoo`, `wikipedia`.
 
 ```bash
@@ -724,7 +849,7 @@ BRAVE_API_KEY=...
 Testen lässt sich jedes Backend ohne LLM:
 
 ```bash
-scoutr search "cafés mönchengladbach" -n 5
+cortex search "cafés mönchengladbach" -n 5
 ```
 
 ## Stabilität
@@ -801,7 +926,7 @@ JavaScript nichts liefern:
 
 ```bash
 uv tool install --with playwright scoutr
-scoutr install-browser
+cortex install-browser
 ```
 
 Dort wird auf Netzruhe gewartet, dann die **Ablehnen**-Schaltfläche der bekannten
@@ -896,6 +1021,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_API_KEY` | Key für Anbieter ohne eigenen Eintrag | — |
 | `SCOUTR_SEARCH_BACKEND` | `duckduckgo`, `searxng`, `brave`, `tavily` | `duckduckgo` |
 | `SCOUTR_SEARCH_ENGINES` | Engines der Metasuche einschränken | alle |
+| `SCOUTR_SEARCH_VARIANTS` | Formulierungen je Suche (`1` = aus) | `3` |
 | `SCOUTR_SEARXNG_URL` | Adresse der SearXNG-Instanz | — |
 | `SCOUTR_LOCATION` | Standard-Ortsfilter | — |
 | `SCOUTR_LANG` / `SCOUTR_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
@@ -914,13 +1040,15 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `SCOUTR_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
 | `SCOUTR_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
 | `SCOUTR_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
+| `SCOUTR_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | eigene Google-Anwendung | — |
 
 ### Ganz ohne API-Key: lokales Modell
 
 Ein Befehl, und scoutr richtet sich ein Modell auf deinem Rechner ein:
 
 ```bash
-scoutr install-model
+cortex install-model
 ```
 
 Der Befehl macht der Reihe nach:
@@ -949,10 +1077,10 @@ und muss die Farbe nennen. Ein Textmodell fällt dabei durch und wird nicht eing
 Ein bestimmtes Modell direkt:
 
 ```bash
-scoutr install-model --model qwen2.5:14b                  # nur Text
-scoutr install-model --vision-model llava:7b              # Text + Bild
-scoutr install-model --vision-only --vision-model llava:7b  # nur Bild nachrüsten
-scoutr install-model --model qwen2.5:7b --no-vision       # ohne Bild
+cortex install-model --model qwen2.5:14b                  # nur Text
+cortex install-model --vision-model llava:7b              # Text + Bild
+cortex install-model --vision-only --vision-model llava:7b  # nur Bild nachrüsten
+cortex install-model --model qwen2.5:7b --no-vision       # ohne Bild
 ```
 
 Mit `--yes` läuft alles ohne Rückfragen — ein Vision-Modell wird dann nur geladen, wenn
@@ -1009,7 +1137,7 @@ Jedes andere Ollama-Modell mit Werkzeug-Unterstützung geht auch — `--model` n
 Namen aus dem [Ollama-Katalog](https://ollama.com/library).
 
 > **Das Präfix muss `ollama_chat/` lauten, nicht `ollama/`.** Nur ersteres reicht
-> Werkzeuge durch; mit `ollama/` bleibt der Agent stumm. `scoutr install-model` schreibt
+> Werkzeuge durch; mit `ollama/` bleibt der Agent stumm. `cortex install-model` schreibt
 > automatisch das richtige.
 
 #### Wenn der Speicher knapp wird
@@ -1039,9 +1167,9 @@ Aufruf geht noch an einen fremden Dienst.
 Da LiteLLM als LLM-Schicht dient, ist der Anbieter austauschbar:
 
 ```bash
-scoutr --model openai/gpt-4o
-scoutr --model nvidia_nim/meta/llama-3.3-70b-instruct   # NVIDIA NIM
-scoutr --model ollama_chat/qwen2.5:7b                   # lokal, siehe oben
+cortex --model openai/gpt-4o
+cortex --model nvidia_nim/meta/llama-3.3-70b-instruct   # NVIDIA NIM
+cortex --model ollama_chat/qwen2.5:7b                   # lokal, siehe oben
 ```
 
 | Anbieter | Modell-Präfix | Key |

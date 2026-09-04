@@ -12,12 +12,19 @@ APIs mag, `brave` oder `tavily`. Ein Wechsel aendert nur diese Datei --
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 import httpx
 
 from scoutr.models import SearchResult, domain_of
+from scoutr.queries import fuse
+
+#: Abstand, mit dem parallele Anfragen losgeschickt werden. Gleichzeitig
+#: abgefeuert quittieren die offenen Engines das gern mit einem Rate-Limit.
+STAGGER_SECONDS = 0.35
 
 #: Offene Engines, die `ddgs` ohne Key abfragt.
 OPEN_ENGINES = ("duckduckgo", "mojeek", "startpage", "brave", "yahoo", "wikipedia")
@@ -186,7 +193,7 @@ def _search_searxng(query: str, options: SearchOptions) -> list[SearchResult]:
 def _search_brave(query: str, options: SearchOptions) -> list[SearchResult]:
     key = options.api_key or os.environ.get("BRAVE_API_KEY", "")
     if not key:
-        raise SearchError("BRAVE_API_KEY fehlt -- setze ihn per `scoutr setup`.")
+        raise SearchError("BRAVE_API_KEY fehlt -- setze ihn per `cortex setup`.")
     response = httpx.get(
         "https://api.search.brave.com/res/v1/web/search",
         params={
@@ -214,7 +221,7 @@ def _search_brave(query: str, options: SearchOptions) -> list[SearchResult]:
 def _search_tavily(query: str, options: SearchOptions) -> list[SearchResult]:
     key = options.api_key or os.environ.get("TAVILY_API_KEY", "")
     if not key:
-        raise SearchError("TAVILY_API_KEY fehlt -- setze ihn per `scoutr setup`.")
+        raise SearchError("TAVILY_API_KEY fehlt -- setze ihn per `cortex setup`.")
     response = httpx.post(
         "https://api.tavily.com/search",
         json={"api_key": key, "query": query, "max_results": min(max(options.count, 1), 20)},
@@ -338,3 +345,63 @@ def search_news(
         )
     return _dedupe(results, count)
 
+
+
+def search_broadly(
+    queries: Sequence[str],
+    count: int,
+    runner: Callable[[str, int], list[SearchResult]],
+    *,
+    stagger: float = STAGGER_SECONDS,
+) -> tuple[list[SearchResult], list[str]]:
+    """Mehrere Anfragen auf einmal stellen und die Listen mischen.
+
+    Welche Suchmaschine dahintersteckt, ist hier egal -- *runner* nimmt eine
+    Anfrage samt Trefferzahl und liefert eine Liste. Diese Funktion kuemmert
+    sich nur um das Nebeneinander und das Mischen.
+
+    Die Anfragen laufen parallel, aber leicht versetzt: gleichzeitig
+    losgeschickt handelt man sich bei den offenen Engines schnell ein
+    Rate-Limit ein, und dann hat man statt drei Listen gar keine. Der Versatz
+    kostet ein paar Zehntelsekunden und spart den Aerger.
+
+    Faellt eine Anfrage aus, zaehlen die anderen trotzdem; erst wenn *keine*
+    durchkommt, fliegt der Fehler nach oben.
+
+    Returns:
+        Die gemischte Trefferliste und die Anfragen, die etwas geliefert haben.
+
+    Raises:
+        SearchError: Wenn keine einzige Anfrage durchkam.
+    """
+    wanted = [query.strip() for query in queries if query and query.strip()]
+    if not wanted:
+        return [], []
+    if len(wanted) == 1:
+        return runner(wanted[0], count), wanted
+
+    # Etwas mehr je Anfrage holen, als am Ende gebraucht wird: erst die
+    # Ueberlappung zwischen den Listen macht das Mischen aussagekraeftig.
+    per_query = min(count + 4, 20)
+
+    def one(position: int, query: str) -> list[SearchResult]:
+        if position and stagger > 0:
+            time.sleep(position * stagger)
+        return runner(query, per_query)
+
+    lists: list[list[SearchResult]] = []
+    problems: list[str] = []
+    used: set[str] = set()
+    with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
+        jobs = {pool.submit(one, i, q): q for i, q in enumerate(wanted)}
+        for job in as_completed(jobs):
+            try:
+                lists.append(job.result())
+            except SearchError as exc:
+                problems.append(str(exc))
+            else:
+                used.add(jobs[job])
+
+    if not lists:
+        raise SearchError(problems[0] if problems else "Keine Suchanfrage kam durch.")
+    return fuse(lists, count), [query for query in wanted if query in used]

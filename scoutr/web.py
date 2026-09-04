@@ -14,12 +14,14 @@ import base64
 import binascii
 import contextlib
 import json
+import os
 import queue
 import secrets
 import socket
 import threading
 import time
 import webbrowser
+from html import escape
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,8 +32,10 @@ from scoutr import __version__
 from scoutr.cache import Cache
 from scoutr.config import (
     DEFAULT_ENV_PATH,
+    SEARCH_BACKEND_KEYS,
     Settings,
     api_key_name_for,
+    base_fits,
     find_env_file,
     get_settings,
     load_env,
@@ -43,7 +47,11 @@ from scoutr.config import (
 
 UI_FILE = Path(__file__).with_name("webui.html")
 
-#: Alles, was sich auch in `scoutr setup` einstellen laesst.
+#: Standardport der Oberflaeche. Steht hier, weil auch die
+#: Google-Rueckleitadresse ihn braucht.
+DEFAULT_PORT = 8765
+
+#: Alles, was sich auch in `cortex setup` einstellen laesst.
 SETTING_KEYS: tuple[str, ...] = (
     "SCOUTR_MODEL",
     "SCOUTR_VISION_MODEL",
@@ -51,6 +59,7 @@ SETTING_KEYS: tuple[str, ...] = (
     "SCOUTR_API_BASE",
     "SCOUTR_SEARCH_BACKEND",
     "SCOUTR_SEARCH_ENGINES",
+    "SCOUTR_SEARCH_VARIANTS",
     "SCOUTR_SEARXNG_URL",
     "SCOUTR_LOCATION",
     "SCOUTR_LANG",
@@ -65,6 +74,7 @@ SETTING_KEYS: tuple[str, ...] = (
     "SCOUTR_ENABLE_PLAYWRIGHT",
     "SCOUTR_HA_URL",
     "SCOUTR_HA_CONTROL",
+    "SCOUTR_GOOGLE",
     "SCOUTR_LAN_ENABLED",
     "SCOUTR_LAN_SUBNET",
     "SCOUTR_MEMORY",
@@ -75,6 +85,15 @@ API_KEY_FIELD = "__API_KEY__"
 
 #: Dasselbe fuer das Home-Assistant-Token.
 HA_TOKEN_FIELD = "__HA_TOKEN__"
+
+#: Schluessel der Suchmaschine (Brave, Tavily). Dasselbe Spiel wie beim
+#: Modell-Key: leer heisst "unveraendert", nicht "loeschen".
+SEARCH_KEY_FIELD = "__SEARCH_KEY__"
+
+#: Zugangsdaten der Google-Anwendung. Die ID darf zurueck in den Browser
+#: (sie steht ohnehin in jeder Zustimmungsadresse), das Secret nie.
+GOOGLE_ID_FIELD = "__GOOGLE_ID__"
+GOOGLE_SECRET_FIELD = "__GOOGLE_SECRET__"
 
 #: Groesse einer einzelnen hochgeladenen Datei. Passt zu der Grenze, die
 #: scoutr auch fuer heruntergeladene PDFs zieht.
@@ -518,7 +537,7 @@ class ChatSession:
         return Cache(settings.db_path, settings.cache_ttl_hours)
 
     def _export(self, fmt: str) -> str:
-        """Exportiert die letzten Recherchen -- wie `scoutr export`."""
+        """Exportiert die letzten Recherchen -- wie `cortex export`."""
         from scoutr.export import Turn, export
 
         entries = self._cache().recent_history(limit=5)
@@ -575,6 +594,7 @@ def current_values() -> dict[str, str]:
         "SCOUTR_API_BASE": settings.api_base,
         "SCOUTR_SEARCH_BACKEND": settings.search_backend,
         "SCOUTR_SEARCH_ENGINES": settings.search_engines,
+        "SCOUTR_SEARCH_VARIANTS": str(settings.search_variants),
         "SCOUTR_SEARXNG_URL": settings.searxng_url,
         "SCOUTR_LOCATION": settings.location,
         "SCOUTR_LANG": settings.lang,
@@ -589,6 +609,7 @@ def current_values() -> dict[str, str]:
         "SCOUTR_ENABLE_PLAYWRIGHT": "true" if settings.enable_playwright else "false",
         "SCOUTR_HA_URL": settings.ha_url,
         "SCOUTR_HA_CONTROL": "true" if settings.ha_control else "false",
+        "SCOUTR_GOOGLE": "true" if settings.google_enabled else "false",
         "SCOUTR_LAN_ENABLED": "true" if settings.lan_enabled else "false",
         "SCOUTR_LAN_SUBNET": settings.lan_subnet,
         "SCOUTR_MEMORY": "true" if settings.memory_enabled else "false",
@@ -609,6 +630,54 @@ def fix_model_id(model: str) -> str:
     return suggest_model(model) or model
 
 
+def google_client(settings: Settings) -> Any:
+    """Der Google-Zugriff mit den aktuellen Einstellungen."""
+    from scoutr.google import Google, TokenStore
+
+    return Google(
+        settings.google_client_id,
+        settings.google_client_secret,
+        TokenStore(settings.data_dir, settings.memory_key),
+    )
+
+
+def google_state(settings: Settings) -> dict[str, Any]:
+    """Was die Oberflaeche ueber die Google-Anbindung wissen darf.
+
+    Token und Secret bleiben hier -- der Browser erfaehrt nur, ob etwas
+    hinterlegt ist und welches Konto verbunden wurde.
+    """
+    client = google_client(settings)
+    try:
+        connected = client.connected()
+        account = client.account()
+    finally:
+        client.close()
+    return {
+        "enabled": settings.google_enabled,
+        "has_id": bool(settings.google_client_id),
+        "has_secret": bool(settings.google_client_secret),
+        "connected": connected,
+        "account": account,
+    }
+
+
+def google_redirect(host: str = "") -> str:
+    """Wohin Google nach der Zustimmung zurueckschickt.
+
+    Google erlaubt fuer Desktop-Anwendungen nur `localhost` und `127.0.0.1`.
+    Sitzt der Browser auf einem anderen Geraet, laeuft die Weiterleitung ins
+    Leere -- dann kopiert der Nutzer die Adresse aus der Adresszeile, der
+    Code steht darin. Deshalb ist die Adresse hier fest und haengt NICHT vom
+    aufrufenden Geraet ab: sie muss mit der in der Google Cloud Console
+    eingetragenen uebereinstimmen, sonst lehnt Google ab.
+    """
+    port = host.rsplit(":", 1)[-1] if ":" in host else str(DEFAULT_PORT)
+    if not port.isdigit():
+        port = str(DEFAULT_PORT)
+    return f"http://localhost:{port}/google"
+
+
 def save_values(payload: dict[str, Any]) -> Path:
     """Schreibt die Formularwerte in die `.env` und laedt neu."""
     values = {
@@ -627,6 +696,18 @@ def save_values(payload: dict[str, Any]) -> Path:
         key_name = api_key_name_for(values.get("SCOUTR_MODEL", "") or SESSION.settings().model)
         if key_name:
             values[key_name] = api_key
+    google_id = str(payload.get(GOOGLE_ID_FIELD, "")).strip()
+    if google_id:
+        values["GOOGLE_CLIENT_ID"] = google_id
+    google_secret = str(payload.get(GOOGLE_SECRET_FIELD, "")).strip()
+    if google_secret:
+        values["GOOGLE_CLIENT_SECRET"] = google_secret
+    search_key = str(payload.get(SEARCH_KEY_FIELD, "")).strip()
+    if search_key:
+        backend = values.get("SCOUTR_SEARCH_BACKEND", "") or SESSION.settings().search_backend
+        backend_key_name = SEARCH_BACKEND_KEYS.get(backend, "")
+        if backend_key_name:
+            values[backend_key_name] = search_key
     target = find_env_file() or DEFAULT_ENV_PATH
     written = write_env_file(values, target)
     # In einem laufenden Prozess gewinnen bereits gesetzte Umgebungsvariablen
@@ -800,6 +881,8 @@ class Handler(BaseHTTPRequestHandler):
         route = self._route()
         if route in ("/", "/index.html"):
             self._send_ui()
+        elif route == "/google":
+            self._google_return()
         elif route == "/api/config":
             settings = SESSION.settings()
             self._json(
@@ -807,10 +890,13 @@ class Handler(BaseHTTPRequestHandler):
                     "version": __version__,
                     "values": current_values(),
                     "key_name": api_key_name_for(settings.model),
+                    "search_key_name": SEARCH_BACKEND_KEYS.get(settings.search_backend, ""),
                     "env_path": str(settings.env_path or DEFAULT_ENV_PATH),
                     "problems": settings.missing_requirements(),
-                    # Das Token selbst geht nie an den Browser -- nur, ob eines da ist.
+                    # Schluessel selbst gehen nie an den Browser -- nur, ob welche da sind.
                     "ha_connected": bool(settings.ha_url and settings.ha_token),
+                    "search_key_set": bool(settings.search_api_key),
+                    "google": google_state(settings),
                 }
             )
         elif route == "/api/chats":
@@ -872,6 +958,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, **SESSION.open_chat(wanted)})
         elif route == "/api/ha":
             self._json(self._ha_probe(self._read_json()))
+        elif route == "/api/probe":
+            self._json(self._probe(self._read_json()))
+        elif route == "/api/google":
+            self._json(self._google(self._read_json()))
         elif route == "/api/answer":
             text = str(self._read_json().get("text", "")).strip()
             self._json({"ok": SESSION.answer(text)})
@@ -893,6 +983,161 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "path": str(written)})
         else:
             self._json({"error": "unbekannter Pfad"}, 404)
+
+    def _google_return(self) -> None:
+        """Der Rueckweg von Google -- hier landet der Nutzer nach der Zustimmung.
+
+        Sitzt der Browser auf demselben Rechner, ist die Anmeldung damit
+        fertig; er sieht eine Seite mit dem Ergebnis. Sitzt er woanders,
+        kommt er hier nie an -- dann kopiert er die Adresse in das Feld in
+        den Einstellungen, was auf denselben Tausch hinauslaeuft.
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        from scoutr.google import GoogleError, exchange_code
+
+        query = parse_qs(urlparse(self.path).query)
+        denied = query.get("error", [""])[0]
+        code = query.get("code", [""])[0]
+        settings = SESSION.settings()
+        if denied:
+            self._google_page(False, f"Google hat abgelehnt: {denied}")
+            return
+        if not code:
+            self._google_page(False, "Google hat keinen Code mitgeschickt.")
+            return
+        if not settings.google_client_id or not settings.google_client_secret:
+            self._google_page(False, "Client-ID und Secret fehlen -- erst speichern.")
+            return
+        client = google_client(settings)
+        try:
+            tokens = exchange_code(
+                settings.google_client_id,
+                settings.google_client_secret,
+                code,
+                google_redirect(self.headers.get("Host", "")),
+            )
+            client.remember(tokens)
+            account = client.account()
+        except GoogleError as exc:
+            self._google_page(False, str(exc))
+            return
+        finally:
+            client.close()
+        self._google_page(True, f"Verbunden{f' als {account}' if account else ''}.")
+
+    def _google_page(self, ok: bool, message: str) -> None:
+        """Eine schlichte Seite als Rueckmeldung -- ohne Skript, ohne Ballast."""
+        colour = "#2f6f4e" if ok else "#a4342b"
+        title = "Geschafft" if ok else "Das hat nicht geklappt"
+        body = f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Cortex AI</title>
+<style>body{{font:15px/1.6 system-ui,sans-serif;margin:0;display:grid;place-items:center;
+min-height:100vh;background:#faf9f6;color:#26241f}}
+main{{max-width:30em;padding:32px;text-align:center}}
+h1{{color:{colour};font-size:20px;margin:0 0 12px}}
+p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
+<h1>{title}</h1><p>{escape(message)}</p>
+<p>Du kannst dieses Fenster schliessen und zu Cortex AI zurueckgehen.</p>
+</main></body></html>"""
+        raw = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def _google(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Verbindet, trennt oder meldet den Stand des Google-Kontos.
+
+        Der Ablauf hat zwei Schritte, weil Google dazwischen den Nutzer fragt:
+        `start` liefert die Adresse zum Zustimmen, `finish` nimmt den Code
+        entgegen, den Google zurueckgibt.
+        """
+        from scoutr.google import GoogleError, consent_url, exchange_code
+
+        action = str(payload.get("action", "state")).strip()
+        settings = SESSION.settings()
+        redirect = google_redirect(self.headers.get("Host", ""))
+
+        if action == "start":
+            client_id = str(payload.get("client_id", "")).strip() or settings.google_client_id
+            try:
+                return {"ok": True, "url": consent_url(client_id, redirect), "redirect": redirect}
+            except GoogleError as exc:
+                return {"ok": False, "error": str(exc)}
+
+        if action == "finish":
+            if not settings.google_client_id or not settings.google_client_secret:
+                return {
+                    "ok": False,
+                    "error": (
+                        "Erst Client-ID und Secret speichern, dann verbinden -- "
+                        "ohne beides kann Google den Code nicht einloesen."
+                    ),
+                }
+            client = google_client(settings)
+            try:
+                tokens = exchange_code(
+                    settings.google_client_id,
+                    settings.google_client_secret,
+                    str(payload.get("code", "")),
+                    redirect,
+                )
+                client.remember(tokens)
+                return {"ok": True, **google_state(SESSION.settings())}
+            except GoogleError as exc:
+                return {"ok": False, "error": str(exc)}
+            finally:
+                client.close()
+
+        if action == "disconnect":
+            client = google_client(settings)
+            try:
+                client.disconnect()
+            finally:
+                client.close()
+            return {"ok": True, **google_state(SESSION.settings())}
+
+        return {"ok": True, **google_state(settings), "redirect": redirect}
+
+    def _probe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Testet Modell und Suchmaschine -- dasselbe, was `cortex setup` macht.
+
+        Geprueft werden die Werte aus dem Formular, nicht die gespeicherten:
+        so sieht man VOR dem Speichern, ob ein Schluessel stimmt. Ein leeres
+        Schluesselfeld heisst weiterhin "unveraendert", also greift dann der
+        gespeicherte.
+        """
+        from scoutr.probe import check_llm, check_search
+
+        settings = SESSION.settings()
+        model = fix_model_id(str(payload.get("SCOUTR_MODEL", "")).strip()) or settings.model
+        api_key = str(payload.get(API_KEY_FIELD, "")).strip()
+        if not api_key:
+            name = api_key_name_for(model)
+            api_key = os.environ.get(name, "") if name else ""
+        api_base = str(payload.get("SCOUTR_API_BASE", settings.api_base) or "").strip()
+        if api_base and not base_fits(api_base, model):
+            # Dieselbe Regel wie im Betrieb -- sonst testet man etwas anderes,
+            # als spaeter laeuft, und der Test luegt.
+            api_base = ""
+
+        backend = str(payload.get("SCOUTR_SEARCH_BACKEND", "")).strip() or settings.search_backend
+        search_key = str(payload.get(SEARCH_KEY_FIELD, "")).strip()
+        if not search_key:
+            name = SEARCH_BACKEND_KEYS.get(backend, "")
+            search_key = os.environ.get(name, "") if name else ""
+        engines = str(payload.get("SCOUTR_SEARCH_ENGINES", settings.search_engines) or "").strip()
+        instance = str(payload.get("SCOUTR_SEARXNG_URL", settings.searxng_url) or "").strip()
+
+        llm_ok, llm_msg = check_llm(model, api_key, api_base)
+        search_ok, search_msg = check_search(backend, search_key, engines, instance)
+        return {
+            "ok": llm_ok and search_ok,
+            "llm": {"ok": llm_ok, "message": llm_msg, "model": model},
+            "search": {"ok": search_ok, "message": search_msg, "backend": backend},
+        }
 
     def _ha_probe(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Sucht eine Instanz oder testet die eingetragenen Angaben.
@@ -1137,7 +1382,7 @@ def _warm_up() -> None:
 
 def serve(
     host: str = "127.0.0.1",
-    port: int = 8765,
+    port: int = DEFAULT_PORT,
     open_browser: bool = True,
     token: str = "",
 ) -> None:

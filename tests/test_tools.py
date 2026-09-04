@@ -642,3 +642,232 @@ def test_the_home_tools_are_reachable_through_call(settings: Settings,
     box = Toolbox(settings)
     assert box.call("lan_scan", {"subnet": "192.168.1.0/24"})["count"] == 0
     assert "connect-ha" in box.call("ha_states", {})["error"]
+
+
+# ---------------------------------------------------------------------------
+# Auffaecherung der Suche
+# ---------------------------------------------------------------------------
+def test_one_call_searches_several_phrasings(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Ein Werkzeugaufruf, mehrere Formulierungen -- das Budget bleibt gleich."""
+    asked: list[str] = []
+
+    def fake_search(query, **kwargs):
+        asked.append(query)
+        return [SearchResult(title="T", url=f"https://{len(asked)}.de/", snippet="S")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    result = box.web_search("Wie viel kostet ein gebrauchtes Lastenrad in Bremen?")
+
+    assert len(asked) == 2, asked
+    assert asked[0] == "Wie viel kostet ein gebrauchtes Lastenrad in Bremen?"
+    assert asked[1] == "kostet gebrauchtes Lastenrad Bremen"
+    assert len(result["queries"]) == 2
+
+
+def test_the_model_may_send_its_own_phrasings(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    asked: list[str] = []
+
+    def fake_search(query, **kwargs):
+        asked.append(query)
+        return [SearchResult(title="T", url=f"https://{len(asked)}.de/", snippet="S")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.call(
+        "web_search",
+        {"query": "Lastenrad Preis", "queries": ["Cargobike gebraucht Bremen"]},
+    )
+    assert sorted(asked) == ["Cargobike gebraucht Bremen", "Lastenrad Preis"]
+
+
+def test_duplicate_phrasings_are_searched_once(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    asked: list[str] = []
+
+    def fake_search(query, **kwargs):
+        asked.append(query)
+        return [SearchResult(title="T", url="https://a.de/", snippet="S")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.call("web_search", {"query": "Lastenrad Bremen", "queries": ["lastenrad bremen"]})
+    assert asked == ["Lastenrad Bremen"]
+
+
+def test_a_query_list_sent_as_a_string_still_works(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Kleinere Modelle schicken statt einer Liste gern einen einzelnen String."""
+    asked: list[str] = []
+
+    def fake_search(query, **kwargs):
+        asked.append(query)
+        return [SearchResult(title="T", url=f"https://{len(asked)}.de/", snippet="S")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.call("web_search", {"query": "Lastenrad", "queries": "Cargobike"})
+    assert asked == ["Lastenrad", "Cargobike"]
+
+
+def test_the_fan_out_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    asked: list[str] = []
+
+    def fake_search(query, **kwargs):
+        asked.append(query)
+        return [SearchResult(title="T", url="https://a.de/", snippet="S")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    settings.search_variants = 1
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.web_search("Wie viel kostet ein Lastenrad in Bremen?")
+    assert len(asked) == 1
+
+
+def test_a_hit_found_by_two_phrasings_moves_up(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    def fake_search(query, **kwargs):
+        if query.startswith("Wie"):
+            return [
+                SearchResult(title="A", url="https://a.de/", snippet="S"),
+                SearchResult(title="B", url="https://b.de/", snippet="S"),
+            ]
+        return [
+            SearchResult(title="C", url="https://c.de/", snippet="S"),
+            SearchResult(title="B", url="https://b.de/", snippet="S"),
+        ]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    result = box.web_search("Wie viel kostet ein gebrauchtes Lastenrad in Bremen?")
+    assert result["results"][0]["url"] == "https://b.de/"
+
+
+def test_the_fan_out_survives_a_dead_phrasing(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Eine gescheiterte Formulierung darf die Suche nicht mitreissen."""
+    from scoutr.search import SearchError
+
+    def fake_search(query, **kwargs):
+        if not query.startswith("Wie"):
+            raise SearchError("Engine weg")
+        return [SearchResult(title="A", url="https://a.de/", snippet="S")]
+
+    monkeypatch.setattr("scoutr.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    result = box.web_search("Wie viel kostet ein gebrauchtes Lastenrad in Bremen?")
+    assert result["results"][0]["url"] == "https://a.de/"
+    assert result["queries"] == ["Wie viel kostet ein gebrauchtes Lastenrad in Bremen?"]
+
+
+# ---------------------------------------------------------------------------
+# Gmail und Kalender
+# ---------------------------------------------------------------------------
+class FakeGoogle:
+    """Steht fuer das verbundene Konto -- ohne Netz."""
+
+    def __init__(self, connected: bool = True) -> None:
+        self._connected = connected
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def connected(self) -> bool:
+        return self._connected
+
+    def events(self, days=7, query="", count=10):
+        self.calls.append(("events", {"days": days, "query": query, "count": count}))
+        return [{"summary": "Zahnarzt", "start": "2026-09-08T09:30:00+02:00"}]
+
+    def search_mail(self, query="", count=8):
+        self.calls.append(("search_mail", {"query": query, "count": count}))
+        return [{"id": "m1", "subject": "Ihre Sendung", "from": "DHL"}]
+
+    def read_mail(self, message_id):
+        self.calls.append(("read_mail", {"message_id": message_id}))
+        return {"id": message_id, "subject": "Ihre Sendung", "text": "Unterwegs"}
+
+    def close(self) -> None:
+        pass
+
+
+def _google_box(settings: Settings, fake: FakeGoogle | None = None) -> Toolbox:
+    settings.google_enabled = True
+    settings.google_client_id = "id.apps.googleusercontent.com"
+    settings.google_client_secret = "secret"
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box._google_client = fake if fake is not None else FakeGoogle()
+    return box
+
+
+def test_calendar_and_mail_are_off_until_switched_on(settings: Settings) -> None:
+    """Privates ist aus, bis es jemand einschaltet."""
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    for result in (box.calendar_events(), box.mail_search(), box.mail_read("m1")):
+        assert "abgeschaltet" in result["error"]
+
+
+def test_without_a_connected_account_the_hint_says_how(settings: Settings) -> None:
+    box = _google_box(settings, FakeGoogle(connected=False))
+    assert "kein Google-Konto verbunden" in box.calendar_events()["error"]
+
+
+def test_missing_credentials_point_at_the_readme(settings: Settings) -> None:
+    settings.google_enabled = True
+    settings.google_client_id = ""
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    assert "GOOGLE_CLIENT_ID" in box.calendar_events()["error"]
+
+
+def test_events_come_through_the_tool(settings: Settings) -> None:
+    fake = FakeGoogle()
+    box = _google_box(settings, fake)
+    result = box.calendar_events(days=3, query="Zahnarzt")
+    assert result["events"][0]["summary"] == "Zahnarzt"
+    assert fake.calls[0] == ("events", {"days": 3, "query": "Zahnarzt", "count": 10})
+    assert box.stats.google_reads == 1
+
+
+def test_mail_search_and_read_come_through_the_tool(settings: Settings) -> None:
+    fake = FakeGoogle()
+    box = _google_box(settings, fake)
+    listing = box.mail_search(query="from:dhl", count=3)
+    assert listing["mails"][0]["subject"] == "Ihre Sendung"
+    body = box.mail_read("m1")
+    assert body["text"] == "Unterwegs"
+    assert [name for name, _ in fake.calls] == ["search_mail", "read_mail"]
+
+
+def test_a_google_failure_is_reported_not_raised(settings: Settings) -> None:
+    from scoutr.google import GoogleError
+
+    class Broken(FakeGoogle):
+        def events(self, days=7, query="", count=10):
+            raise GoogleError("Google verweigert den Zugriff")
+
+    box = _google_box(settings, Broken())
+    assert "verweigert" in box.calendar_events()["error"]
+
+
+def test_the_google_tools_are_dispatched(settings: Settings) -> None:
+    fake = FakeGoogle()
+    box = _google_box(settings, fake)
+    box.call("calendar_events", {"days": 2})
+    box.call("mail_search", {"query": "is:unread"})
+    box.call("mail_read", {"message_id": "m9"})
+    assert [name for name, _ in fake.calls] == ["events", "search_mail", "read_mail"]
+
+
+def test_reading_mail_counts_against_the_budget(settings: Settings) -> None:
+    box = _google_box(settings)
+    before = box.stats.tool_calls
+    box.mail_search()
+    assert box.stats.tool_calls == before + 1

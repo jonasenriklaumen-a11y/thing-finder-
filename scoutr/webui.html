@@ -173,6 +173,14 @@ body:not(.start) .hint{display:none}
 .step.warn .tag{color:var(--warn)} .step.err .tag{color:var(--err)}
 .step .txt{overflow:hidden;text-overflow:ellipsis}
 .step .sub{padding-left:71px;opacity:.8;font-size:12.5px}
+/* Mitlesen. Die Zeilen entstehen immer, sichtbar sind sie nur mit dem Haken --
+   so zeigt das Einschalten auch das, was schon gelaufen ist. */
+.trace{display:none}
+body.tracing .trace{display:flex}
+body.tracing .trace .txt{white-space:pre-wrap;word-break:break-word;
+  font:12px/1.6 var(--mono);color:var(--text-3);opacity:.85;
+  border-left:2px solid var(--line);padding-left:9px;max-height:15em;overflow-y:auto}
+.trace.think .tag{color:var(--text-3);font-style:italic}
 .cursor{display:inline-block;width:2px;height:1.05em;background:var(--accent);
   vertical-align:-2px;animation:blink 1.1s steps(2) infinite;margin-left:1px}
 @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -262,7 +270,15 @@ input:focus,select:focus{border-color:var(--accent)}
 .btn:hover{border-color:var(--accent)}
 .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:500}
 :root[data-theme="dark"] .btn.primary{color:#14251b}
-.note{font-size:12.5px;color:var(--text-2);margin-top:12px}
+.note{font-size:12.5px;color:var(--text-2);margin-top:12px;white-space:pre-line}
+/* Die Einrichtungsanleitung: aufklappbar, damit sie nicht im Weg steht. */
+.note summary{cursor:pointer;color:var(--accent);font-weight:600}
+.note ol{margin:.7em 0;padding-left:1.4em;white-space:normal;line-height:1.65}
+.note ol li{margin:.35em 0}
+.note p{white-space:normal;margin:.6em 0 0}
+.note code{font:11.5px var(--mono);background:var(--sidebar);padding:1px 5px;
+  border-radius:4px}
+.note a{color:var(--accent)}
 .note.ok{color:var(--accent-text)} .note.bad{color:var(--err)}
 .inline{display:flex;gap:8px;align-items:flex-end}
 .inline label{flex:1;margin:0}
@@ -477,6 +493,18 @@ input:focus,select:focus{border-color:var(--accent)}
         <div class="note" id="storage-note"></div>
       </fieldset>
 
+      <fieldset><legend>Mitlesen</legend>
+        <div class="check">
+          <input type="checkbox" id="showtrace">
+          <label for="showtrace" style="margin:0">Gedanken und Aktionen mitlesen
+            <span class="why">Zeigt waehrend der Antwort, was Cortex AI gerade denkt
+              und tut: jede Suchanfrage im Wortlaut, jede aufgerufene Seite, was ein
+              Werkzeug zurueckgegeben hat. Bei Modellen, die ihre Denkschritte
+              offenlegen, auch die. Der Schalter wirkt sofort -- auch rueckwirkend
+              auf die Antwort, die gerade auf dem Schirm steht.</span></label>
+        </div>
+      </fieldset>
+
       <fieldset><legend>Auslastung</legend>
         <div class="check">
           <input type="checkbox" id="showload">
@@ -486,6 +514,62 @@ input:focus,select:focus{border-color:var(--accent)}
               solange dieses Fenster offen ist.</span></label>
         </div>
         <div class="note" id="usage-note"></div>
+      </fieldset>
+
+      <fieldset><legend>Gmail &amp; Kalender</legend>
+        <div class="check">
+          <input type="checkbox" name="SCOUTR_GOOGLE" id="google-on">
+          <label for="google-on" style="margin:0">Termine und Mails lesen dürfen
+            <span class="why">Cortex AI kann dann Fragen zu Terminen und E-Mails
+              beantworten und die Angaben für die Recherche nutzen. Nur lesen —
+              es wird nie eine Mail verschickt oder ein Termin geändert.</span></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Client-ID <span id="google-id-hint"></span></span>
+            <input type="text" name="__GOOGLE_ID__"
+                   placeholder="…apps.googleusercontent.com" autocomplete="off"></label>
+          <label><span class="lbl">Client-Secret <span id="google-secret-hint"></span></span>
+            <input type="password" name="__GOOGLE_SECRET__"
+                   placeholder="leer lassen = unverändert" autocomplete="off"></label>
+        </div>
+        <div class="inline">
+          <button type="button" class="btn" id="google-connect">Verbinden</button>
+          <button type="button" class="btn" id="google-off">Trennen</button>
+          <span class="note" id="google-state"></span>
+        </div>
+        <div id="google-step" hidden>
+          <div class="note">1. <a id="google-link" href="#" target="_blank"
+            rel="noopener">Bei Google zustimmen</a> — 2. Danach landest du auf einer
+            Adresse, die mit <code>localhost</code> beginnt. Kopiere sie vollständig
+            aus der Adresszeile (auch wenn der Browser eine Fehlerseite zeigt) und
+            füge sie hier ein:</div>
+          <div class="inline">
+            <label style="flex:1"><input type="text" id="google-code"
+                   placeholder="http://localhost:8765/google?code=…"></label>
+            <button type="button" class="btn" id="google-save">Fertig</button>
+          </div>
+        </div>
+        <details class="note"><summary>Wie richte ich das ein?</summary>
+          <ol>
+            <li>Auf <a href="https://console.cloud.google.com/" target="_blank"
+              rel="noopener">console.cloud.google.com</a> anmelden und oben links ein
+              neues Projekt anlegen (Name egal, z.B. „Cortex").</li>
+            <li><b>APIs und Dienste → Bibliothek</b>: nach „Gmail API" suchen,
+              aktivieren. Dasselbe mit „Google Calendar API".</li>
+            <li><b>APIs und Dienste → OAuth-Zustimmungsbildschirm</b>: Nutzertyp
+              „Extern", Name und deine Mailadresse eintragen. Unter <b>Zielgruppe</b>
+              dich selbst als Testnutzer hinzufügen — sonst lehnt Google später ab.</li>
+            <li><b>Anmeldedaten → Anmeldedaten erstellen → OAuth-Client-ID</b>,
+              Anwendungstyp <b>Desktop-App</b>. Als autorisierte Weiterleitungs-URI
+              <code id="google-redirect">http://localhost:8765/google</code>
+              eintragen.</li>
+            <li>Client-ID und Client-Secret hier oben einfügen, <b>speichern</b>,
+              dann auf <b>Verbinden</b>.</li>
+          </ol>
+          <p>Der Zugriff bleibt auf Lesen beschränkt. Die Anmeldedaten liegen
+            verschlüsselt auf dem Rechner, auf dem Cortex läuft, und verlassen ihn
+            nicht. Trennen entfernt sie wieder.</p>
+        </details>
       </fieldset>
 
       <fieldset><legend>Zuhause &amp; Netz</legend>
@@ -531,6 +615,20 @@ input:focus,select:focus{border-color:var(--accent)}
         </div>
         <label><span class="lbl">SearXNG-Adresse</span>
           <input type="text" name="SCOUTR_SEARXNG_URL" placeholder="http://localhost:8080"></label>
+        <div class="row">
+          <label><span class="lbl">Schlüssel der Suchmaschine
+            <span class="why" id="search-keyname">nur bei Brave und Tavily nötig</span></span>
+            <input type="password" name="__SEARCH_KEY__" placeholder="leer lassen = unverändert"
+                   autocomplete="off"></label>
+          <label><span class="lbl">Formulierungen je Suche
+            <span class="why">Dieselbe Frage anders gestellt findet mehr. 2 bis 3 ist
+              das Maß, 1 schaltet es ab.</span></span>
+            <input type="number" name="SCOUTR_SEARCH_VARIANTS" min="1" max="3"></label>
+        </div>
+        <div class="inline">
+          <button type="button" class="btn" id="probe">Verbindung testen</button>
+          <span class="note" id="probe-note"></span>
+        </div>
       </fieldset>
 
       <fieldset><legend>Ort &amp; Sprache</legend>
@@ -693,7 +791,20 @@ function step(box, tag, text, kind){
   el.querySelector(".txt").textContent = text || "";
   box.appendChild(el); scroll(); return el;
 }
-const scroll = () => { main.scrollTop = main.scrollHeight; };
+// Mitlese-Zeile. Sie wird immer erzeugt; ob man sie sieht, entscheidet der
+// Haken in den Einstellungen -- deshalb kann man auch nachtraeglich noch
+// nachschauen, was gerade passiert ist.
+function trace(box, tag, text, kind){
+  const el = step(box, tag, text, "trace" + (kind ? " " + kind : ""));
+  if (!document.body.classList.contains("tracing")) scrollLock = true;
+  return el;
+}
+// Verhindert, dass unsichtbare Zeilen den Chat springen lassen.
+let scrollLock = false;
+const scroll = () => {
+  if (scrollLock){ scrollLock = false; return; }
+  main.scrollTop = main.scrollHeight;
+};
 
 /* ---------- Anhaenge ---------- */
 const MAX_FILES = 5, MAX_BYTES = 25000000;
@@ -858,7 +969,10 @@ async function ask(text){
   pending = []; drawFiles();
   addUser(text, attachments); input.value = ""; input.style.height = "auto";
   const { steps, bubble } = addBot();
-  let answer = "", reading = null, readCount = 0, planning = null;
+  // `thinking` gehoert hier hoch und nicht zu seiner Funktion: die
+  // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile
+  // ueberhaupt ausgefuehrt waere -- das gaebe einen ReferenceError.
+  let answer = "", reading = null, readCount = 0, planning = null, thinking = null;
 
   try {
     const res = await api("/api/chat", {
@@ -884,7 +998,16 @@ async function ask(text){
     step(steps, "[Fehler]", String(err), "err");
   }
 
+  // Denkschritte kommen tokenweise. Jedes Token als eigene Zeile waere
+  // unlesbar -- sie wachsen deshalb in derselben.
+  function thought(box, text){
+    if (!thinking) thinking = trace(box, "[Denkt]", "", "think");
+    thinking.querySelector(".txt").textContent += text;
+    if (document.body.classList.contains("tracing")) scroll();
+  }
+
   function handle(ev){
+    if (ev.type !== "thought") thinking = null;
     switch (ev.type){
       case "planning":
         planning = step(steps, "[Plane]", "sichte die Anfrage …"); break;
@@ -919,10 +1042,28 @@ async function ask(text){
       case "lan_done": step(steps, "[Netz]",
         `${ev.found} ${ev.found === 1 ? "Gerät" : "Geräte"} erreichbar`); break;
       case "lan_check": step(steps, "[Netz]", ev.host); break;
+      case "calendar": step(steps, "[Termine]", ev.query || `${ev.days || 7} Tage`); break;
+      case "calendar_done": step(steps, "[Termine]",
+        `${ev.found} ${ev.found === 1 ? "Termin" : "Termine"}`); break;
+      case "mail": step(steps, "[Mail]", ev.query); break;
+      case "mail_done": step(steps, "[Mail]",
+        `${ev.found} ${ev.found === 1 ? "Nachricht" : "Nachrichten"}`); break;
       case "ha_read": step(steps, "[Haus]", ev.search); break;
       case "ha_call": step(steps, "[Haus]",
         `${ev.domain}.${ev.service} → ${ev.entity_id || ev.domain}`, "warn"); break;
-      case "search": step(steps, "[Suche]", ev.query); break;
+      case "search":
+        step(steps, "[Suche]", ev.query);
+        if ((ev.queries || []).length > 1){
+          trace(steps, "[Anfragen]", ev.queries.map((q, i) => `${i + 1}. ${q}`).join("\n"));
+        }
+        break;
+      case "search_done":
+        trace(steps, "[Treffer]", `${ev.hits} nach dem Zusammenfuehren`); break;
+      case "thought": thought(steps, ev.text); break;
+      case "action":
+        trace(steps, "[Aufruf]", ev.tool + " " + JSON.stringify(ev.arguments || {})); break;
+      case "action_done":
+        trace(steps, "[Zurueck]", ev.result || ""); break;
       case "fetch":
         readCount++;
         if (!reading) reading = step(steps, "[Lese]", "");
@@ -1143,11 +1284,17 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#model-note").textContent = "";
   $("#usage-note").innerHTML = "";
   api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
+  $("#showtrace").checked = document.body.classList.contains("tracing");
   let wanted = false;
   try { wanted = localStorage.getItem("scoutr-showload") === "1"; } catch {}
   $("#showload").checked = wanted;
   if (wanted) $("#showload").dispatchEvent(new Event("change"));
   $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
+  searchKeyHint();
+  if (cfg.search_key_set) $("#search-keyname").textContent += " · gesetzt";
+  $("#probe-note").textContent = ""; $("#probe-note").className = "note";
+  $("#google-step").hidden = true;
+  showGoogle(cfg.google);
   $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
   $("#savenote").textContent = ""; $("#savenote").className = "note";
   $("#ha-note").textContent = ""; $("#ha-note").className = "note";
@@ -1248,6 +1395,21 @@ $("#save-model").addEventListener("click", async () => {
     : `${saved} ist jetzt aktiv.`;
   refreshHeader();
 });
+
+/* ---------- Mitlesen ---------- */
+// Reine Anzeigesache: die Zeilen stehen ohnehin im Dokument, der Haken
+// blendet sie nur ein. Deshalb kein Serveraufruf und keine .env -- und
+// deshalb wirkt er auch auf die Antwort, die schon dasteht.
+function setTracing(on){
+  document.body.classList.toggle("tracing", on);
+  try {
+    if (on) localStorage.setItem("scoutr-trace", "1");
+    else localStorage.removeItem("scoutr-trace");
+  } catch {}
+}
+try { if (localStorage.getItem("scoutr-trace") === "1") document.body.classList.add("tracing"); }
+catch {}
+$("#showtrace").addEventListener("change", (e) => setTracing(e.target.checked));
 
 /* ---------- Auslastung ---------- */
 function gauge(name, value, sub, percent){
@@ -1369,6 +1531,114 @@ $("#ha-test").addEventListener("click", async () => {
   note.textContent = `Verbunden mit ${data.name} — ${data.entities} Geräte und Werte. `
     + "Zum Übernehmen unten speichern.";
 });
+
+/* ---------- Gmail und Kalender ---------- */
+// Zwei Schritte, weil Google dazwischen den Nutzer fragt: erst die Adresse
+// zum Zustimmen holen, dann den Code einloesen, den Google zurueckgibt.
+async function googleCall(body){
+  try {
+    return await (await api("/api/google", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body),
+    })).json();
+  } catch { return null; }
+}
+
+function showGoogle(state){
+  const note = $("#google-state");
+  if (!state){ note.textContent = ""; return; }
+  if (state.redirect) $("#google-redirect").textContent = state.redirect;
+  $("#google-id-hint").textContent = state.has_id ? "(gesetzt)" : "";
+  $("#google-secret-hint").textContent = state.has_secret ? "(gesetzt)" : "";
+  if (state.connected){
+    note.className = "note ok";
+    note.textContent = "Verbunden" + (state.account ? ` als ${state.account}` : "") + ".";
+  } else {
+    note.className = "note";
+    note.textContent = state.has_id
+      ? "Noch kein Konto verbunden."
+      : "Erst Client-ID und Secret speichern.";
+  }
+}
+
+$("#google-connect").addEventListener("click", async () => {
+  const data = await googleCall({
+    action:"start", client_id: form.elements["__GOOGLE_ID__"].value.trim(),
+  });
+  const note = $("#google-state");
+  if (!data || !data.ok){
+    note.className = "note bad";
+    note.textContent = data ? data.error : "Keine Antwort vom Server.";
+    return;
+  }
+  $("#google-link").href = data.url;
+  $("#google-redirect").textContent = data.redirect;
+  $("#google-step").hidden = false;
+  note.className = "note";
+  note.textContent = "Fenster bei Google geöffnet — danach die Adresse hier einfügen.";
+  window.open(data.url, "_blank", "noopener");
+});
+
+$("#google-save").addEventListener("click", async () => {
+  const note = $("#google-state");
+  note.className = "note"; note.textContent = "Löse den Code ein …";
+  const data = await googleCall({ action:"finish", code: $("#google-code").value.trim() });
+  if (!data || !data.ok){
+    note.className = "note bad";
+    note.textContent = data ? data.error : "Keine Antwort vom Server.";
+    return;
+  }
+  $("#google-code").value = "";
+  $("#google-step").hidden = true;
+  showGoogle(data);
+});
+
+$("#google-off").addEventListener("click", async () => {
+  const data = await googleCall({ action:"disconnect" });
+  if (data && data.ok){
+    $("#google-step").hidden = true;
+    showGoogle(data);
+  }
+});
+
+/* ---------- Verbindungstest ---------- */
+// Dasselbe, was `cortex setup` am Ende macht: eine winzige Anfrage ans Modell
+// und eine Testsuche. Geprueft wird, was IM FORMULAR steht -- so sieht man vor
+// dem Speichern, ob ein Schluessel stimmt.
+$("#probe").addEventListener("click", async () => {
+  const note = $("#probe-note"), button = $("#probe");
+  note.className = "note"; note.textContent = "Teste Modell und Suche …";
+  button.disabled = true;
+  const body = {
+    SCOUTR_MODEL: form.elements["SCOUTR_MODEL"].value.trim(),
+    SCOUTR_API_BASE: form.elements["SCOUTR_API_BASE"].value.trim(),
+    SCOUTR_SEARCH_BACKEND: form.elements["SCOUTR_SEARCH_BACKEND"].value,
+    SCOUTR_SEARCH_ENGINES: form.elements["SCOUTR_SEARCH_ENGINES"].value.trim(),
+    SCOUTR_SEARXNG_URL: form.elements["SCOUTR_SEARXNG_URL"].value.trim(),
+    __API_KEY__: form.elements["__API_KEY__"].value.trim(),
+    __SEARCH_KEY__: form.elements["__SEARCH_KEY__"].value.trim(),
+  };
+  let data;
+  try {
+    data = await (await api("/api/probe", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body),
+    })).json();
+  } catch { data = null; }
+  button.disabled = false;
+  if (!data){ note.className = "note bad"; note.textContent = "Keine Antwort vom Server."; return; }
+  const mark = (part) => (part.ok ? "✓" : "✗") + " " + part.message;
+  note.className = "note " + (data.ok ? "ok" : "bad");
+  note.textContent = `Modell (${data.llm.model}): ${mark(data.llm)}
+Suche (${data.search.backend}): ${mark(data.search)}`;
+});
+
+// Der Hinweis am Schluesselfeld richtet sich nach der gewaehlten Suchmaschine.
+function searchKeyHint(){
+  const names = { brave: "BRAVE_API_KEY", tavily: "TAVILY_API_KEY" };
+  const name = names[form.elements["SCOUTR_SEARCH_BACKEND"].value] || "";
+  $("#search-keyname").textContent = name
+    ? `(${name})` : "nur bei Brave und Tavily nötig";
+}
+form.elements["SCOUTR_SEARCH_BACKEND"].addEventListener("change", searchKeyHint);
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();

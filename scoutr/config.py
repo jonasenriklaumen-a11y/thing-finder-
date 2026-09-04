@@ -21,7 +21,7 @@ ENV_CANDIDATES: tuple[Path, ...] = (
     Path.home() / ".scoutr" / ".env",
 )
 
-#: Ort, an den `scoutr setup` schreibt, wenn noch keine `.env` existiert.
+#: Ort, an den `cortex setup` schreibt, wenn noch keine `.env` existiert.
 DEFAULT_ENV_PATH = Path.home() / ".config" / "scoutr" / ".env"
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
@@ -277,6 +277,12 @@ class Settings:
     #: Gesetzt = der Schluessel wird bei jedem Start neu abgeleitet und liegt
     #: nirgends auf der Platte.
     memory_key: str = ""
+    #: Darf Cortex AI Gmail und den Google Kalender lesen? Aus, bis es jemand
+    #: einschaltet -- und selbst dann nur lesend (siehe scoutr/google.py).
+    google_enabled: bool = False
+    #: Zugangsdaten der eigenen Google-Cloud-Anwendung (Typ "Desktop").
+    google_client_id: str = ""
+    google_client_secret: str = ""
     #: Darf scoutr das eigene Netz durchsuchen?
     lan_enabled: bool = True
     #: Netz, das dabei durchsucht wird. Leer = das eigene automatisch erkennen.
@@ -284,6 +290,10 @@ class Settings:
     fetch_timeout: float = 15.0
     cache_ttl_hours: int = 24
     max_results_default: int = 8
+    #: Wie viele Formulierungen derselben Frage hoechstens rausgehen. Eine
+    #: einzige findet nur, was zufaellig genau so im Netz steht; zwei bis drei
+    #: decken deutlich mehr ab. Ab der vierten wird es beliebig. 1 = aus.
+    search_variants: int = 3
     user_agent: str = (
         "scoutr/0.1 (+https://github.com/jonasenriklaumen-a11y/thing-finder-; "
         "research agent; contact via repository issues)"
@@ -334,6 +344,16 @@ class Settings:
     @property
     def api_key(self) -> str:
         name = self.api_key_name
+        return _env_str(name) if name else ""
+
+    @property
+    def search_key_name(self) -> str:
+        """Der Schluesselname der gewaehlten Suchmaschine, "" bei den offenen."""
+        return SEARCH_BACKEND_KEYS.get(self.search_backend, "")
+
+    @property
+    def search_api_key(self) -> str:
+        name = self.search_key_name
         return _env_str(name) if name else ""
 
     def llm_kwargs(self) -> dict[str, object]:
@@ -430,6 +450,10 @@ def get_settings() -> Settings:
         lan_subnet=_env_str("SCOUTR_LAN_SUBNET"),
         fetch_timeout=float(_env_int("SCOUTR_FETCH_TIMEOUT", 15)),
         cache_ttl_hours=_env_int("SCOUTR_CACHE_TTL_HOURS", 24),
+        search_variants=_env_int("SCOUTR_SEARCH_VARIANTS", 3),
+        google_enabled=_env_bool("SCOUTR_GOOGLE", False),
+        google_client_id=_env_str("GOOGLE_CLIENT_ID"),
+        google_client_secret=_env_str("GOOGLE_CLIENT_SECRET"),
         enable_playwright=_env_bool("SCOUTR_ENABLE_PLAYWRIGHT", True),
         data_dir=data_dir,
         env_path=env_path,

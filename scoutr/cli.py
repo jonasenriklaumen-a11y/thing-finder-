@@ -30,12 +30,13 @@ from scoutr.config import (
     reset_settings_cache,
     write_env_file,
 )
+from scoutr.probe import check_llm, check_search
 from scoutr.search import OPEN_ENGINES
 
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,
-    help="scoutr -- KI-Rechercheagent fuer die Kommandozeile.",
+    help="cortex -- Cortex AI, der Rechercheagent fuer die Kommandozeile.",
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 console = Console()
@@ -62,50 +63,11 @@ TOOL_CALL_WARNING = (
 # ---------------------------------------------------------------------------
 # setup
 # ---------------------------------------------------------------------------
-def _probe_llm(model: str, api_key: str, api_base: str) -> tuple[bool, str]:
-    """Schickt eine winzige Testanfrage an das Modell."""
-    try:
-        import litellm
-
-        litellm.suppress_debug_info = True
-        kwargs: dict[str, object] = {}
-        if api_key:
-            kwargs["api_key"] = api_key
-        if api_base:
-            kwargs["api_base"] = api_base
-        response = litellm.completion(
-            model=model,
-            messages=[{"role": "user", "content": "Antworte mit genau dem Wort: ok"}],
-            max_tokens=8,
-            timeout=30,
-            **kwargs,
-        )
-        text = (response.choices[0].message.content or "").strip()
-        return True, text or "(leere Antwort, aber Verbindung steht)"
-    except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
-
-
-def _probe_search(
-    backend: str, api_key: str = "", engines: str = "", instance_url: str = ""
-) -> tuple[bool, str]:
-    """Schickt eine Testsuche an das gewaehlte Such-Backend."""
-    try:
-        from scoutr.search import search_web
-
-        results = search_web(
-            "wetter berlin",
-            count=3,
-            backend=backend,
-            api_key=api_key,
-            engines=engines,
-            instance_url=instance_url,
-        )
-        if not results:
-            return False, "Keine Treffer -- Backend erreichbar, aber ohne Ergebnis."
-        return True, f"{len(results)} Treffer, erster: {results[0].title[:60]}"
-    except Exception as exc:
-        return False, f"{exc}"
+# Die Testanfragen selbst stehen in scoutr/probe.py -- die Web-Einstellungen
+# pruefen mit demselben Code, und zwei Fassungen desselben Tests waeren eine
+# zu viel.
+_probe_llm = check_llm
+_probe_search = check_search
 
 
 @app.command("setup")
@@ -120,7 +82,7 @@ def setup_command(
     target = env_file or find_env_file() or DEFAULT_ENV_PATH
     console.print(
         Panel.fit(
-            "[bold]scoutr setup[/bold]\n"
+            "[bold]cortex setup[/bold]\n"
             f"Konfiguration wird geschrieben nach: [cyan]{target}[/cyan]",
             border_style="cyan",
         )
@@ -274,7 +236,7 @@ def setup_command(
             console.print(
                 "\n[yellow]Mindestens ein Test ist fehlgeschlagen.[/yellow] "
                 "Die Konfiguration wird trotzdem gespeichert -- du kannst sie jederzeit "
-                "mit [bold]scoutr setup[/bold] korrigieren."
+                "mit [bold]cortex setup[/bold] korrigieren."
             )
 
     # -- Schreiben ---------------------------------------------------------
@@ -304,8 +266,8 @@ def setup_command(
             f"Gespeichert in [cyan]{written}[/cyan]\n\n"
             "Jetzt loslegen:\n"
             '  [bold]scoutr[/bold]                     Chat starten\n'
-            '  [bold]scoutr web[/bold]                 Oberflaeche im Browser\n'
-            '  [bold]scoutr "deine Frage"[/bold]       einmalige Recherche',
+            '  [bold]cortex web[/bold]                 Oberflaeche im Browser\n'
+            '  [bold]cortex "deine Frage"[/bold]       einmalige Recherche',
             title="fertig",
             border_style="green",
         )
@@ -372,7 +334,7 @@ def config_command() -> None:
         console.print("\n[yellow]Fehlende Angaben:[/yellow]")
         for problem in problems:
             console.print(f"  - {problem}")
-        console.print("Behebe sie mit [bold]scoutr setup[/bold].")
+        console.print("Behebe sie mit [bold]cortex setup[/bold].")
     else:
         console.print("\n[green]Konfiguration vollstaendig.[/green]")
 
@@ -486,7 +448,7 @@ def cache_command(
 @app.command("version")
 def version_command() -> None:
     """Gibt die Version aus."""
-    console.print(f"scoutr {__version__}")
+    console.print(f"cortex {__version__}")
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +562,120 @@ def web_command(
     console.print("[dim]Beendet.[/dim]")
 
 
+@app.command("google")
+def google_command(
+    client_id: str = typer.Option("", "--client-id", help="OAuth-Client-ID der Anwendung."),
+    client_secret: str = typer.Option("", "--client-secret", help="Zugehoeriges Secret."),
+    disconnect: bool = typer.Option(False, "--trennen", help="Konto wieder entfernen."),
+    env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
+) -> None:
+    """Verbindet Gmail und den Google Kalender -- nur lesend.
+
+    Danach beantwortet Cortex AI Fragen nach Terminen und Mails aus dem eigenen
+    Konto und kann die Angaben fuer eine Recherche nutzen. Verschickt oder
+    geaendert wird nie etwas: angefragt werden ausschliesslich Leserechte.
+    """
+    load_env()
+    settings = get_settings()
+
+    from scoutr.google import GoogleError, TokenStore, code_from, consent_url, exchange_code
+    from scoutr.web import DEFAULT_PORT, google_client
+
+    if disconnect:
+        client = google_client(settings)
+        try:
+            client.disconnect()
+        finally:
+            client.close()
+        console.print("[green]Konto getrennt.[/green] Die Anmeldedaten sind geloescht.")
+        return
+
+    client_id = client_id.strip() or settings.google_client_id
+    client_secret = client_secret.strip() or settings.google_client_secret
+    if not client_id or not client_secret:
+        console.print(
+            Panel.fit(
+                "[bold]Einmalige Einrichtung bei Google[/bold]\n\n"
+                "1. [cyan]console.cloud.google.com[/cyan] oeffnen, oben links ein neues\n"
+                "   Projekt anlegen (Name egal).\n"
+                "2. [bold]APIs und Dienste -> Bibliothek[/bold]: [cyan]Gmail API[/cyan]\n"
+                "   aktivieren, dann [cyan]Google Calendar API[/cyan].\n"
+                "3. [bold]OAuth-Zustimmungsbildschirm[/bold]: Nutzertyp [cyan]Extern[/cyan],\n"
+                "   Name und Mailadresse eintragen -- und dich selbst als\n"
+                "   [bold]Testnutzer[/bold] hinzufuegen. Ohne das lehnt Google spaeter ab.\n"
+                "4. [bold]Anmeldedaten -> OAuth-Client-ID[/bold], Typ [cyan]Desktop-App[/cyan].\n"
+                f"   Weiterleitungs-URI: [cyan]http://localhost:{DEFAULT_PORT}/google[/cyan]\n"
+                "5. Client-ID und Secret hier eingeben.",
+                border_style="cyan",
+            )
+        )
+        client_id = client_id or typer.prompt("Client-ID").strip()
+        client_secret = client_secret or typer.prompt("Client-Secret", hide_input=True).strip()
+    if not client_id or not client_secret:
+        console.print("[yellow]Ohne Client-ID und Secret geht es nicht.[/yellow]")
+        raise typer.Exit(code=1)
+
+    redirect = f"http://localhost:{DEFAULT_PORT}/google"
+    try:
+        url = consent_url(client_id, redirect)
+    except GoogleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print("\nOeffne diese Adresse und stimme zu:\n")
+    console.print(f"  [cyan]{url}[/cyan]\n")
+    console.print(
+        "[dim]Danach landest du auf einer Adresse, die mit localhost beginnt. Der\n"
+        "Browser zeigt dort eine Fehlerseite -- das ist richtig so. Kopiere die\n"
+        "ganze Adresse aus der Adresszeile.[/dim]\n"
+    )
+    with contextlib.suppress(Exception):
+        import webbrowser
+
+        webbrowser.open(url)
+
+    pasted = typer.prompt("Adresse oder Code").strip()
+    if not code_from(pasted):
+        console.print("[yellow]Darin steckt kein Code.[/yellow]")
+        raise typer.Exit(code=1)
+
+    try:
+        tokens = exchange_code(client_id, client_secret, pasted, redirect)
+    except GoogleError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    store = TokenStore(settings.data_dir, settings.memory_key)
+    from scoutr.google import Google
+
+    connection = Google(client_id, client_secret, store)
+    try:
+        connection.remember(tokens)
+        account = connection.account()
+    finally:
+        connection.close()
+
+    target = env_file or find_env_file() or DEFAULT_ENV_PATH
+    written = write_env_file(
+        {
+            "SCOUTR_GOOGLE": "true",
+            "GOOGLE_CLIENT_ID": client_id,
+            "GOOGLE_CLIENT_SECRET": client_secret,
+        },
+        target,
+    )
+    console.print(
+        f"\n[green]Verbunden{f' als {account}' if account else ''}.[/green] "
+        f"Eingetragen in {written}."
+    )
+    console.print(
+        "[dim]Probier es aus:[/dim]\n"
+        '  [bold]cortex "was habe ich diese Woche vor"[/bold]\n'
+        '  [bold]cortex "habe ich eine Mail von der Bahn bekommen"[/bold]'
+    )
+    console.print("[dim]Wieder loswerden: cortex google --trennen[/dim]")
+
+
 @app.command("connect-ha")
 def connect_ha_command(
     url: str = typer.Option("", "--url", help="Adresse der Instanz, z.B. 192.168.1.5:8123."),
@@ -699,8 +775,8 @@ def connect_ha_command(
         Panel.fit(
             f"Gespeichert in [cyan]{written}[/cyan]\n\n"
             "Probier es aus:\n"
-            '  [bold]scoutr "wie warm ist es im Wohnzimmer"[/bold]\n'
-            '  [bold]scoutr "welche Lichter sind gerade an"[/bold]'
+            '  [bold]cortex "wie warm ist es im Wohnzimmer"[/bold]\n'
+            '  [bold]cortex "welche Lichter sind gerade an"[/bold]'
             + ("\n  [bold]scoutr \"mach das Licht im Flur aus\"[/bold]" if control else ""),
             title="fertig",
             border_style="green",
@@ -720,7 +796,7 @@ def lan_command(
     target = subnet or settings.lan_subnet or own_subnet()
     if not target:
         console.print("[red]Kein eigenes Netz erkennbar.[/red]")
-        console.print("[dim]Gib es an: scoutr lan --subnet 192.168.1.0/24[/dim]")
+        console.print("[dim]Gib es an: cortex lan --subnet 192.168.1.0/24[/dim]")
         raise typer.Exit(code=1)
 
     console.print(f"[dim]Durchsuche {target} ...[/dim]")
@@ -987,7 +1063,7 @@ def _run_vision_setup(
     if not (model_name or assume_yes) and not typer.confirm(
         "  Auch Bilder als Eingabe nutzen?", default=True
     ):
-        console.print("  [dim]Uebersprungen. Spaeter: scoutr install-model --vision-only[/dim]")
+        console.print("  [dim]Uebersprungen. Spaeter: cortex install-model --vision-only[/dim]")
         return ""
 
     already = set(lm.installed_models())
@@ -1192,8 +1268,8 @@ def install_model_command(
             + f"\nEingetragen in [cyan]{written}[/cyan]\n\n"
             "Loslegen:\n"
             "  [bold]scoutr[/bold]                     Chat\n"
-            "  [bold]scoutr web[/bold]                 Oberflaeche im Browser\n"
-            '  [bold]scoutr "deine Frage"[/bold]       einmalige Recherche\n'
+            "  [bold]cortex web[/bold]                 Oberflaeche im Browser\n"
+            '  [bold]cortex "deine Frage"[/bold]       einmalige Recherche\n'
             + (
                 "  [bold]scoutr --image foto.jpg[/bold]  Bild als Ausgangspunkt"
                 if "SCOUTR_VISION_MODEL" in values
@@ -1215,7 +1291,7 @@ HELP_TEXT = """\
   [cyan]/export html|md|csv[/cyan]  Recherche dieser Sitzung speichern
   [cyan]/image <pfad>[/cyan]        Bild beschreiben lassen und danach recherchieren
   [cyan]/history[/cyan]             Fruehere Recherchen anzeigen
-  [cyan]/notes[/cyan]               Merkzettel anzeigen (verwalten: scoutr notes)
+  [cyan]/notes[/cyan]               Merkzettel anzeigen (verwalten: cortex notes)
   [cyan]/clear[/cyan]               Gespraechsverlauf verwerfen
   [cyan]/memory[/cyan]              Langzeitspeicher anzeigen
   [cyan]/forget[/cyan]              Langzeitspeicher leeren
@@ -1258,8 +1334,8 @@ def _warn_if_unconfigured(settings: Settings) -> None:
         console.print(
             Panel.fit(
                 "\n".join(problems)
-                + "\n\nRichte scoutr mit [bold]scoutr setup[/bold] ein."
-                + "\n[dim]Keinen API-Key? [bold]scoutr install-model[/bold] richtet ein "
+                + "\n\nRichte scoutr mit [bold]cortex setup[/bold] ein."
+                + "\n[dim]Keinen API-Key? [bold]cortex install-model[/bold] richtet ein "
                 "lokales Modell ein -- laeuft ohne Key und ohne Konto.[/dim]",
                 title="Konfiguration unvollstaendig",
                 border_style="red",
@@ -1476,7 +1552,7 @@ def _describe_image(agent, image: Path) -> str | None:
         console.print(f"[red]{exc}[/red]")
         console.print(
             "[dim]Kann dein Modell ueberhaupt Bilder sehen? Ein eigenes Vision-Modell "
-            "richtet [bold]scoutr install-model --vision-only[/bold] ein.[/dim]"
+            "richtet [bold]cortex install-model --vision-only[/bold] ein.[/dim]"
         )
         return None
     console.print(Panel(description, title=f"[Bild] {image.name}", border_style="cyan"))
@@ -1697,23 +1773,23 @@ def export_command(
 
 
 #: Alles, was kein Unterbefehl ist, gilt als Frage an den Chat.
-COMMANDS = {
-    "setup",
-    "config",
-    "search",
-    "fetch",
-    "cache",
-    "history",
-    "notes",
-    "export",
-    "install-browser",
-    "install-model",
-    "connect-ha",
-    "lan",
-    "web",
-    "chat",
-    "version",
-}
+def _command_names() -> set[str]:
+    """Die Namen aller Unterbefehle -- direkt bei Typer erfragt.
+
+    Frueher stand hier eine Liste von Hand. Die ging beim ersten neuen Befehl
+    prompt auseinander: `cortex google` landete im Chat, statt sich zu
+    verbinden. Abgeleitet kann das nicht mehr passieren.
+    """
+    names = set()
+    for command in app.registered_commands:
+        if command.name:
+            names.add(command.name)
+        elif command.callback is not None:
+            names.add(command.callback.__name__.replace("_", "-"))
+    return names
+
+
+COMMANDS = _command_names()
 
 
 #: Sieht wie ein Unterbefehl aus: kleingeschrieben, mit Bindestrich, ein Wort.
@@ -1733,15 +1809,19 @@ def _unknown_command(name: str) -> None:
         )
     console.print("[dim]Alle Befehle: " + ", ".join(sorted(COMMANDS)) + "[/dim]")
     console.print(
-        f'[dim]War das als Frage gemeint? Dann in Anfuehrungszeichen: scoutr "{name}"[/dim]'
+        f'[dim]War das als Frage gemeint? Dann in Anfuehrungszeichen: cortex "{name}"[/dim]'
     )
 
 
 def main() -> None:
-    """Einstiegspunkt: `scoutr` und `scoutr "Frage"` landen im Chat."""
+    """Einstiegspunkt: `cortex` und `cortex "Frage"` landen im Chat.
+
+    Der Befehl heisst cortex; `scoutr` bleibt als zweiter Name bestehen,
+    damit bestehende Skripte und Dienste weiterlaufen.
+    """
     argv = sys.argv[1:]
     if argv and argv[0] in ("--version", "-V"):
-        console.print(f"scoutr {__version__}")
+        console.print(f"cortex {__version__}")
         return
     # Ein einzelnes Wort mit Bindestrich ist fast sicher ein vertippter oder
     # unbekannter Unterbefehl. Den als Rechercheanfrage ans LLM zu schicken

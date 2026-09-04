@@ -85,6 +85,19 @@ class ChatRenderer:
         self._skips.append(f"{_domain(payload.get('url', ''))} uebersprungen: {reason}")
         self._update_reading()
 
+    def _on_calendar(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        wanted = payload.get("query") or f"{payload.get('days', 7)} Tage"
+        self.console.print(
+            Text.assemble(("  [Termine] ", "bold cyan"), (str(wanted), "white"))
+        )
+
+    def _on_mail(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            Text.assemble(("  [Mail] ", "bold cyan"), (str(payload.get("query", "")), "white"))
+        )
+
     def _on_planning(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         self.console.print(

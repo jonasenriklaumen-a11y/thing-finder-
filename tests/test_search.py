@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
 import pytest
 
 from scoutr import search
 from scoutr.models import SearchResult
-from scoutr.search import KEYLESS_BACKENDS, OPEN_ENGINES, SearchError, search_web
+from scoutr.search import (
+    KEYLESS_BACKENDS,
+    OPEN_ENGINES,
+    SearchError,
+    search_broadly,
+    search_web,
+)
 
 
 def test_region_mapping() -> None:
@@ -254,3 +262,87 @@ def test_unknown_backend_lists_the_keyless_ones() -> None:
         search_web("q", backend="altavista")
     assert "ohne Key" in str(excinfo.value)
     assert "searxng" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Auffaecherung: mehrere Anfragen auf einmal
+# ---------------------------------------------------------------------------
+def test_a_single_query_needs_no_machinery() -> None:
+    """Eine Anfrage laeuft direkt durch -- kein Thread, kein Versatz."""
+    calls: list[tuple[str, int]] = []
+
+    def runner(query: str, count: int) -> list[SearchResult]:
+        calls.append((query, count))
+        return [SearchResult(title="A", url="https://a.de/1", snippet="s")]
+
+    results, used = search_broadly(["nur eine"], 5, runner)
+    assert calls == [("nur eine", 5)]
+    assert used == ["nur eine"]
+    assert len(results) == 1
+
+
+def test_several_queries_are_merged() -> None:
+    def runner(query: str, count: int) -> list[SearchResult]:
+        if query == "eins":
+            return [
+                SearchResult(title="A", url="https://a.de/1", snippet="s"),
+                SearchResult(title="B", url="https://b.de/1", snippet="s"),
+            ]
+        return [
+            SearchResult(title="C", url="https://c.de/1", snippet="s"),
+            SearchResult(title="B", url="https://b.de/1", snippet="s"),
+        ]
+
+    results, used = search_broadly(["eins", "zwei"], 5, runner, stagger=0)
+    assert results[0].url == "https://b.de/1", "von beiden gefunden"
+    assert sorted(used) == ["eins", "zwei"]
+
+
+def test_more_is_fetched_per_query_than_returned() -> None:
+    """Ohne Ueberlappung zwischen den Listen sagt das Mischen nichts aus."""
+    asked: list[int] = []
+
+    def runner(query: str, count: int) -> list[SearchResult]:
+        asked.append(count)
+        return [SearchResult(title="A", url=f"https://{query}.de/1", snippet="s")]
+
+    search_broadly(["eins", "zwei"], 5, runner, stagger=0)
+    assert asked == [9, 9]
+
+
+def test_one_failing_query_does_not_sink_the_rest() -> None:
+    def runner(query: str, count: int) -> list[SearchResult]:
+        if query == "kaputt":
+            raise SearchError("Engine weg")
+        return [SearchResult(title="A", url="https://a.de/1", snippet="s")]
+
+    results, used = search_broadly(["gut", "kaputt"], 5, runner, stagger=0)
+    assert used == ["gut"], "die gescheiterte Anfrage wird nicht als benutzt gemeldet"
+    assert len(results) == 1
+
+
+def test_all_queries_failing_raises() -> None:
+    def runner(query: str, count: int) -> list[SearchResult]:
+        raise SearchError("alles weg")
+
+    with pytest.raises(SearchError, match="alles weg"):
+        search_broadly(["eins", "zwei"], 5, runner, stagger=0)
+
+
+def test_empty_queries_are_skipped() -> None:
+    def runner(query: str, count: int) -> list[SearchResult]:
+        raise AssertionError("darf nicht aufgerufen werden")
+
+    assert search_broadly(["", "   "], 5, runner) == ([], [])
+
+
+def test_parallel_queries_are_staggered() -> None:
+    """Gleichzeitig abgefeuert quittieren die offenen Engines das mit 429."""
+    starts: list[float] = []
+
+    def runner(query: str, count: int) -> list[SearchResult]:
+        starts.append(time.monotonic())
+        return [SearchResult(title="A", url=f"https://{query}.de/1", snippet="s")]
+
+    search_broadly(["eins", "zwei"], 5, runner, stagger=0.2)
+    assert max(starts) - min(starts) >= 0.15

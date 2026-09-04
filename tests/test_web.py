@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -1189,6 +1190,27 @@ def test_the_ui_offers_the_model_picker_and_load_button() -> None:
     assert 'name="SCOUTR_MEMORY"' in html
 
 
+def test_the_ui_offers_reading_along() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="showtrace"' in html, "der Schalter in den Einstellungen"
+    assert "body.tracing .trace" in html, "eingeblendet wird per Klasse"
+    for kind in ('case "thought"', 'case "action"', 'case "action_done"'):
+        assert kind in html, kind
+
+
+def test_the_trace_state_is_declared_before_the_read_loop() -> None:
+    """`let` in der Leseschleife spaeter zu deklarieren gibt einen ReferenceError.
+
+    Genau das ist passiert: handle() laeuft, bevor eine weiter unten stehende
+    let-Zeile ueberhaupt ausgefuehrt wurde -- und die ganze Antwort brach mit
+    "Cannot access 'thinking' before initialization" ab.
+    """
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    declared = html.index("thinking = null")
+    used = html.index("if (!thinking) thinking = trace(")
+    assert declared < used
+
+
 def test_escape_closes_the_settings_window() -> None:
     """Sonst bleibt es offen und die Auslastung fragt im Hintergrund weiter."""
     html = web.UI_FILE.read_text(encoding="utf-8")
@@ -1363,3 +1385,255 @@ def test_a_proxy_is_not_mistaken_for_ollama() -> None:
     assert base_fits("http://192.168.1.9:4000", "nvidia_nim/meta/llama")
     assert base_fits("http://localhost:4000", "openai/gpt-4o")
     assert not base_fits("http://192.168.1.9:11434", "openai/gpt-4o")
+
+
+# ---------------------------------------------------------------------------
+# Terminal-Setup und Web-Einstellungen zeigen dasselbe
+# ---------------------------------------------------------------------------
+def test_everything_setup_asks_for_is_in_the_web_form() -> None:
+    """Was `cortex setup` fragt, muss auch im Browser einstellbar sein.
+
+    Der Test liest die Schluessel direkt aus dem Setup-Quelltext -- kommt dort
+    eine Frage dazu, faellt er auf, bis das Formular nachzieht.
+    """
+    import inspect
+    import re
+
+    from scoutr import cli
+
+    source = inspect.getsource(cli.setup_command)
+    asked = set(re.findall(r'"(SCOUTR_[A-Z_]+)"', source))
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for key in asked:
+        assert f'name="{key}"' in html, f"{key} wird im Terminal gefragt, fehlt aber im Formular"
+
+
+def test_the_search_engine_key_can_be_set_in_the_browser() -> None:
+    """Brave und Tavily brauchen einen Schluessel -- den fragt das Terminal ab."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert f'name="{web.SEARCH_KEY_FIELD}"' in html
+
+
+def test_saving_stores_the_search_key_under_the_right_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / ".env"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
+
+    web.save_values({"SCOUTR_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "bsa-xyz"})
+    assert "BRAVE_API_KEY=bsa-xyz" in target.read_text(encoding="utf-8")
+
+
+def test_an_empty_search_key_means_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / ".env"
+    target.write_text("BRAVE_API_KEY=alt\n", encoding="utf-8")
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
+
+    web.save_values({"SCOUTR_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "   "})
+    assert "BRAVE_API_KEY=alt" in target.read_text(encoding="utf-8")
+
+
+def test_the_open_metasearch_needs_no_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ohne Schluesselnamen wird auch nichts geschrieben -- kein Phantomeintrag."""
+    target = tmp_path / ".env"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
+
+    web.save_values({"SCOUTR_SEARCH_BACKEND": "duckduckgo", web.SEARCH_KEY_FIELD: "egal"})
+    content = target.read_text(encoding="utf-8")
+    assert "egal" not in content
+
+
+def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Getestet wird, was im Formular steht -- sonst prueft man den alten Stand."""
+    seen: dict[str, Any] = {}
+
+    def fake_llm(model, api_key="", api_base=""):
+        seen["model"] = model
+        seen["key"] = api_key
+        return True, "ok"
+
+    def fake_search(backend, api_key="", engines="", instance_url=""):
+        seen["backend"] = backend
+        return True, "3 Treffer"
+
+    monkeypatch.setattr("scoutr.probe.check_llm", fake_llm)
+    monkeypatch.setattr("scoutr.probe.check_search", fake_search)
+
+    status, body = client(
+        "POST",
+        "/api/probe",
+        {
+            "SCOUTR_MODEL": "openai/gpt-4o",
+            "SCOUTR_SEARCH_BACKEND": "brave",
+            web.API_KEY_FIELD: "sk-neu",
+        },
+    )
+    assert status == 200
+    data = json.loads(body)
+    assert data["ok"] is True
+    assert seen == {"model": "openai/gpt-4o", "key": "sk-neu", "backend": "brave"}
+
+
+def test_the_probe_reports_a_failure_without_crashing(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("scoutr.probe.check_llm", lambda *a, **k: (False, "401 Unauthorized"))
+    monkeypatch.setattr("scoutr.probe.check_search", lambda *a, **k: (True, "3 Treffer"))
+    status, body = client("POST", "/api/probe", {"SCOUTR_MODEL": "openai/gpt-4o"})
+    data = json.loads(body)
+    assert status == 200
+    assert data["ok"] is False
+    assert "401" in data["llm"]["message"]
+    assert data["search"]["ok"] is True
+
+
+def test_a_leftover_ollama_base_is_ignored_in_the_probe(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonst testet man Ollama und bekommt gruenes Licht fuer NVIDIA."""
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "scoutr.probe.check_llm",
+        lambda model, api_key="", api_base="": (seen.update(base=api_base), (True, "ok"))[1],
+    )
+    monkeypatch.setattr("scoutr.probe.check_search", lambda *a, **k: (True, "ok"))
+    client(
+        "POST",
+        "/api/probe",
+        {"SCOUTR_MODEL": "openai/gpt-4o", "SCOUTR_API_BASE": "http://localhost:11434"},
+    )
+    assert seen["base"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Gmail und Kalender in den Einstellungen
+# ---------------------------------------------------------------------------
+def test_the_settings_have_their_own_google_section() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "Gmail &amp; Kalender" in html, "eigene Sparte"
+    assert 'name="SCOUTR_GOOGLE"' in html, "an- und ausschaltbar"
+    assert f'name="{web.GOOGLE_ID_FIELD}"' in html
+    assert f'name="{web.GOOGLE_SECRET_FIELD}"' in html
+    assert "console.cloud.google.com" in html, "die Anleitung steht dabei"
+    assert "Gmail API" in html and "Google Calendar API" in html
+    assert "Testnutzer" in html, "der haeufigste Stolperstein"
+
+
+def test_the_google_secret_never_reaches_the_browser(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wie beim HA-Token: der Browser erfaehrt nur, DASS eines da ist."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "id-123.apps.googleusercontent.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "streng-geheim")
+    web.SESSION.reload()
+    _, body = client("GET", "/api/config")
+    assert b"streng-geheim" not in body
+    data = json.loads(body)
+    assert data["google"]["has_secret"] is True
+    assert data["google"]["connected"] is False
+
+
+def test_saving_stores_the_google_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / ".env"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
+
+    web.save_values(
+        {
+            "SCOUTR_GOOGLE": "true",
+            web.GOOGLE_ID_FIELD: "id-1.apps.googleusercontent.com",
+            web.GOOGLE_SECRET_FIELD: "s3cret",
+        }
+    )
+    content = target.read_text(encoding="utf-8")
+    assert "GOOGLE_CLIENT_ID=id-1.apps.googleusercontent.com" in content
+    assert "GOOGLE_CLIENT_SECRET=s3cret" in content
+    assert "SCOUTR_GOOGLE=true" in content
+
+
+def test_an_empty_google_secret_means_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    target = tmp_path / ".env"
+    target.write_text("GOOGLE_CLIENT_SECRET=alt\n", encoding="utf-8")
+    monkeypatch.setattr(web, "find_env_file", lambda: target)
+    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
+
+    web.save_values({web.GOOGLE_SECRET_FIELD: "  "})
+    assert "GOOGLE_CLIENT_SECRET=alt" in target.read_text(encoding="utf-8")
+
+
+def test_the_consent_link_is_built_on_request(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "id-123.apps.googleusercontent.com")
+    web.SESSION.reload()
+    status, body = client("POST", "/api/google", {"action": "start"})
+    data = json.loads(body)
+    assert status == 200 and data["ok"] is True
+    assert "accounts.google.com" in data["url"]
+    assert "gmail.readonly" in data["url"]
+    assert data["redirect"].startswith("http://localhost:")
+
+
+def test_connecting_without_credentials_says_so(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+    web.SESSION.reload()
+    _, body = client("POST", "/api/google", {"action": "finish", "code": "abc"})
+    data = json.loads(body)
+    assert data["ok"] is False
+    assert "Client-ID" in data["error"]
+
+
+def test_the_redirect_matches_what_google_allows() -> None:
+    """Google erlaubt fuer Desktop-Anwendungen nur localhost."""
+    assert web.google_redirect("192.168.1.5:8765") == "http://localhost:8765/google"
+    assert web.google_redirect("") == f"http://localhost:{web.DEFAULT_PORT}/google"
+    assert web.google_redirect("kaputt:abc") == f"http://localhost:{web.DEFAULT_PORT}/google"
+
+
+def test_the_return_from_google_finishes_the_connection(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sitzt der Browser auf demselben Rechner, ist danach alles fertig."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "id-1.apps.googleusercontent.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "s3cret")
+    web.SESSION.reload()
+
+    from scoutr.google import Tokens
+
+    monkeypatch.setattr(
+        "scoutr.google.exchange_code",
+        lambda cid, secret, code, redirect: Tokens(
+            access_token="at", refresh_token="rt", expires_at=time.time() + 3600
+        ),
+    )
+    monkeypatch.setattr("scoutr.google.Google.remember", lambda self, tokens: None)
+    monkeypatch.setattr("scoutr.google.Google.account", lambda self: "jemand@example.com")
+
+    status, body = client("GET", "/google?code=4/0AX")
+    assert status == 200
+    assert b"jemand@example.com" in body
+
+
+def test_a_refusal_at_google_is_shown_not_swallowed(client) -> None:
+    status, body = client("GET", "/google?error=access_denied")
+    assert status == 200
+    assert b"access_denied" in body
+
+
+def test_a_return_without_a_code_says_so(client) -> None:
+    status, body = client("GET", "/google")
+    assert status == 200
+    assert b"keinen Code" in body
