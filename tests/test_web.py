@@ -24,7 +24,8 @@ class FakeToolbox:
         self.on_event: Any = None
         self.ask_handler: Any = None
         self.mode = ""
-        self.thinking: bool | None = None
+        self.structured: bool | None = None
+        self.effort = ""
         self.recheck: bool | None = None
 
 
@@ -51,12 +52,14 @@ class FakeAgent:
         *,
         stream: bool = True,
         mode: str = "",
-        thinking: bool | None = None,
+        structured: bool | None = None,
+        effort: str = "",
         recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
         self.mode = mode
-        self.thinking = thinking
+        self.structured = structured
+        self.effort = effort
         self.recheck = recheck
         if self.raise_error is not None:
             raise self.raise_error
@@ -595,7 +598,7 @@ def test_a_waiting_device_is_told_so(session: web.ChatSession) -> None:
     started, release = threading.Event(), threading.Event()
 
     class Slow(FakeAgent):
-        def ask(self, question, *, stream=True, mode="", thinking=None, recheck=None):
+        def ask(self, question, *, stream=True, mode="", structured=None, recheck=None, effort=""):
             started.set()
             release.wait(timeout=5)
             return AgentResult(answer="fertig")
@@ -706,7 +709,8 @@ class AskingAgent(FakeAgent):
         *,
         stream: bool = True,
         mode: str = "",
-        thinking: bool | None = None,
+        structured: bool | None = None,
+        effort: str = "",
         recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
@@ -1819,7 +1823,7 @@ def test_a_silent_model_does_not_kill_the_connection(
         def set_ask_handler(self, handler):
             pass
 
-        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
+        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
             time.sleep(0.4)
             self.on_event("answer_chunk", {"text": "Da bin ich."})
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -1897,7 +1901,7 @@ def test_stopping_cancels_the_running_agent(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
+        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
             started.set()
             for _ in range(100):
                 if cancelled.is_set():
@@ -2031,7 +2035,7 @@ def test_a_closed_tab_ends_the_run(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
+        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
             started.set()
             for _ in range(200):
                 if cancelled.is_set():
@@ -2085,7 +2089,7 @@ def test_the_waiting_notice_does_not_invent_another_device(
         def cancel(self):
             release.set()
 
-        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
+        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
             running.set()
             release.wait(timeout=10)
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -2228,11 +2232,27 @@ def test_the_mode_reaches_the_agent(client, session: web.ChatSession, agent: Fak
     assert agent.mode == "code"
 
 
-def test_the_thinking_switch_reaches_the_agent(
+def test_the_structure_switch_reaches_the_agent(
     client, session: web.ChatSession, agent: FakeAgent
 ) -> None:
-    client("POST", "/api/chat", {"message": "Frage", "thinking": False})
-    assert agent.thinking is False
+    client("POST", "/api/chat", {"message": "Frage", "structured": False})
+    assert agent.structured is False
+
+
+def test_the_old_name_of_the_switch_still_works(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    """Eine Oberflaeche aus dem Cache schickt noch "thinking" -- sie soll
+    deswegen nicht aufhoeren zu arbeiten."""
+    client("POST", "/api/chat", {"message": "Frage", "thinking": True})
+    assert agent.structured is True
+
+
+def test_the_effort_reaches_the_agent(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    client("POST", "/api/chat", {"message": "Frage", "effort": "high"})
+    assert agent.effort == "high"
 
 
 def test_without_a_choice_nothing_is_forced(
@@ -2241,7 +2261,7 @@ def test_without_a_choice_nothing_is_forced(
     """Ein alter Browser ohne die neuen Felder soll weiterlaufen wie bisher."""
     client("POST", "/api/chat", {"message": "Frage"})
     assert agent.mode == ""
-    assert agent.thinking is None
+    assert agent.structured is None
 
 
 def test_the_composer_offers_both_modes() -> None:
@@ -2254,31 +2274,37 @@ def test_the_composer_offers_both_modes() -> None:
     assert 'id="clip"' in row and 'id="modes"' in row
 
 
-def test_the_picker_offers_the_thinking_switch() -> None:
+def test_the_picker_offers_the_structure_switch_and_the_effort() -> None:
+    """Gedacht wird immer -- der Schalter zerlegt. Deshalb heisst er anders."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     picker = html[html.index('id="picker-models"') :]
     picker = picker[: picker.index("picker-foot")]
-    assert 'id="think"' in picker
-    assert "Denken" in picker
+    assert 'id="structure"' in picker
+    assert "Strukturieren" in picker
+    assert "Gedacht wird immer" in picker
+    for stufe in ("low", "medium", "high"):
+        assert f'data-effort="{stufe}"' in picker, stufe
+    assert "Denktiefe" in picker
 
 
-def test_both_choices_are_sent_with_every_question() -> None:
+def test_every_choice_is_sent_with_every_question() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "message: text, attachments, mode, thinking" in html
+    assert "message: text, attachments, mode, structured, recheck, effort" in html
 
 
-def test_switched_off_thinking_is_visible_in_the_header() -> None:
+def test_what_differs_from_normal_is_visible_in_the_header() -> None:
     """Es aendert das Ergebnis spuerbar -- man soll es sehen."""
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert '"ohne Denken"' in html
+    assert '"strukturiert"' in html
+    assert '"Denktiefe "' in html
 
 
-def test_the_thinking_switch_is_not_shadowed_by_a_local_name() -> None:
+def test_the_switch_is_not_shadowed_by_a_local_name() -> None:
     """Eine gleichnamige lokale Variable hat den Schalter verdeckt.
 
-    In `ask()` hiess die Zeile fuer die Denkschritte einmal `thinking` -- und
-    damit ging beim Absenden `null` statt `false` an den Server. Der Schalter
-    stand auf aus, der Server sah nichts davon.
+    In `ask()` hiess die Zeile fuer die Denkschritte einmal wie der Schalter --
+    und damit ging beim Absenden `null` statt `false` an den Server. Der
+    Schalter stand auf aus, der Server sah nichts davon.
     """
     html = web.UI_FILE.read_text(encoding="utf-8")
     body = html[html.index("async function ask(text){") :]
@@ -2286,7 +2312,8 @@ def test_the_thinking_switch_is_not_shadowed_by_a_local_name() -> None:
     assert "thoughtLine" in body, "die Zeile heisst anders als der Schalter"
     assert "let answer" in body
     declared = body[body.index("let answer") : body.index("\n", body.index("let answer"))]
-    assert "thinking" not in declared, f"verdeckt den Schalter: {declared}"
+    for schalter in ("structured", "recheck", "effort"):
+        assert schalter not in declared, f"verdeckt den Schalter: {declared}"
 
 
 # ---------------------------------------------------------------------------
@@ -2351,11 +2378,32 @@ def test_the_standard_mode_starts_no_agents_in_the_ui() -> None:
     assert 'case "code_model"' in html and "stärkstes Modell" in html
 
 
-def test_the_recheck_switch_sits_under_the_thinking_switch() -> None:
+def test_the_recheck_leaves_a_mark_on_the_answer() -> None:
+    """Die Zwischenschritte sieht nur, wer sie aufklappt -- dass gegengeprueft
+    wurde, gehoert zur Antwort selbst."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "function mark(" in html
+    assert "Gegengeprüft" in html
+    assert ".answer-note{" in html
+    # "mark" gehoert dem Logo in der Seitenleiste -- zwei Bedeutungen unter
+    # einem Namen, und die neue Regel hat das Logo umgestylt.
+    assert html.count(".mark{") == 1
+
+
+def test_code_blocks_carry_their_language_and_a_copy_button() -> None:
+    """Die Sprachangabe stand woertlich als erste Zeile IM Code."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "codeblock" in html and "code-head" in html
+    assert "clipboard.writeText" in html
+    # Die Sprache wird aus dem Zaun gelesen, nicht mitgeschrieben.
+    assert "```([a-zA-Z0-9+#._-]*)" in html
+
+
+def test_the_recheck_switch_sits_under_the_structure_switch() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     picker = html[html.index('id="picker-models"') :]
     picker = picker[: picker.index("picker-foot")]
-    assert picker.index('id="think"') < picker.index('id="recheck"')
+    assert picker.index('id="structure"') < picker.index('id="recheck"')
     assert "Gegenprüfen" in picker
     assert "nicht dran waren" in picker
 
@@ -2380,7 +2428,7 @@ def test_the_recheck_is_off_unless_asked_for(
 
 def test_the_recheck_is_sent_with_every_question() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "message: text, attachments, mode, thinking, recheck" in html
+    assert "message: text, attachments, mode, structured, recheck, effort" in html
 
 
 def test_a_running_recheck_is_visible() -> None:

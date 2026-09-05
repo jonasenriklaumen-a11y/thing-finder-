@@ -44,9 +44,9 @@ CHROMIUM = "/opt/pw-browsers/chromium"
 class FakeAgent:
     """Verhaelt sich wie der echte Agent -- ohne Modell, ohne Netz.
 
-    Er merkt sich, was die Oberflaeche ihm geschickt hat (Modus, Denken,
-    Gegenprobe), damit der Rundgang pruefen kann, ob die Schalter wirklich
-    ankommen und nicht nur huebsch aussehen.
+    Er merkt sich, was die Oberflaeche ihm geschickt hat (Modus, Struktur,
+    Gegenprobe, Denktiefe), damit der Rundgang pruefen kann, ob die Schalter
+    wirklich ankommen und nicht nur huebsch aussehen.
     """
 
     def __init__(self) -> None:
@@ -77,17 +77,24 @@ class FakeAgent:
         message: str,
         stream: bool = True,
         mode: str = "",
-        thinking: bool | None = None,
+        structured: bool | None = None,
         recheck: bool | None = None,
+        effort: str = "",
     ) -> Any:
         self.gesehen.append(
-            {"text": message, "modus": mode, "denken": thinking, "gegenprobe": recheck}
+            {
+                "text": message,
+                "modus": mode,
+                "struktur": structured,
+                "gegenprobe": recheck,
+                "tiefe": effort,
+            }
         )
         text = message.lower()
 
         if mode == "code":
             self.on_event("code_model", {"model": "anthropic/claude-opus-5"})
-        if thinking:
+        if structured:
             self.on_event("subagents", {"tasks": ["Teil eins", "Teil zwei"]})
             self.on_event("subagent_done", {"task": "Teil eins"})
         if "frag" in text:
@@ -214,7 +221,7 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         schritte = pg.inner_text(".steps >> nth=-1")
         log.pruefe("[Suche]" in schritte, f"Zwischenschritte sichtbar: {schritte[:40]!r}")
         log.pruefe(
-            agent.gesehen[-1]["denken"] is False,
+            agent.gesehen[-1]["struktur"] is False,
             f"Standard ist das Gespräch, nicht die Recherche ({agent.gesehen[-1]})",
         )
 
@@ -248,9 +255,12 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
 
         pg.click("#btn-model")
         pg.wait_for_timeout(500)
-        log.pruefe(pg.is_visible("#think") and pg.is_visible("#recheck"),
-                   "Denken und Gegenprüfen stehen bereit")
-        pg.check("#think")
+        log.pruefe(pg.is_visible("#structure") and pg.is_visible("#recheck"),
+                   "Strukturieren und Gegenprüfen stehen bereit")
+        log.pruefe(pg.locator("#efforts .eff").count() == 3, "drei Stufen der Denktiefe")
+        pg.click('#efforts .eff[data-effort="high"]')
+        pg.wait_for_timeout(200)
+        pg.check("#structure")
         pg.check("#recheck")
         pg.keyboard.press("Escape")
         pg.wait_for_timeout(400)
@@ -259,14 +269,25 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.click("#send")
         pg.wait_for_timeout(1200)
         letzte = agent.gesehen[-1]
-        log.pruefe(letzte["denken"] is True and letzte["gegenprobe"] is True,
+        log.pruefe(letzte["struktur"] is True and letzte["gegenprobe"] is True,
                    f"beide Schalter kommen an ({letzte})")
+        log.pruefe(letzte["tiefe"] == "high", f"die Denktiefe kommt an ({letzte['tiefe']})")
+        log.pruefe("Denktiefe high" in pg.inner_text("#status"),
+                   "und steht in der Kopfzeile")
         schritte = pg.inner_text(".steps >> nth=-1")
-        log.pruefe("[Teile]" in schritte, "mit Denken wird zerlegt")
+        log.pruefe("[Teile]" in schritte, "strukturiert wird zerlegt")
         log.pruefe("[Gegenprobe]" in schritte, "die Gegenprobe meldet sich")
+        log.pruefe("Gegengeprüft" in pg.inner_text(".msg.bot >> nth=-1"),
+                   "und steht als Vermerk an der Antwort")
+        breite = pg.eval_on_selector(".answer-note", "e => e.getBoundingClientRect().width")
+        log.pruefe(breite > 200, f"der Vermerk steht in einer Zeile ({breite:.0f}px)")
+        log.pruefe(
+            pg.eval_on_selector(".brand svg", "e => e.getBoundingClientRect().width") >= 20,
+            "und das Logo in der Seitenleiste ist unversehrt",
+        )
         pg.click("#btn-model")
         pg.wait_for_timeout(400)
-        pg.uncheck("#think")
+        pg.uncheck("#structure")
         pg.uncheck("#recheck")
         pg.keyboard.press("Escape")
         foto("04-modi")

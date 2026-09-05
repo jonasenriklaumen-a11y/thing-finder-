@@ -1848,7 +1848,8 @@ def test_the_code_mode_replaces_the_verbose_answer_format(
     prompt = agent.messages[0]["content"]
     assert "Code-Modus" in prompt
     assert "sei ausfuehrlich" not in prompt
-    assert "Der Code ist die Antwort" in prompt
+    assert "lauffaehiger Code" in prompt
+    assert "Erfundene Funktionsnamen" in prompt
 
 
 def test_the_mode_can_change_between_two_questions(
@@ -1906,7 +1907,7 @@ def test_without_thinking_there_is_no_planning_call(
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False)
+    agent.ask("Was kostet ein Lastenrad?", stream=False, structured=False)
     assert planned == [], "kein Planungsaufruf"
 
 
@@ -1928,7 +1929,7 @@ def test_without_thinking_no_agent_runs_at_all(
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    agent.ask("Was kostet ein gebrauchtes Lastenrad in Bremen?", stream=False, thinking=False)
+    agent.ask("Was kostet ein gebrauchtes Lastenrad in Bremen?", stream=False, structured=False)
     assert seen == [], "ohne Denken laeuft keine Vorrecherche"
     assert any(schema["function"]["name"] == "web_search" for schema in agent.tools), (
         "die Werkzeuge bleiben trotzdem da"
@@ -1954,7 +1955,7 @@ def test_a_greeting_starts_no_agent_even_without_thinking(
     agent = Agent(settings, cache=None, toolbox=toolbox)
     for gruss in ("Hallo", "danke dir", "  hey!  "):
         agent.clear()
-        agent.ask(gruss, stream=False, thinking=False)
+        agent.ask(gruss, stream=False, structured=False)
     assert gestartet == [], "fuer einen Gruss laeuft kein Agent"
 
 
@@ -1974,7 +1975,7 @@ def test_an_empty_pre_research_is_not_pushed_into_the_context(
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False)
+    agent.ask("Was kostet ein Lastenrad?", stream=False, structured=False)
     angehaengt = [
         message
         for message in agent.messages
@@ -1993,29 +1994,35 @@ def test_findings_count_as_useful_when_something_is_in_them() -> None:
     assert useful_findings([{"task": "a", "sources": ["https://example.org"]}])
 
 
-def test_the_thinking_effort_follows_the_job(
-    settings: Settings, toolbox: Toolbox
+def test_the_effort_is_chosen_by_the_user(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
-    """Gespraech schnell, Recherche gruendlich, Code am gruendlichsten."""
+    """Die Denktiefe steht oben in der Modellauswahl -- drei Stufen."""
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
     agent = Agent(settings, cache=None, toolbox=toolbox)
 
-    agent.thinking = False
     kwargs = agent._llm_kwargs()
-    assert kwargs["reasoning_effort"] == "low"
+    assert kwargs["reasoning_effort"] == "medium", "die Mitte ist der Standard"
     assert kwargs["drop_params"] is True, "Anbieter ohne den Wunsch duerfen ihn weglassen"
 
-    agent.thinking = True
-    assert agent._llm_kwargs()["reasoning_effort"] == "medium"
-
-    agent._apply_mode("code")
+    agent.ask("Frage", stream=False, effort="high")
     assert agent._llm_kwargs()["reasoning_effort"] == "high"
+
+    agent.ask("Frage", stream=False, effort="low")
+    assert agent._llm_kwargs()["reasoning_effort"] == "low"
+
+    agent.ask("Frage", stream=False, effort="unsinn")
+    assert agent._llm_kwargs()["reasoning_effort"] == "medium", "Unbekanntes faellt zurueck"
+
+    agent.ask("Frage", stream=False)
+    assert agent._llm_kwargs()["reasoning_effort"] == "medium", "leer laesst stehen"
 
 
 def test_thinking_stays_on_unless_someone_turns_it_off(
     settings: Settings, toolbox: Toolbox
 ) -> None:
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    assert agent.thinking is True
+    assert agent.structured is True
 
 
 def test_thinking_can_be_turned_back_on(
@@ -2026,10 +2033,10 @@ def test_thinking_can_be_turned_back_on(
     )
     monkeypatch.setattr("cortex.subagents.run_subagents", lambda tasks, *a, **k: [])
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    agent.ask("erste", stream=False, thinking=False)
-    assert agent.thinking is False
-    agent.ask("zweite", stream=False, thinking=True)
-    assert agent.thinking is True
+    agent.ask("erste", stream=False, structured=False)
+    assert agent.structured is False
+    agent.ask("zweite", stream=False, structured=True)
+    assert agent.structured is True
 
 
 def test_without_thinking_the_model_cannot_split_the_question_itself(
@@ -2044,7 +2051,7 @@ def test_without_thinking_the_model_cannot_split_the_question_itself(
     agent = Agent(settings, cache=None, toolbox=toolbox)
     assert "research_subtasks" in {s["function"]["name"] for s in agent.tools}
 
-    agent.thinking = False
+    agent.structured = False
     assert "research_subtasks" not in {s["function"]["name"] for s in agent.tools}
 
 
@@ -2052,8 +2059,8 @@ def test_the_tool_comes_back_when_thinking_is_on_again(
     settings: Settings, toolbox: Toolbox
 ) -> None:
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    agent.thinking = False
-    agent.thinking = True
+    agent.structured = False
+    agent.structured = True
     assert "research_subtasks" in {s["function"]["name"] for s in agent.tools}
 
 
@@ -2062,12 +2069,12 @@ def test_the_standard_mode_talks_instead_of_reporting(
 ) -> None:
     """Ohne Denken steht der Gespraechstext im Systemprompt, nicht der Bericht."""
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    agent.ask("", thinking=False)          # setzt nur den Zustand
+    agent.ask("", structured=False)          # setzt nur den Zustand
     system = agent.messages[0]["content"]
     assert "du fuehrst ein Gespraech" in system
     assert "Nicht gefunden:" not in system
 
-    agent.ask("", thinking=True)
+    agent.ask("", structured=True)
     system = agent.messages[0]["content"]
     assert "sei ausfuehrlich" in system
 
@@ -2080,13 +2087,57 @@ def test_the_system_prompt_only_changes_when_the_situation_does(
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
     agent = Agent(settings, cache=None, toolbox=toolbox)
 
-    agent.ask("Erste Frage", stream=False, thinking=False)
+    agent.ask("Erste Frage", stream=False, structured=False)
     vorher = agent.messages[0]["content"]
-    agent.ask("Zweite Frage", stream=False, thinking=False, mode="normal")
+    agent.ask("Zweite Frage", stream=False, structured=False, mode="normal")
     assert agent.messages[0]["content"] is vorher, "unveraendert heisst unangetastet"
 
-    agent.ask("Dritte Frage", stream=False, thinking=True)
+    agent.ask("Dritte Frage", stream=False, structured=True)
     assert agent.messages[0]["content"] is not vorher, "andere Lage, anderer Text"
+
+
+def test_a_missing_essential_must_be_asked_for(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """"Wie wird das Wetter morgen?" ohne Ort ist eine Rueckfrage, keine Stadt.
+
+    Vorher stand im Systemtext "im Zweifel naheliegende Annahme treffen" --
+    und die naheliegende Annahme war dann Berlin, fuer jemanden, der ganz
+    woanders wohnt.
+    """
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.set_ask_handler(lambda question, options: "Bremen")
+    system = agent.messages[0]["content"]
+    assert "PFLICHT" in system
+    assert "niemals einfach Berlin" in system
+    assert "ask_user" in system
+
+
+def test_without_anyone_to_ask_the_gap_is_named(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ohne Gegenueber waere eine Rueckfrage eine Sackgasse -- geraten wird
+    trotzdem nicht, die Luecke wird benannt."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    system = agent.messages[0]["content"]
+    assert "Rueckfragen sind hier nicht moeglich" in system
+    assert "erfindest du sie trotzdem nicht" in system
+
+
+def test_the_ask_paragraph_survives_a_change_of_mode(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Der Systemtext wird bei jedem Moduswechsel neu gebaut -- der Absatz
+    ueber Rueckfragen darf dabei nicht verlorengehen."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.set_ask_handler(lambda question, options: "ja")
+    assert "ask_user" in agent.messages[0]["content"]
+
+    agent._apply_mode("code")
+    assert "ask_user" in agent.messages[0]["content"], "nach dem Moduswechsel weg"
+
+    agent.set_ask_handler(None)
+    assert "Rueckfragen sind hier nicht moeglich" in agent.messages[0]["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -2177,7 +2228,7 @@ def test_the_second_round_searches_before_it_asks_the_model(
     agent = Agent(settings, cache=None, toolbox=toolbox)
     toolbox.stats.sources.append({"url": "https://alt.example/x", "domain": "alt.example"})
 
-    result = agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False, recheck=True)
+    result = agent.ask("Was kostet ein Lastenrad?", stream=False, structured=False, recheck=True)
     assert gesucht == ["Was kostet ein Lastenrad?"], "die Gegenprobe sucht selbst"
     angeboten = [
         message["content"]
@@ -2208,7 +2259,7 @@ def test_the_second_round_ignores_hits_from_pages_already_read(
     # Was die erste Runde gelesen hat, steht beim Start der zweiten in
     # avoid_domains -- hier direkt gesetzt, statt eine Runde nachzustellen.
     toolbox.avoid_domains.add("alt.example")
-    agent.ask("Frage", stream=False, thinking=False, recheck=True)
+    agent.ask("Frage", stream=False, structured=False, recheck=True)
     assert not [
         message
         for message in agent.messages

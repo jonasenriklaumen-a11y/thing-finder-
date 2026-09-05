@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.3.5                                      │
+│ Cortex AI 8.4.5                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -333,12 +333,18 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   ans Vision-Modell, PDFs werden ausgelesen, Text-, Markdown-, CSV- und JSON-Dateien
   direkt übernommen. Bis zu 5 Dateien à 25 MB. Ein gescanntes PDF ohne Textebene sagt
   das offen — geraten wird nichts.
-* **Rückfragen:** braucht cortex etwas Entscheidendes (Budget, Ort, welches von
-  mehreren Dingen gemeint ist), fragt er nach — in einem kleinen Fenster über dem
-  Chat, mit anklickbaren Antworten oder einem Feld zum Selberschreiben.
-  <kbd>Esc</kbd> heißt „überspringen". Er fragt höchstens zweimal je Anfrage und nur,
-  wenn die Antwort das Ergebnis wirklich ändert; sonst trifft er eine Annahme und
-  sagt sie dazu.
+* **Rückfragen statt Raten.** Fehlt eine Angabe, ohne die die Antwort auf gut Glück
+  raten würde, *muss* Cortex fragen — in einem kleinen Fenster über dem Chat, mit
+  anklickbaren Antworten oder einem Feld zum Selberschreiben. <kbd>Esc</kbd> heißt
+  „überspringen". Das gilt vor allem für den **Ort** (Wetter, Öffnungszeiten, Preise
+  vor Ort), den **Zeitraum**, das **Budget**, welches von mehreren gleichnamigen
+  Dingen gemeint ist, und bei Code für **Sprache, Version und Zielsystem**.
+  „Wie wird das Wetter morgen?" ohne bekannten Ort ist eine Rückfrage — nie
+  stillschweigend Berlin. Steht die Angabe schon im Gespräch, im Ortsfilter oder auf
+  dem Merkzettel, nimmt er sie von dort. Nach Kleinigkeiten fragt er nicht, und
+  höchstens zweimal je Anfrage. Sitzt niemand davor, der antworten könnte (Terminal
+  mit `--yes`, Automatik), erfindet er die Angabe trotzdem nicht: dann sagt er in der
+  ersten Zeile, was fehlt, und nennt die Annahme, unter der er weitermacht.
 * **Letzte Chats** in der Seitenleiste sind Chats, keine Einzelfragen. Ein Chat
   beginnt mit **Neuer Chat**, bekommt seinen Namen von der ersten Frage darin und
   sammelt alles Weitere, bis du den nächsten startest. Er erscheint in dem Moment in
@@ -362,6 +368,12 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   **Code** dreht das um: der Codeblock steht zuerst, Erklärungen nur
   wenn sie etwas hinzufügen, das nicht im Code steht. Vollständiger, lauffähiger
   Code statt Ausschnitten mit „…", Kommentare sagen *warum* statt *was*. Und
+  Verlangt wird dort: Annahmen in einer Zeile über dem Block statt im Fließtext,
+  nur Schnittstellen, die es wirklich gibt, Fehlerbehandlung dort wo sie hingehört
+  (kein nacktes `except: pass`), ein Aufrufbeispiel oder ein kurzer Test als Beleg,
+  dass es läuft — und bei Änderungen nur die geänderten Stellen statt der ganzen
+  Datei. Fehlt Sprache, Version oder Zielsystem, fragt er, statt zu raten. Im Chat
+  bekommt jeder Codeblock eine Kopfzeile mit der Sprache und einen **Kopieren**-Knopf.
   Cortex nimmt dafür **automatisch das stärkste Modell, das er erreichen kann**
   — beim Programmieren ist ein schwaches Modell am teuersten: Code, der falsch
   aussieht, erkennt man; Code, der falsch *ist*, nicht. Welches es war, steht in
@@ -369,7 +381,15 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   → Modell → Code-Modell* ein. Die Quellenpflicht bleibt: erfundene
   Funktionsnamen sind hier der teuerste Fehler überhaupt — sie sehen richtig aus
   und laufen nicht.
-* **Denken an oder aus**, in der Modellauswahl oben — aus ist der Normalfall.
+* **Denktiefe: Low, Medium, High**, oben in der Modellauswahl. Wie lange das
+  Modell überlegen darf, bevor es antwortet — der eine Regler, der Tempo und
+  Gründlichkeit gegeneinander stellt. Medium ist der Standard, Low für flotte
+  Fragen, High für schwierige. Die Stufe geht als `reasoning_effort` an den
+  Anbieter; wer den Begriff nicht kennt, bekommt ihn dank `drop_params` gar
+  nicht erst zu sehen. Steht sie nicht auf Medium, sagt es die Kopfzeile.
+* **Strukturieren an oder aus**, in der Modellauswahl oben — aus ist der Normalfall.
+  (Der Schalter hieß einmal „Denken". Gedacht wird immer; was er umlegt, ist die
+  Zerlegung.)
   Angeschaltet wird Cortex vom Gesprächspartner zum Rechercheagenten: er zerlegt
   die Frage in Teilfragen, schickt für jede einen Agenten los und schreibt aus
   deren Funden eine ausführliche Antwort mit Quellen, Vergleich, Fazit und einem
@@ -385,7 +405,8 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   alte Antwort einfach noch einmal hinschreiben.) Findet die zweite Runde etwas
   anderes, steht es in der Antwort; findet sie nichts Neues, sagt sie das. Gut für
   Zahlen, die nur in einer einzigen Quelle so stehen. Kostet ungefähr die doppelte
-  Zeit.
+  Zeit. Dass gegengeprüft wurde, steht danach als Vermerk **an der Antwort** —
+  nicht nur in den Zwischenschritten, die ja nur sieht, wer sie aufklappt.
 * **Erscheinungsbild** unten links in der Seitenleiste öffnet ein eigenes Fenster:
   **hell**, **dunkel** oder **wie das System** — und darunter acht Farbschemata.
   *Standard* sind die Farben, die du kennst (warmes Papier, grüner Akzent); dazu
@@ -459,7 +480,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.3.5                                                   │
+│ Cortex AI 8.4.5                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

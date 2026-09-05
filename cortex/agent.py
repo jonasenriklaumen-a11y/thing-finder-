@@ -15,7 +15,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 from cortex.cache import Cache
 from cortex.config import Settings
@@ -122,6 +122,21 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 #: Die beiden Arbeitsweisen. "normal" schreibt aus, "code" schreibt Code.
 MODES = ("normal", "code")
 
+#: Die drei Stufen der Denktiefe, wie sie oben in der Modellauswahl stehen.
+#: Sie landen unveraendert als `reasoning_effort` beim Anbieter -- wer den
+#: Begriff nicht kennt, bekommt ihn dank `drop_params` gar nicht erst zu sehen.
+EFFORTS = ("low", "medium", "high")
+
+#: Mitte als Standard: gruendlich genug fuer eine ernste Frage, schnell genug,
+#: dass ein Gespraech nicht zaeh wird.
+DEFAULT_EFFORT = "medium"
+
+
+def clean_effort(effort: str) -> str:
+    """Unbekanntes wird zur Mitte -- eine falsche Stufe darf nichts kippen."""
+    effort = (effort or "").strip().lower()
+    return effort if effort in EFFORTS else DEFAULT_EFFORT
+
 
 def clean_mode(mode: str) -> str:
     """Unbekanntes wird "normal" -- lieber ausfuehrlich als versehentlich knapp."""
@@ -173,24 +188,41 @@ als eine erfundene Zahl.
 #: programmiert -- dann ist eine Seite Prosa vor dem Codeblock kein Service,
 #: sondern etwas, das man wegscrollen muss.
 CODE_PROMPT = """\
-Antwortformat -- du bist im Code-Modus:
-- Der Code ist die Antwort. Schreib ihn zuerst, in einem Block mit Sprachangabe. \
-Erklaerungen kommen danach, kurz, und nur wenn sie etwas hinzufuegen, das nicht \
-im Code steht.
-- Keine Vorrede, keine Zusammenfassung der Frage, kein "Gerne!", kein Fazit.
-- Vollstaendiger, lauffaehiger Code statt Ausschnitten mit "..." -- Importe, \
-Fehlerbehandlung und Randfaelle gehoeren dazu. Wo etwas fehlen MUSS, steht ein \
-Kommentar an genau der Stelle.
-- Nenne die Version oder das Jahr, wenn es fuer die Antwort zaehlt (Sprachversion, \
-Bibliotheksfassung, veraltete Schnittstelle).
-- Kommentare im Code sagen WARUM, nicht was. Was dasteht, liest man ohnehin.
-- Aenderst du bestehenden Code, zeig nur die geaenderten Stellen mit genug \
-Umgebung, um sie einzuordnen -- nicht die ganze Datei noch einmal.
-- Fehlermeldungen: erst die Ursache in einem Satz, dann die Korrektur als Code.
-- Was du im Web nachschlaegst -- Schnittstellen, Signaturen, Versionen -- \
-belegst du weiterhin mit der Quelle. Erfundene Funktionsnamen sind hier der \
-teuerste Fehler ueberhaupt: sie sehen richtig aus und laufen nicht.
-- Musst du raten, sag es in einer Zeile ueber dem Block, statt es auszuschmuecken.
+Antwortformat -- du bist im Code-Modus. Hier zaehlt lauffaehiger Code, nicht \
+Beschreibung von Code.
+
+Der Aufbau der Antwort:
+1. Fehlt etwas Entscheidendes -- Sprache, Version, Zielsystem, Rahmenwerk --, frag \
+zuerst nach. Rate nicht: Code fuer die falsche Sprachversion ist wertlos, und man \
+sieht es ihm nicht an.
+2. Wenn du eine Annahme treffen musst, steht sie in EINER Zeile ueber dem Block \
+("Annahme: Python 3.11, keine Fremdbibliotheken."). Nicht mehr.
+3. Der Codeblock, mit Sprachangabe hinter den drei Backticks.
+4. Danach nur, was nicht im Code stehen kann: Warum dieser Weg, welche Fallstricke, \
+wie man es startet oder testet. Drei Saetze, keine Nacherzaehlung.
+
+Was der Code erfuellen muss:
+- Vollstaendig und lauffaehig. Importe, Fehlerbehandlung, Randfaelle. Keine \
+Ausschnitte mit "..." und kein "Rest analog". Wo wirklich etwas fehlen MUSS, steht \
+ein Kommentar an genau der Stelle.
+- Nur Schnittstellen, die es gibt. Erfundene Funktionsnamen sind hier der teuerste \
+Fehler ueberhaupt: sie sehen richtig aus und laufen nicht. Bist du dir bei einer \
+Signatur nicht sicher, schlag sie nach und nenn die Quelle.
+- Namen sagen, was die Sache ist. Kommentare sagen WARUM, nicht was -- was dasteht, \
+liest man ohnehin.
+- Fehler werden behandelt, wo sie auftreten koennen, und nicht pauschal \
+weggefangen. Kein nacktes `except: pass`.
+- Zeig, dass es laeuft: ein Aufrufbeispiel mit erwarteter Ausgabe, oder ein kurzer \
+Test. Bei einem Programm gehoert die Startzeile dazu.
+- Aenderst du bestehenden Code, zeig nur die geaenderten Stellen mit genug Umgebung, \
+um sie einzuordnen -- nicht die ganze Datei noch einmal. Sag in einem Satz, was sich \
+geaendert hat.
+- Bei einer Fehlermeldung: erst die Ursache in einem Satz, dann die Korrektur als \
+Code. Keine Liste moeglicher Ursachen, wenn die Meldung eindeutig ist.
+- Version oder Jahr nennen, wo es zaehlt (Sprachversion, Bibliotheksfassung, \
+veraltete Schnittstelle).
+
+Kein "Gerne!", keine Vorrede, keine Zusammenfassung der Frage, kein Fazit.
 """
 
 #: Die Gegenprobe holt zuerst selbst frische Treffer -- dieser Text erklaert
@@ -396,15 +428,39 @@ Begriffen; das Persoenliche bleibt im Gespraech."""
 ASK_PROMPT = """\
 
 Du hast ausserdem `ask_user(question, options)` -- eine Rueckfrage an den Nutzer, auf \
-deren Antwort du wartest.
-- Frag nach, wenn die Anfrage ohne die Antwort in eine ganz andere Richtung laufen \
-koennte: offenes Budget, offener Ort, offener Zweck, offener Zeitraum, oder wenn unklar \
-ist, welches von mehreren Dingen gemeint ist.
-- Frag NICHT nach Kleinigkeiten, nicht zur Absicherung und nicht nach etwas, das du \
-selbst herausfinden kannst. Im Zweifel: naheliegende Annahme treffen, sie in der \
-Antwort nennen, weiterarbeiten.
-- Frag VOR der Recherche, nicht mittendrin, und hoechstens zweimal je Anfrage. Gib \
-zwei bis vier Antwortmoeglichkeiten mit, wenn es klar abgrenzbare gibt."""
+deren Antwort du wartest. Sie oeffnet bei ihm ein kleines Fenster.
+
+PFLICHT: Fehlt eine Angabe, ohne die die Antwort auf gut Glueck raten wuerde, FRAGST \
+DU. Du erfindest sie nicht und du waehlst auch nicht "das Naheliegende" fuer den \
+Nutzer aus. Das sind vor allem:
+- der Ort, wenn die Antwort vom Ort abhaengt (Wetter, Oeffnungszeiten, Preise vor Ort, \
+Anfahrt, Aerzte, Geschaefte). "Wie wird das Wetter morgen?" ohne bekannten Ort ist \
+IMMER eine Rueckfrage -- niemals einfach Berlin, niemals "in Deutschland".
+- der Zeitraum, wenn es mehrere plausible gibt (heute, dieses Wochenende, naechster \
+Monat).
+- das Budget oder die Preisklasse, wenn danach ausgewaehlt werden soll.
+- welches von mehreren Dingen gemeint ist, wenn der Begriff mehrdeutig ist (Person, \
+Produkt, Firma, Ort gleichen Namens).
+- die Sprache, Version oder das Zielsystem, wenn Code davon abhaengt.
+
+Steht die Angabe schon im Gespraech, im Ortsfilter oder auf dem Merkzettel, nimmst du \
+sie von dort -- dann fragst du natuerlich nicht noch einmal danach.
+
+Frag NICHT nach Kleinigkeiten, nicht zur Absicherung und nicht nach etwas, das du \
+selbst herausfinden kannst. Frag VOR der Recherche, nicht mittendrin, und hoechstens \
+zweimal je Anfrage. Gib zwei bis vier Antwortmoeglichkeiten mit, wenn es klar \
+abgrenzbare gibt ("heute", "morgen", "am Wochenende")."""
+
+#: Dasselbe in kurz, wenn niemand da ist, der antworten koennte. Ohne
+#: Gegenueber waere eine Rueckfrage eine Sackgasse -- dann muss die fehlende
+#: Angabe wenigstens benannt werden, statt sie zu erfinden.
+NO_ASK_PROMPT = """\
+
+Rueckfragen sind hier nicht moeglich -- es sitzt niemand davor, der sie beantworten \
+koennte. Fehlt eine entscheidende Angabe (Ort, Zeitraum, Budget, welches von mehreren \
+Dingen gemeint ist), erfindest du sie trotzdem nicht: du sagst in der ersten Zeile, \
+was fehlt, beantwortest die Frage danach fuer die naheliegendste Lesart und schreibst \
+dazu, von welcher Annahme du ausgegangen bist."""
 
 def new_session_id() -> str:
     """Eine neue Chat-Kennung: nach Zeit sortierbar und eindeutig."""
@@ -569,24 +625,33 @@ class Agent:
         self._stop = threading.Event()
         #: Arbeitsweise dieses Turns: "normal" schreibt aus, "code" schreibt Code.
         self.mode = "normal"
-        #: Denkt Cortex vor der Recherche? Aus heisst: kein Planen, keine
-        #: Teilfragen -- die Agenten bekommen die Frage, wie sie gestellt wurde.
-        self.thinking = True
+        #: Zerlegt Cortex die Frage vor der Recherche in Teilfragen und
+        #: schickt Agenten los? Gedacht wird immer -- das hier ist die
+        #: Struktur, nicht das Denken.
+        #:
+        #: Im Terminal ist das der Normalfall: "cortex ask ..." ist ein
+        #: Rechercheauftrag. Die Weboberflaeche schickt ihren eigenen Stand
+        #: bei jeder Frage mit, dort ist das Gespraech der Normalfall.
+        self.structured = True
         #: Nach der Antwort noch einmal suchen, mit anderen Quellen.
         self.recheck = False
+        #: Wie gruendlich das Modell ueberlegen soll: "low", "medium", "high".
+        self.effort = DEFAULT_EFFORT
         #: Im Code-Modus das staerkste erreichbare Modell. Einmal ermittelt,
         #: dann gemerkt -- die Suche danach fragt bei Ollama nach und soll
         #: nicht vor jeder Frage neu laufen. "" heisst "nichts gefunden".
         self._code_model: str | None = None
-        self.messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt(cache, self._home_prompt())}
-        ]
         self.toolbox = toolbox or Toolbox(
             settings,
             cache=cache,
             on_event=on_event,
             spec_extractor=self.extract_specs,
         )
+        # Erst der Werkzeugkasten, dann der Text: ob Rueckfragen moeglich sind,
+        # steht am Werkzeugkasten und gehoert in den Systemtext.
+        self.messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self._compose_system()}
+        ]
         #: Subagenten sind nur fuer den Hauptagenten da -- sonst koennte sich
         #: die Kette endlos fortsetzen.
         self.use_subagents = settings.max_subagents > 0
@@ -632,7 +697,7 @@ class Agent:
         # Ohne Denken gibt es dieses Werkzeug nicht. Sonst zerlegt das Modell
         # die Frage eben selbst -- und der Schalter, der genau das abstellen
         # soll, waere eine Bitte statt einer Entscheidung.
-        if self.use_subagents and self.thinking:
+        if self.use_subagents and self.structured:
             extra.append(SUBAGENT_SCHEMA)
         # Subagenten bekommen diese Liste nie -- sie arbeiten mit TOOL_SCHEMAS
         # allein. Einstellungen aendert also nur der Hauptagent, und das ist
@@ -833,11 +898,7 @@ class Agent:
         Mit *new_chat* beginnt zugleich ein neuer Chat: die naechste Frage
         gehoert dann nicht mehr zum vorherigen, sondern benennt einen neuen.
         """
-        self.messages = [
-            {"role": "system", "content": self._system_prompt(self.cache, self._home_prompt())}
-        ]
-        if self.toolbox.ask_handler is not None:
-            self.messages[0]["content"] += ASK_PROMPT
+        self.messages = [{"role": "system", "content": self._compose_system()}]
         self.last_result = None
         if new_chat:
             self.session_id = new_session_id()
@@ -880,27 +941,16 @@ class Agent:
                 parts.append(HA_CONTROL_PROMPT)
         return "".join(parts)
 
-    #: Wie gruendlich das Modell je Betriebsart ueberlegen soll. Denkaufwand
-    #: ist der eine Regler, der Tempo und Qualitaet gegeneinander stellt --
-    #: also wird er je Aufgabe gesetzt statt einmal fuer alles:
-    #: Gespraech schnell, Recherche gruendlich, Code am gruendlichsten (dort
-    #: kostet ein Fehler am meisten, weil er erst beim Ausfuehren auffaellt).
-    EFFORT: ClassVar[dict[str, str]] = {"chat": "low", "research": "medium", "code": "high"}
-
     def _llm_kwargs(self) -> dict[str, Any]:
         """Aufrufargumente fuer das Modell dieses Turns.
 
+        Die Denktiefe waehlt der Nutzer oben in der Modellauswahl -- sie ist
+        der eine Regler, der Tempo und Gruendlichkeit gegeneinander stellt.
         Anbieter, die `reasoning_effort` nicht kennen, lassen es dank
-        `drop_params` einfach weg -- der Aufruf scheitert deswegen nie.
+        `drop_params` einfach weg; der Aufruf scheitert deswegen nie.
         """
         kwargs = dict(self.settings.llm_kwargs_for(self.active_model))
-        if clean_mode(self.mode) == "code":
-            role = "code"
-        elif self.thinking:
-            role = "research"
-        else:
-            role = "chat"
-        kwargs.setdefault("reasoning_effort", self.EFFORT[role])
+        kwargs.setdefault("reasoning_effort", clean_effort(self.effort))
         kwargs["drop_params"] = True
         return kwargs
 
@@ -940,23 +990,31 @@ class Agent:
         self.mode = clean_mode(mode)
         self._refresh_system()
 
-    def _refresh_system(self) -> None:
-        """Schreibt die Systemnachricht neu -- Modus und Denken bestimmen sie.
+    def _compose_system(self) -> str:
+        """Der vollstaendige Systemtext fuer die jetzige Lage.
 
-        Ohne Denken ist Cortex ein Gespraechspartner mit Werkzeugen, mit Denken
-        ein Rechercheagent. Das steht im Systemtext, nicht nur in der Regie.
+        Modus und Strukturieren bestimmen den Antwortteil, das Zuhause und die
+        angebundenen Dienste haengen hinten dran -- und je nachdem, ob jemand
+        Rueckfragen beantworten kann, der eine oder der andere Absatz dazu.
+        Alles an einer Stelle, damit kein Weg durch den Code einen Teil davon
+        vergisst.
         """
+        text = self._system_prompt(
+            self.cache, self._home_prompt(), mode=self.mode, structured=self.structured
+        )
+        return text + (ASK_PROMPT if self.toolbox.ask_handler is not None else NO_ASK_PROMPT)
+
+    def _refresh_system(self) -> None:
+        """Schreibt die Systemnachricht neu -- fuer die jetzige Lage."""
         if self.messages and self.messages[0].get("role") == "system":
-            self.messages[0]["content"] = self._system_prompt(
-                self.cache, self._home_prompt(), mode=self.mode, thinking=self.thinking
-            )
+            self.messages[0]["content"] = self._compose_system()
 
     @staticmethod
     def _system_prompt(
         cache: Cache | None,
         extras: str = "",
         mode: str = "normal",
-        thinking: bool = True,
+        structured: bool = False,
     ) -> str:
         """Systemprompt plus Tagesdatum und Merkzettel.
 
@@ -975,7 +1033,7 @@ class Agent:
         # und Gespraech.
         if clean_mode(mode) == "code":
             answer = CODE_PROMPT
-        elif thinking:
+        elif structured:
             answer = ANSWER_PROMPT
         else:
             answer = CHAT_PROMPT
@@ -1018,14 +1076,8 @@ class Agent:
         """
         had = self.toolbox.ask_handler is not None
         self.toolbox.ask_handler = handler
-        has = handler is not None
-        if had == has or not self.messages or self.messages[0].get("role") != "system":
-            return
-        base = str(self.messages[0]["content"])
-        if has:
-            self.messages[0]["content"] = base + ASK_PROMPT
-        elif base.endswith(ASK_PROMPT):
-            self.messages[0]["content"] = base[: -len(ASK_PROMPT)]
+        if had != (handler is not None):
+            self._refresh_system()
 
     def _emit(self, event: str, **payload: Any) -> None:
         if self.on_event:
@@ -1170,8 +1222,9 @@ class Agent:
         *,
         stream: bool = True,
         mode: str = "",
-        thinking: bool | None = None,
+        structured: bool | None = None,
         recheck: bool | None = None,
+        effort: str = "",
     ) -> AgentResult:
         """Beantwortet *question* -- sucht, liest und wertet aus.
 
@@ -1179,23 +1232,27 @@ class Agent:
             question: Die Frage.
             stream: Antwort Wort fuer Wort ausgeben.
             mode: "normal" oder "code". Leer laesst den bisherigen stehen.
-            thinking: Vor der Recherche planen und zerlegen. `None` laesst den
-                bisherigen Stand stehen.
+            structured: Vor der Recherche planen und zerlegen. `None` laesst
+                den bisherigen Stand stehen.
             recheck: Nach der Antwort eine zweite Runde mit anderen Quellen.
                 `None` laesst den bisherigen Stand stehen.
+            effort: Denktiefe -- "low", "medium" oder "high". Leer laesst die
+                bisherige stehen.
         """
         question = question.strip()
-        before = (self.mode, self.thinking)
+        if effort:
+            self.effort = clean_effort(effort)
+        before = (self.mode, self.structured)
         if mode:
             self.mode = clean_mode(mode)
-        if thinking is not None:
-            self.thinking = bool(thinking)
+        if structured is not None:
+            self.structured = bool(structured)
         if recheck is not None:
             self.recheck = bool(recheck)
         # Der Systemtext haengt an beidem. Nur neu schreiben, wenn sich etwas
         # geaendert hat: er sitzt am Anfang des Verlaufs, und wer ihn bei jeder
         # Frage anfasst, wirft beim Anbieter den zwischengespeicherten Prefix weg.
-        if (self.mode, self.thinking) != before:
+        if (self.mode, self.structured) != before:
             self._refresh_system()
         if clean_mode(self.mode) == "code":
             picked = self._strongest_model()
@@ -1221,7 +1278,7 @@ class Agent:
         # Automatische Vorrecherche: die Anfrage wird zerlegt und die Teile
         # laufen parallel, bevor der Hauptagent uebernimmt. Was die
         # Subagenten schon gefunden haben, steht ihm dann zur Verfuegung.
-        if not self.thinking:
+        if not self.structured:
             # Denken aus ist der Standard und heisst: ein Gespraech. Kein
             # Planungsaufruf, keine Zerlegung, keine Agenten -- das Modell
             # antwortet selbst und greift zu seinen Werkzeugen, wenn die Frage

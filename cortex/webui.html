@@ -272,6 +272,15 @@ body:not(.start) .hint{display:none}
 .bubble li::marker{color:var(--text-3)}
 .bubble code{background:var(--surface-2);padding:.12em .38em;border-radius:5px;
   font:0.88em var(--mono)}
+.codeblock{margin:.9em 0;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.code-head{display:flex;align-items:center;gap:10px;background:var(--surface-2);
+  border-bottom:1px solid var(--line);padding:5px 12px;font:600 11px/1.6 var(--mono);
+  letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+.code-head .lang{flex:1}
+.code-head .copy{background:transparent;border:0;cursor:pointer;color:var(--text-3);
+  font:inherit;text-transform:none;letter-spacing:0}
+.code-head .copy:hover{color:var(--accent-text)}
+.codeblock pre{margin:0;border:0;border-radius:0}
 .bubble pre{background:var(--surface-2);border:1px solid var(--line);padding:13px 15px;
   border-radius:11px;overflow-x:auto}
 .bubble pre code{background:none;padding:0}
@@ -385,6 +394,21 @@ textarea::placeholder{color:var(--text-3)}
 .mode:hover{color:var(--text)}
 .mode.on{background:var(--bg);color:var(--accent-text);font-weight:600;
   box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.picker-effort{padding:11px 16px;border-top:1px solid var(--line)}
+.eff-head{font-size:13px}
+.eff-head .why{display:block;color:var(--text-3);font-size:11.5px;line-height:1.5;
+  margin-top:2px}
+.efforts{display:flex;gap:6px;margin-top:9px}
+.eff{flex:1;background:var(--surface);border:1px solid var(--line-2);border-radius:9px;
+  padding:6px 0;font-size:12.5px;color:var(--text-2);cursor:pointer}
+.eff:hover{border-color:var(--accent);color:var(--text)}
+.eff.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-text);
+  font-weight:600}
+/* Was an einer Antwort noch zu sagen ist: gegengeprueft, gekuerzt, abgebrochen. */
+.answer-note{display:inline-flex;align-items:center;gap:6px;margin-top:12px;
+  border:1px solid var(--line-2);border-radius:999px;padding:4px 11px;
+  font-size:12px;color:var(--text-2);background:var(--surface)}
+.answer-note .tick{color:var(--accent)}
 .picker-think{display:flex;gap:9px;align-items:flex-start;padding:11px 16px;
   border-top:1px solid var(--line);cursor:pointer;font-size:13px}
 .picker-think input{margin-top:2px;flex:0 0 auto;accent-color:var(--accent)}
@@ -716,14 +740,26 @@ input:focus,select:focus{border-color:var(--accent)}
   <div class="picker" id="picker-models" hidden>
     <div class="picker-head">Modell wählen</div>
     <div class="picker-list" id="model-list"></div>
-    <label class="picker-think" for="think">
-      <input type="checkbox" id="think">
-      <span><b>Denken</b>
-        <span class="why">Zerlegt die Frage in Teilfragen, schickt für jede
-          einen Agenten los — jeder auf anderen Seiten — und schreibt daraus
-          eine ausführliche Antwort mit Quellen. Ausgeschaltet führst du ein
-          normales Gespräch: Cortex antwortet selbst und sucht nur, wenn die
-          Frage es braucht oder du ihn darum bittest. Das ist schneller.</span></span>
+    <div class="picker-effort">
+      <div class="eff-head"><b>Denktiefe</b>
+        <span class="why">Wie lange das Modell überlegen darf, bevor es
+          antwortet. Low ist flott, High nimmt sich Zeit für schwierige
+          Fragen.</span></div>
+      <div class="efforts" id="efforts" role="group" aria-label="Denktiefe">
+        <button type="button" class="eff" data-effort="low">Low</button>
+        <button type="button" class="eff" data-effort="medium">Medium</button>
+        <button type="button" class="eff" data-effort="high">High</button>
+      </div>
+    </div>
+    <label class="picker-think" for="structure">
+      <input type="checkbox" id="structure">
+      <span><b>Strukturieren</b>
+        <span class="why">Gedacht wird immer — hier zerlegt Cortex die Frage
+          zusätzlich in Teilfragen, schickt für jede einen Agenten los (jeden
+          auf anderen Seiten) und schreibt daraus eine ausführliche Antwort mit
+          Quellen. Ausgeschaltet führst du ein normales Gespräch: er antwortet
+          selbst und sucht nur, wenn die Frage es braucht oder du ihn darum
+          bittest. Das ist schneller.</span></span>
     </label>
     <label class="picker-think" for="recheck">
       <input type="checkbox" id="recheck">
@@ -1092,12 +1128,15 @@ const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
 
-/* ---------- Arbeitsweise und Denken ---------- */
-// Beides gehoert zur Frage, nicht zur Sitzung -- es geht bei jeder Anfrage
-// mit. Gemerkt wird es trotzdem, damit man es nicht jedes Mal neu einstellt.
+/* ---------- Arbeitsweise, Struktur und Denktiefe ---------- */
+// Alles drei gehoert zur Frage, nicht zur Sitzung -- es geht bei jeder
+// Anfrage mit. Gemerkt wird es trotzdem, damit man es nicht jedes Mal neu
+// einstellt. "Strukturieren" hiess frueher "Denken"; gedacht wird immer,
+// zerlegt nur hier.
 let mode = "normal";
-let thinking = true;
+let structured = false;
 let recheck = false;
+let effort = "medium";
 
 function setMode(wanted){
   mode = wanted === "code" ? "code" : "normal";
@@ -1116,25 +1155,37 @@ function setRecheck(on){
   refreshHeader();
 }
 
-function setThinking(on){
-  thinking = !!on;
-  $("#think").checked = thinking;
-  try { localStorage.setItem("cortex-think", thinking ? "1" : "0"); } catch {}
+function setStructured(on){
+  structured = !!on;
+  $("#structure").checked = structured;
+  try { localStorage.setItem("cortex-structure", structured ? "1" : "0"); } catch {}
+  refreshHeader();
+}
+
+const EFFORTS = ["low", "medium", "high"];
+function setEffort(wanted){
+  effort = EFFORTS.includes(wanted) ? wanted : "medium";
+  document.querySelectorAll("#efforts .eff").forEach(button =>
+    button.classList.toggle("on", button.dataset.effort === effort));
+  try { localStorage.setItem("cortex-effort", effort); } catch {}
   refreshHeader();
 }
 
 document.querySelectorAll("#modes .mode").forEach(button =>
   button.addEventListener("click", () => setMode(button.dataset.mode)));
-$("#think").addEventListener("change", (e) => setThinking(e.target.checked));
+document.querySelectorAll("#efforts .eff").forEach(button =>
+  button.addEventListener("click", () => setEffort(button.dataset.effort)));
+$("#structure").addEventListener("change", (e) => setStructured(e.target.checked));
 $("#recheck").addEventListener("change", (e) => setRecheck(e.target.checked));
 
 try {
   setMode(localStorage.getItem("cortex-mode") || "normal");
-  // Standard ist das Gespraech: Denken ist ein Schalter, den man umlegt,
-  // wenn eine Frage wirklich Recherche braucht -- nicht der Normalzustand.
-  setThinking(localStorage.getItem("cortex-think") === "1");
+  // Standard ist das Gespraech: Strukturieren ist ein Schalter, den man
+  // umlegt, wenn eine Frage wirklich Recherche braucht.
+  setStructured(localStorage.getItem("cortex-structure") === "1");
   setRecheck(localStorage.getItem("cortex-recheck") === "1");
-} catch { setMode("normal"); setThinking(false); setRecheck(false); }
+  setEffort(localStorage.getItem("cortex-effort") || "medium");
+} catch { setMode("normal"); setStructured(false); setRecheck(false); setEffort("medium"); }
 // Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
 // soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
 // eines allein reicht nicht.
@@ -1182,7 +1233,12 @@ const esc = (t) => t.replace(/[&<>"']/g, (c) =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 function md(text){
   let h = esc(text);
-  h = h.replace(/```([\s\S]*?)```/g, (m,c)=>`<pre><code>${c.trim()}</code></pre>`);
+  // Die Sprachangabe hinter den Backticks gehoert in die Kopfzeile des Blocks,
+  // nicht als erste Zeile in den Code -- vorher stand dort woertlich "python".
+  h = h.replace(/```([a-zA-Z0-9+#._-]*)\n?([\s\S]*?)```/g, (m, lang, code) =>
+    `<div class="codeblock"><div class="code-head"><span class="lang">${
+      lang || "Code"}</span><button type="button" class="copy">Kopieren</button></div>`
+    + `<pre><code>${code.replace(/\s+$/, "")}</code></pre></div>`);
   h = h.replace(/`([^`\n]+)`/g, "<code>$1</code>");
   h = h.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   h = h.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
@@ -1251,6 +1307,23 @@ function addBot(){
   thread.appendChild(el); scroll();
   return { steps: el.querySelector(".steps"), bubble: el.querySelector(".bubble") };
 }
+// Ein Vermerk unter der Antwort. Anders als ein Zwischenschritt bleibt er
+// sichtbar, auch wenn niemand das Mitlesen eingeschaltet hat.
+function mark(bubble, text){
+  if (!bubble || bubble.parentNode === null) return;
+  // Der Name ist bewusst lang: "mark" traegt in der Seitenleiste schon das
+  // Logo, und eine zweite Regel gleichen Namens hat es prompt umgestylt.
+  let box = bubble.parentNode.querySelector(".answer-note");
+  if (!box){
+    box = document.createElement("div");
+    box.className = "answer-note";
+    box.innerHTML = '<span class="tick">✓</span><span class="txt"></span>';
+    bubble.parentNode.appendChild(box);
+  }
+  box.querySelector(".txt").textContent = text;
+  scroll();
+}
+
 function step(box, tag, text, kind){
   const el = document.createElement("div");
   el.className = "step" + (kind ? " " + kind : "");
@@ -1509,16 +1582,16 @@ async function ask(text){
   const { steps, bubble } = addBot();
   // `thoughtLine` gehoert hier hoch und nicht zu seiner Funktion: die
   // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile ueberhaupt
-  // ausgefuehrt waere -- das gaebe einen ReferenceError. Und sie heisst
-  // nicht `thinking`: so hiess sie einmal, und sie verdeckte damit den
-  // Schalter gleichen Namens -- der ging dann als `null` an den Server.
+  // ausgefuehrt waere -- das gaebe einen ReferenceError. Und sie traegt
+  // bewusst keinen Schalternamen: eine gleichnamige lokale Variable verdeckte
+  // hier einmal den Schalter, der dann als `null` beim Server ankam.
   let answer = "", reading = null, readCount = 0, planning = null, thoughtLine = null;
 
   try {
     running = new AbortController();
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ message: text, attachments, mode, thinking, recheck }),
+      body: JSON.stringify({ message: text, attachments, mode, structured, recheck, effort }),
       signal: running.signal,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1591,7 +1664,14 @@ async function ask(text){
         step(steps, "[Gegenprobe]",
           `andere Quellen als die ${ev.sources} gelesenen`); break;
       case "recheck_done":
-        step(steps, "[Gegenprobe]", ev.changed ? "abgeschlossen" : "nichts Neues"); break;
+        step(steps, "[Gegenprobe]", ev.changed ? "abgeschlossen" : "nichts Neues");
+        // Und dasselbe noch einmal an der Antwort selbst: die Zwischenschritte
+        // sieht nur, wer sie aufklappt -- dass gegengeprueft wurde, gehoert
+        // aber zur Antwort dazu.
+        mark(bubble, ev.changed
+          ? "Gegengeprüft — mit anderen Quellen, Änderungen sind eingearbeitet"
+          : "Gegengeprüft — andere Quellen, nichts widersprochen");
+        break;
       case "subagents":
         step(steps, "[Teile]", `${ev.tasks.length} Teilfragen`);
         ev.tasks.forEach(t => {
@@ -1690,6 +1770,22 @@ send.addEventListener("click", () => {
   send.classList.add("sent");
   ask(input.value);
 });
+// Kopieren am Codeblock. Ein Zuhoerer fuer alle Bloecke, auch fuer die, die
+// erst noch kommen -- die Antworten wachsen ja waehrend des Schreibens.
+thread.addEventListener("click", async (e) => {
+  const knopf = e.target.closest(".code-head .copy");
+  if (!knopf) return;
+  const code = knopf.closest(".codeblock")?.querySelector("code");
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code.textContent || "");
+    knopf.textContent = "Kopiert";
+    setTimeout(() => { knopf.textContent = "Kopieren"; }, 1600);
+  } catch {
+    toast("Kopieren ging nicht — der Browser lässt es hier nicht zu.");
+  }
+});
+
 document.querySelectorAll(".chip").forEach(c =>
   c.addEventListener("click", () => {
     input.value = c.textContent; input.focus();
@@ -2641,10 +2737,11 @@ async function refreshHeader(){
     // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
     // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.
     const bits = [cfg.values.CORTEX_LOCATION || "kein Ortsfilter"];
-    // Ausgeschaltetes Denken sieht man sonst nirgends -- und es aendert das
-    // Ergebnis spuerbar. Angeschaltet ist der Normalfall und braucht nichts.
-    if (!thinking) bits.push("ohne Denken");
+    // Was vom Normalfall abweicht, gehoert in die Kopfzeile -- es aendert
+    // das Ergebnis spuerbar, und man sieht es sonst nirgends.
+    if (structured) bits.push("strukturiert");
     if (recheck) bits.push("gegenprüfen");
+    if (effort !== "medium") bits.push("Denktiefe " + effort);
     if (cfg.ha_connected) bits.push("Zuhause verbunden");
     if (cfg.values.CORTEX_MEMORY === "true") bits.push("Speicher an");
     flash($("#status"), bits.join(" · "));
