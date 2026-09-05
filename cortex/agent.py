@@ -120,6 +120,10 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 """
 
 #: Die beiden Arbeitsweisen. "normal" schreibt aus, "code" schreibt Code.
+#: Die Werkzeuge, die hinaus ins Web gehen. Sie fallen weg, wenn jemand das
+#: Suchen abschaltet.
+WEB_TOOLS = frozenset({"web_search", "fetch_page", "search_news"})
+
 MODES = ("normal", "code")
 
 #: Die drei Stufen der Denktiefe, wie sie oben in der Modellauswahl stehen.
@@ -326,10 +330,39 @@ MEMORY_PROMPT = """\
 Du hast einen Langzeitspeicher, der ueber Gespraeche hinweg haelt:
 - `recall_memory(query)` -- nachsehen, was du frueher festgehalten hast.
 - `save_memory(text, topic)` -- etwas fuer spaeter ablegen.
-Sieh am Anfang nach, sobald die Antwort von persoenlichen Umstaenden abhaengt: Wohnort, \
-Ausstattung, Vorlieben, laufende Vorhaben. Leg ab, was laenger gilt -- nicht jede \
-Kleinigkeit und nichts, was morgen veraltet ist. Schreib ganze Saetze, damit die Notiz \
-spaeter fuer sich steht. In den Speicher gehoert nur Text, nie Bilder oder Dateien."""
+
+VON SELBST ABLEGEN, ohne dass jemand darum bittet: Erzaehlt der Nutzer beilaeufig \
+etwas ueber sich, das dauerhaft gilt, legst du es sofort ab -- seinen Namen ("ich \
+heisse Jonas"), wie er angesprochen werden moechte, seinen Wohnort, seinen Beruf, \
+seine Ausstattung, feste Vorlieben und Abneigungen, laufende Vorhaben. Solche Saetze \
+kommen nebenbei und kehren nicht wieder; wer sie nicht mitschreibt, fragt in zwei \
+Wochen noch einmal danach. Fuer alles, was zur Person gehoert, nimmst du das Thema \
+"person" -- dann steht es beim naechsten Mal von allein vor dir. Sag danach in einem \
+kurzen Halbsatz, dass du es dir gemerkt hast; heimlich mitschreiben waere unhoeflich.
+
+NICHT ablegen: Belangloses, Tagesaktuelles, Vermutungen ueber den Nutzer, und nichts, \
+was er ausdruecklich nicht gespeichert haben will. Was schon dasteht, legst du nicht \
+noch einmal ab -- bei einer Aenderung ("ich bin umgezogen") schreibst du den neuen \
+Stand mit dem alten Thema.
+
+Nachsehen: sobald die Antwort von persoenlichen Umstaenden abhaengt. Schreib ganze \
+Saetze, damit die Notiz spaeter fuer sich steht. In den Speicher gehoert nur Text, nie \
+Bilder oder Dateien."""
+
+#: Wird angehaengt, wenn das Suchen abgeschaltet ist.
+OFFLINE_PROMPT = """\
+
+FUER DIESE FRAGE IST DAS WEB ABGESCHALTET. Der Nutzer hat es oben in der \
+Modellauswahl ausgeschaltet -- du hast weder Suche noch Seitenabruf und auch keine \
+Agenten. Du antwortest aus deinem eigenen Wissen, aus dem, was in diesem Gespraech \
+steht, aus angehaengten Dateien und aus deinem Speicher.
+- Sag dazu, woher du es hast: "aus meinem Wissensstand", "aus der angehaengten Datei", \
+"aus meinem Speicher".
+- Wo dein Wissen alt sein koennte -- Preise, Versionen, Zahlen, alles nach deinem \
+Wissensstand --, sagst du das offen in einem Satz und bietest an, mit eingeschaltetem \
+Web nachzusehen. Erfinde nichts, um die Luecke zu fuellen.
+- Beschwer dich nicht ueber die Einschraenkung, und frag nicht bei jeder Antwort, ob \
+du doch suchen darfst. Einmal anbieten genuegt."""
 
 #: Wird angehaengt, wenn cortex ins eigene Netz sehen darf.
 LAN_PROMPT = """\
@@ -637,6 +670,10 @@ class Agent:
         self.recheck = False
         #: Wie gruendlich das Modell ueberlegen soll: "low", "medium", "high".
         self.effort = DEFAULT_EFFORT
+        #: Darf im Web gesucht und gelesen werden? Aus heisst: eigenes Wissen,
+        #: angehaengte Dateien, Speicher und angebundene Quellen -- sonst
+        #: nichts.
+        self.online = True
         #: Im Code-Modus das staerkste erreichbare Modell. Einmal ermittelt,
         #: dann gemerkt -- die Suche danach fragt bei Ollama nach und soll
         #: nicht vor jeder Frage neu laufen. "" heisst "nichts gefunden".
@@ -697,7 +734,7 @@ class Agent:
         # Ohne Denken gibt es dieses Werkzeug nicht. Sonst zerlegt das Modell
         # die Frage eben selbst -- und der Schalter, der genau das abstellen
         # soll, waere eine Bitte statt einer Entscheidung.
-        if self.use_subagents and self.structured:
+        if self.use_subagents and self.structured and self.online:
             extra.append(SUBAGENT_SCHEMA)
         # Subagenten bekommen diese Liste nie -- sie arbeiten mit TOOL_SCHEMAS
         # allein. Einstellungen aendert also nur der Hauptagent, und das ist
@@ -707,7 +744,18 @@ class Agent:
         # sonst wartet der Agent auf eine Rueckmeldung, die nie kommt.
         if self.toolbox.ask_handler is not None:
             extra.append(ASK_SCHEMA)
-        return [*TOOL_SCHEMAS, *extra]
+        base = TOOL_SCHEMAS
+        if not self.online:
+            # Ohne Web bleiben die oertlichen Werkzeuge (Rechnen, Speicher,
+            # Lager, Zuhause) -- weg ist alles, was hinausgeht. Ein Werkzeug
+            # anzubieten und den Aufruf dann abzulehnen waere die schlechtere
+            # Loesung: das Modell versucht es trotzdem und verbraucht Runden.
+            base = [
+                schema
+                for schema in TOOL_SCHEMAS
+                if schema["function"]["name"] not in WEB_TOOLS
+            ]
+        return [*base, *extra]
 
     def _auto_subagents_wanted(self) -> bool:
         """Soll vor der eigentlichen Runde automatisch vorrecherchiert werden?"""
@@ -1002,7 +1050,37 @@ class Agent:
         text = self._system_prompt(
             self.cache, self._home_prompt(), mode=self.mode, structured=self.structured
         )
-        return text + (ASK_PROMPT if self.toolbox.ask_handler is not None else NO_ASK_PROMPT)
+        text += ASK_PROMPT if self.toolbox.ask_handler is not None else NO_ASK_PROMPT
+        if not self.online:
+            text += OFFLINE_PROMPT
+        return text + self._person_prompt()
+
+    def _person_prompt(self) -> str:
+        """Was ueber den Nutzer bekannt ist -- gleich zu Beginn, ungefragt.
+
+        Der Speicher liesse sich auch per Werkzeug abfragen, aber dann haengt
+        es am Modell, ob es daran denkt. Ein Name gehoert nicht zu den Dingen,
+        nach denen man sucht: er soll einfach dastehen.
+        """
+        store = None
+        try:
+            store = self.toolbox._memory()
+        except Exception:
+            store = None
+        if store is None:
+            return ""
+        try:
+            entries = store.recall("person", limit=8)
+        except Exception:
+            return ""
+        lines = [entry.text.strip() for entry in entries if entry.text.strip()]
+        if not lines:
+            return ""
+        return (
+            "\n\nWas du ueber den Nutzer schon weisst (aus deinem Speicher, "
+            "beruecksichtigen ohne es aufzuzaehlen):\n"
+            + "\n".join(f"- {line}" for line in lines[:8])
+        )
 
     def _refresh_system(self) -> None:
         """Schreibt die Systemnachricht neu -- fuer die jetzige Lage."""
@@ -1225,6 +1303,7 @@ class Agent:
         structured: bool | None = None,
         recheck: bool | None = None,
         effort: str = "",
+        online: bool | None = None,
     ) -> AgentResult:
         """Beantwortet *question* -- sucht, liest und wertet aus.
 
@@ -1238,11 +1317,15 @@ class Agent:
                 `None` laesst den bisherigen Stand stehen.
             effort: Denktiefe -- "low", "medium" oder "high". Leer laesst die
                 bisherige stehen.
+            online: Darf im Web gesucht werden? `None` laesst den bisherigen
+                Stand stehen.
         """
         question = question.strip()
         if effort:
             self.effort = clean_effort(effort)
-        before = (self.mode, self.structured)
+        before = (self.mode, self.structured, self.online)
+        if online is not None:
+            self.online = bool(online)
         if mode:
             self.mode = clean_mode(mode)
         if structured is not None:
@@ -1252,7 +1335,7 @@ class Agent:
         # Der Systemtext haengt an beidem. Nur neu schreiben, wenn sich etwas
         # geaendert hat: er sitzt am Anfang des Verlaufs, und wer ihn bei jeder
         # Frage anfasst, wirft beim Anbieter den zwischengespeicherten Prefix weg.
-        if (self.mode, self.structured) != before:
+        if (self.mode, self.structured, self.online) != before:
             self._refresh_system()
         if clean_mode(self.mode) == "code":
             picked = self._strongest_model()
@@ -1285,7 +1368,7 @@ class Agent:
             # es braucht oder der Nutzer es verlangt. Das ist die schnellste
             # Betriebsart, die es hier gibt: eine Runde zum Modell.
             self._emit("triage", decision="chat", source="standard")
-        elif self._auto_subagents_wanted() and self._needs_research(question):
+        elif self.online and self._auto_subagents_wanted() and self._needs_research(question):
             used += self._auto_research(question, budget)
 
         while True:
@@ -1345,7 +1428,7 @@ class Agent:
                         }
                     )
 
-        if self.recheck and not result.stopped:
+        if self.recheck and self.online and not result.stopped:
             self._second_round(result, question=question, stream=stream)
         return self._finish(result, question)
 

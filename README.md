@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.4.5                                      │
+│ Cortex AI 8.4.6                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -381,6 +381,13 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   → Modell → Code-Modell* ein. Die Quellenpflicht bleibt: erfundene
   Funktionsnamen sind hier der teuerste Fehler überhaupt — sie sehen richtig aus
   und laufen nicht.
+* **Im Web suchen an oder aus**, oben in der Modellauswahl — an ist der Normalfall.
+  Ausgeschaltet geht Cortex nicht mehr hinaus: Suche, Seitenabruf und Agenten werden
+  ihm gar nicht erst angeboten (ein Werkzeug anzubieten und den Aufruf dann abzulehnen
+  kostet nur Runden). Er antwortet dann aus seinem eigenen Wissen, aus dem Gespräch,
+  aus **angehängten Dateien** und aus seinem Speicher — und sagt dazu, woher er es hat
+  und wo sein Wissen alt sein könnte. Die örtlichen Werkzeuge bleiben: Rechnen,
+  Speicher, Lager, Zuhause. Steht der Schalter auf aus, sagt es die Kopfzeile.
 * **Denktiefe: Low, Medium, High**, oben in der Modellauswahl. Wie lange das
   Modell überlegen darf, bevor es antwortet — der eine Regler, der Tempo und
   Gründlichkeit gegeneinander stellt. Medium ist der Standard, Low für flotte
@@ -480,7 +487,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.4.5                                                   │
+│ Cortex AI 8.4.6                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -588,6 +595,22 @@ wieder.
   [Speicher] laptop
   Du suchst einen Laptop bis 1200 Euro für Bildbearbeitung. Dazu ist neu: …
 ```
+
+**Persönliches merkt er sich von selbst.** Sagst du beiläufig „ich heiße Jonas",
+„ich wohne in Bremen", „Kaffee mag ich nicht", legt Cortex das ab, ohne dass du
+darum bitten musst — solche Sätze kommen nebenbei und kehren nicht wieder; wer sie
+nicht mitschreibt, fragt in zwei Wochen noch einmal danach. Er sagt in einem
+Halbsatz dazu, dass er es sich gemerkt hat (heimlich mitschreiben wäre unhöflich),
+und legt es unter dem Thema *person* ab. Das hat einen Grund: Alles unter diesem
+Thema steht beim nächsten Gespräch **von allein im Systemtext** — es hängt also
+nicht daran, ob das Modell auf die Idee kommt, im Speicher nachzusehen. Ein Name ist
+nichts, wonach man sucht; er soll einfach dastehen. Zieht du um, schreibt er den
+neuen Stand unter dasselbe Thema. Belangloses, Tagesaktuelles und Vermutungen über
+dich landen nicht im Speicher, und was du ausdrücklich nicht gespeichert haben
+willst, auch nicht.
+
+Der **Merkzettel** (`/notes`) ist etwas anderes: dorthin schreibt er nur auf
+ausdrückliche Bitte („merk dir …"), dafür hängt sein Inhalt an *jedem* Gespräch.
 
 Vier Regeln bestimmen den Aufbau:
 

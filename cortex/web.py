@@ -287,6 +287,7 @@ class ChatSession:
         structured: bool | None = None,
         recheck: bool | None = None,
         effort: str = "",
+        online: bool | None = None,
     ) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
@@ -328,6 +329,7 @@ class ChatSession:
                     structured=structured,
                     recheck=recheck,
                     effort=effort,
+                    online=online,
                 )
             finally:
                 agent.on_event = None
@@ -1366,6 +1368,8 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         recheck = payload.get("recheck")
         recheck = None if recheck is None else bool(recheck)
         effort = str(payload.get("effort", "")).strip()
+        online = payload.get("online")
+        online = None if online is None else bool(online)
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return
@@ -1404,6 +1408,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                     structured=structured,
                     recheck=recheck,
                     effort=effort,
+                    online=online,
                 )
             except Exception as exc:
                 events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})

@@ -751,6 +751,14 @@ input:focus,select:focus{border-color:var(--accent)}
         <button type="button" class="eff" data-effort="high">High</button>
       </div>
     </div>
+    <label class="picker-think" for="online">
+      <input type="checkbox" id="online" checked>
+      <span><b>Im Web suchen</b>
+        <span class="why">Ausgeschaltet geht Cortex nicht mehr hinaus: keine Suche,
+          kein Seitenabruf, keine Agenten. Er antwortet dann aus seinem eigenen
+          Wissen, aus dem Gespräch, aus angehängten Dateien und aus seinem
+          Speicher — und sagt dazu, wo sein Wissen alt sein könnte.</span></span>
+    </label>
     <label class="picker-think" for="structure">
       <input type="checkbox" id="structure">
       <span><b>Strukturieren</b>
@@ -1137,6 +1145,7 @@ let mode = "normal";
 let structured = false;
 let recheck = false;
 let effort = "medium";
+let online = true;
 
 function setMode(wanted){
   mode = wanted === "code" ? "code" : "normal";
@@ -1152,6 +1161,13 @@ function setRecheck(on){
   recheck = !!on;
   $("#recheck").checked = recheck;
   try { localStorage.setItem("cortex-recheck", recheck ? "1" : "0"); } catch {}
+  refreshHeader();
+}
+
+function setOnline(on){
+  online = !!on;
+  $("#online").checked = online;
+  try { localStorage.setItem("cortex-online", online ? "1" : "0"); } catch {}
   refreshHeader();
 }
 
@@ -1175,6 +1191,7 @@ document.querySelectorAll("#modes .mode").forEach(button =>
   button.addEventListener("click", () => setMode(button.dataset.mode)));
 document.querySelectorAll("#efforts .eff").forEach(button =>
   button.addEventListener("click", () => setEffort(button.dataset.effort)));
+$("#online").addEventListener("change", (e) => setOnline(e.target.checked));
 $("#structure").addEventListener("change", (e) => setStructured(e.target.checked));
 $("#recheck").addEventListener("change", (e) => setRecheck(e.target.checked));
 
@@ -1185,7 +1202,11 @@ try {
   setStructured(localStorage.getItem("cortex-structure") === "1");
   setRecheck(localStorage.getItem("cortex-recheck") === "1");
   setEffort(localStorage.getItem("cortex-effort") || "medium");
-} catch { setMode("normal"); setStructured(false); setRecheck(false); setEffort("medium"); }
+  setOnline(localStorage.getItem("cortex-online") !== "0");
+} catch {
+  setMode("normal"); setStructured(false); setRecheck(false);
+  setEffort("medium"); setOnline(true);
+}
 // Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
 // soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
 // eines allein reicht nicht.
@@ -1591,7 +1612,9 @@ async function ask(text){
     running = new AbortController();
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ message: text, attachments, mode, structured, recheck, effort }),
+      body: JSON.stringify({
+        message: text, attachments, mode, structured, recheck, effort, online,
+      }),
       signal: running.signal,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -2178,12 +2201,18 @@ async function openChat(sessionId){
 const modelBox = $("#picker-models");
 let backdrop = null;
 
+// Waehrend der Ausblende ist die Liste zwar noch da, aber schon zu. Ohne
+// diese Unterscheidung schloss ein Klick auf den Knopf in diesen 140 ms die
+// ohnehin schliessende Liste ein zweites Mal, statt sie neu zu oeffnen.
+let pickerClosing = null;
+const pickerOpen = () => !modelBox.hidden && !modelBox.classList.contains("closing");
+
 function closePicker(){
-  if (modelBox.hidden) return;
+  if (!pickerOpen()) return;
   modelBox.classList.add("closing");
   backdrop?.remove();
   backdrop = null;
-  setTimeout(() => {
+  pickerClosing = setTimeout(() => {
     modelBox.hidden = true;
     modelBox.classList.remove("closing");
   }, CLOSE_MS);
@@ -2192,6 +2221,8 @@ function closePicker(){
 async function openPicker(){
   const list = $("#model-list");
   list.innerHTML = '<div class="picker-foot">Sehe nach …</div>';
+  clearTimeout(pickerClosing);          // eine laufende Ausblende gilt nicht mehr
+  modelBox.classList.remove("closing");
   modelBox.hidden = false;
   backdrop = document.createElement("div");
   backdrop.className = "backdrop";
@@ -2237,7 +2268,7 @@ async function chooseModel(model){
   else alert(data.error || "Das Modell ließ sich nicht umstellen.");
 }
 
-$("#btn-model").addEventListener("click", () => modelBox.hidden ? openPicker() : closePicker());
+$("#btn-model").addEventListener("click", () => pickerOpen() ? closePicker() : openPicker());
 $("#picker-settings").addEventListener("click", () => {
   closePicker(); $("#btn-settings").click();
 });
@@ -2246,7 +2277,7 @@ $("#picker-settings").addEventListener("click", () => {
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (asking) return;              // die Rueckfrage liegt obenauf
-  if (!modelBox.hidden) { closePicker(); return; }
+  if (pickerOpen()) { closePicker(); return; }
   if (themeBox.classList.contains("open")) { closeTheme(); return; }
   if (overlay.classList.contains("open")) closeSettings();
 });
@@ -2739,6 +2770,7 @@ async function refreshHeader(){
     const bits = [cfg.values.CORTEX_LOCATION || "kein Ortsfilter"];
     // Was vom Normalfall abweicht, gehoert in die Kopfzeile -- es aendert
     // das Ergebnis spuerbar, und man sieht es sonst nirgends.
+    if (!online) bits.push("ohne Web");
     if (structured) bits.push("strukturiert");
     if (recheck) bits.push("gegenprüfen");
     if (effort !== "medium") bits.push("Denktiefe " + effort);

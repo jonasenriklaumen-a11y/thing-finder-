@@ -26,6 +26,7 @@ class FakeToolbox:
         self.mode = ""
         self.structured: bool | None = None
         self.effort = ""
+        self.online: bool | None = None
         self.recheck: bool | None = None
 
 
@@ -54,12 +55,14 @@ class FakeAgent:
         mode: str = "",
         structured: bool | None = None,
         effort: str = "",
+        online: bool | None = None,
         recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
         self.mode = mode
         self.structured = structured
         self.effort = effort
+        self.online = online
         self.recheck = recheck
         if self.raise_error is not None:
             raise self.raise_error
@@ -598,7 +601,8 @@ def test_a_waiting_device_is_told_so(session: web.ChatSession) -> None:
     started, release = threading.Event(), threading.Event()
 
     class Slow(FakeAgent):
-        def ask(self, question, *, stream=True, mode="", structured=None, recheck=None, effort=""):
+        def ask(self, question, *, stream=True, mode="", structured=None,
+                recheck=None, effort="", online=None):
             started.set()
             release.wait(timeout=5)
             return AgentResult(answer="fertig")
@@ -711,6 +715,7 @@ class AskingAgent(FakeAgent):
         mode: str = "",
         structured: bool | None = None,
         effort: str = "",
+        online: bool | None = None,
         recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
@@ -1823,7 +1828,8 @@ def test_a_silent_model_does_not_kill_the_connection(
         def set_ask_handler(self, handler):
             pass
 
-        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
+        def ask(self, message, stream=True, mode='', structured=None,
+                recheck=None, effort='', online=None):
             time.sleep(0.4)
             self.on_event("answer_chunk", {"text": "Da bin ich."})
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -1901,7 +1907,8 @@ def test_stopping_cancels_the_running_agent(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
+        def ask(self, message, stream=True, mode='', structured=None,
+                recheck=None, effort='', online=None):
             started.set()
             for _ in range(100):
                 if cancelled.is_set():
@@ -2035,7 +2042,8 @@ def test_a_closed_tab_ends_the_run(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
+        def ask(self, message, stream=True, mode='', structured=None,
+                recheck=None, effort='', online=None):
             started.set()
             for _ in range(200):
                 if cancelled.is_set():
@@ -2089,7 +2097,8 @@ def test_the_waiting_notice_does_not_invent_another_device(
         def cancel(self):
             release.set()
 
-        def ask(self, message, stream=True, mode='', structured=None, recheck=None, effort=''):
+        def ask(self, message, stream=True, mode='', structured=None,
+                recheck=None, effort='', online=None):
             running.set()
             release.wait(timeout=10)
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -2288,8 +2297,13 @@ def test_the_picker_offers_the_structure_switch_and_the_effort() -> None:
 
 
 def test_every_choice_is_sent_with_every_question() -> None:
+    """Was oben eingestellt ist, muss auch unten ankommen."""
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "message: text, attachments, mode, structured, recheck, effort" in html
+    body = html[html.index("async function ask(text){") :]
+    body = body[: body.index("/* ---------- Eingabe ---------- */")]
+    korb = body[body.index("JSON.stringify({") : body.index("signal: running.signal")]
+    for feld in ("message", "attachments", "mode", "structured", "recheck", "effort", "online"):
+        assert feld in korb, f"{feld} geht nicht mit"
 
 
 def test_what_differs_from_normal_is_visible_in_the_header() -> None:
@@ -2312,7 +2326,7 @@ def test_the_switch_is_not_shadowed_by_a_local_name() -> None:
     assert "thoughtLine" in body, "die Zeile heisst anders als der Schalter"
     assert "let answer" in body
     declared = body[body.index("let answer") : body.index("\n", body.index("let answer"))]
-    for schalter in ("structured", "recheck", "effort"):
+    for schalter in ("structured", "recheck", "effort", "online"):
         assert schalter not in declared, f"verdeckt den Schalter: {declared}"
 
 
@@ -2378,6 +2392,24 @@ def test_the_standard_mode_starts_no_agents_in_the_ui() -> None:
     assert 'case "code_model"' in html and "stärkstes Modell" in html
 
 
+def test_the_picker_offers_the_web_switch() -> None:
+    """Ohne Web bleibt Cortex bei seinem Wissen und den eigenen Dateien."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    picker = html[html.index('id="picker-models"') :]
+    picker = picker[: picker.index("picker-foot")]
+    assert 'id="online"' in picker
+    assert "Im Web suchen" in picker
+    assert "angehängten Dateien" in picker
+    assert '"ohne Web"' in html, "die Kopfzeile sagt es"
+
+
+def test_the_web_switch_reaches_the_agent(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    client("POST", "/api/chat", {"message": "Frage", "online": False})
+    assert agent.online is False
+
+
 def test_the_recheck_leaves_a_mark_on_the_answer() -> None:
     """Die Zwischenschritte sieht nur, wer sie aufklappt -- dass gegengeprueft
     wurde, gehoert zur Antwort selbst."""
@@ -2428,7 +2460,8 @@ def test_the_recheck_is_off_unless_asked_for(
 
 def test_the_recheck_is_sent_with_every_question() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "message: text, attachments, mode, structured, recheck, effort" in html
+    body = html[html.index("async function ask(text){") :]
+    assert "recheck," in body[: body.index("signal: running.signal")]
 
 
 def test_a_running_recheck_is_visible() -> None:

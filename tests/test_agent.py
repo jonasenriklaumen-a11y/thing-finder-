@@ -2141,6 +2141,128 @@ def test_the_ask_paragraph_survives_a_change_of_mode(
 
 
 # ---------------------------------------------------------------------------
+# Ohne Web: eigenes Wissen, eigene Dateien
+# ---------------------------------------------------------------------------
+def test_without_the_web_the_web_tools_are_gone(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ein Werkzeug anbieten und den Aufruf ablehnen kostet nur Runden."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    namen = {schema["function"]["name"] for schema in agent.tools}
+    assert {"web_search", "fetch_page", "search_news"} <= namen
+
+    agent.ask("", online=False)
+    namen = {schema["function"]["name"] for schema in agent.tools}
+    assert not ({"web_search", "fetch_page", "search_news"} & namen)
+    assert "calculate" in namen, "oertliche Werkzeuge bleiben"
+    assert "research_subtasks" not in namen, "Agenten suchen auch nur im Web"
+
+    system = agent.messages[0]["content"]
+    assert "DAS WEB ABGESCHALTET" in system
+    assert "angehaengten Dateien" in system
+
+
+def test_without_the_web_nothing_is_researched_in_advance(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    gestartet: list[list[str]] = []
+    monkeypatch.setattr(
+        "cortex.subagents.run_subagents",
+        lambda tasks, *a, **k: gestartet.append(list(tasks)) or [],
+    )
+    monkeypatch.setattr(
+        "cortex.subagents.plan_request", lambda *a, **k: (True, ["a", "b"])
+    )
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Was kostet ein Lastenrad?", stream=False, structured=True, online=False)
+    assert gestartet == [], "ohne Web keine Vorrecherche"
+
+
+def test_without_the_web_there_is_no_second_round(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Eine Gegenprobe ohne Suche waere dieselbe Antwort noch einmal."""
+    gesucht: list[str] = []
+    monkeypatch.setattr(
+        toolbox, "web_search", lambda query, *a, **k: gesucht.append(query) or {"results": []}
+    )
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Erste.")))
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Frage", stream=False, recheck=True, online=False)
+    assert gesucht == []
+    assert result.rechecked is False
+
+
+# ---------------------------------------------------------------------------
+# Was Cortex sich von selbst merkt
+# ---------------------------------------------------------------------------
+def test_personal_notes_stand_in_the_system_prompt(
+    settings: Settings, tmp_path
+) -> None:
+    """Ein Name ist nichts, wonach man sucht -- er soll einfach dastehen."""
+    from cortex.memory import Memory
+
+    settings.memory_enabled = True
+    toolbox = Toolbox(settings, cache=None)
+    store = Memory(settings.db_path, settings.data_dir, settings.memory_key)
+    store.remember("Der Nutzer heisst Jonas.", topic="person")
+    store.remember("Kaffee mag er nicht.", topic="person")
+    toolbox._memory_store = store
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    system = agent.messages[0]["content"]
+    assert "heisst Jonas" in system
+    assert "Was du ueber den Nutzer schon weisst" in system
+
+
+def test_a_saved_name_is_there_in_the_next_conversation(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Der ganze Weg: Modell legt ab -- naechster Chat weiss es.
+
+    Genau das war die Frage: "speichert sich Cortex das, wenn ich schreibe,
+    ich heisse Jonas?" Hier steht die Antwort als Test.
+    """
+    settings.memory_enabled = True
+    toolbox = Toolbox(settings, cache=None)
+    monkeypatch.setattr(
+        "litellm.completion",
+        ScriptedLLM(
+            _message(
+                tool_calls=[
+                    _tool_call(
+                        "save_memory",
+                        {"text": "Der Nutzer heisst Jonas.", "topic": "person"},
+                    )
+                ]
+            ),
+            _message(content="Alles klar, Jonas -- ich habe es mir gemerkt."),
+        ),
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Ich heisse Jonas.", stream=False)
+
+    # Neuer Chat, neuer Agent, neuer Werkzeugkasten -- nur der Speicher bleibt.
+    spaeter = Agent(settings, cache=None, toolbox=Toolbox(settings, cache=None))
+    assert "heisst Jonas" in spaeter.messages[0]["content"]
+
+
+def test_the_memory_rule_tells_the_model_to_save_on_its_own(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """"Ich heisse Jonas" kommt beilaeufig und kehrt nicht wieder."""
+    settings.memory_enabled = True
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    system = agent.messages[0]["content"]
+    assert "VON SELBST ABLEGEN" in system
+    assert "ich heisse jonas" in system.lower()
+    assert '"person"' in system, "das Thema, unter dem es wiedergefunden wird"
+    assert "gemerkt" in system, "und er sagt es dazu"
+
+
+# ---------------------------------------------------------------------------
 # Code-Modus: das staerkste Modell
 # ---------------------------------------------------------------------------
 def test_code_mode_runs_on_the_strongest_model(

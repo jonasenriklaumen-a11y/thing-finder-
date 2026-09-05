@@ -80,6 +80,7 @@ class FakeAgent:
         structured: bool | None = None,
         recheck: bool | None = None,
         effort: str = "",
+        online: bool | None = None,
     ) -> Any:
         self.gesehen.append(
             {
@@ -88,6 +89,7 @@ class FakeAgent:
                 "struktur": structured,
                 "gegenprobe": recheck,
                 "tiefe": effort,
+                "web": online,
             }
         )
         text = message.lower()
@@ -291,6 +293,27 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.uncheck("#recheck")
         pg.keyboard.press("Escape")
         foto("04-modi")
+
+    if dran("web"):
+        log.abschnitt("4b. Ohne Web")
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        log.pruefe(pg.is_checked("#online"), "Suchen ist von Haus aus an")
+        pg.uncheck("#online")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+        log.pruefe("ohne Web" in pg.inner_text("#status"), "die Kopfzeile sagt es")
+        pg.fill("#input", "Was weißt du selbst?")
+        pg.click("#send")
+        pg.wait_for_timeout(1100)
+        log.pruefe(agent.gesehen[-1]["web"] is False,
+                   f"der Schalter kommt an ({agent.gesehen[-1]['web']})")
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        pg.check("#online")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+        log.pruefe("ohne Web" not in pg.inner_text("#status"), "und wieder zurück")
 
     if dran("rueckfrage"):
         log.abschnitt("5. Rückfrage")
