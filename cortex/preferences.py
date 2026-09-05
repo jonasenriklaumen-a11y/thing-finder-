@@ -31,6 +31,22 @@ from pathlib import Path
 #: dieser Sonderfall statt eines Schluessels.
 APPEARANCE = "aussehen"
 
+#: Dasselbe gilt fuer das Farbschema -- auch das kennt nur der Browser.
+PALETTE = "farbschema"
+
+#: Katalogname -> Name im Stilblock der Oberflaeche. Das Standardschema
+#: traegt dort keinen eigenen Namen: es sind die Werte in ``:root``.
+PALETTE_IDS: dict[str, str] = {
+    "standard": "",
+    "nord": "nord",
+    "catppuccin": "catppuccin",
+    "gruvbox": "gruvbox",
+    "tokyo_night": "tokyonight",
+    "solarized": "solarized",
+    "dracula": "dracula",
+    "rose_pine": "rosepine",
+}
+
 
 class NotChangeable(ValueError):
     """Diese Einstellung wird nicht aus dem Gespraech heraus geaendert."""
@@ -62,6 +78,14 @@ CATALOGUE: tuple[Preference, ...] = (
         "Erscheinungsbild",
         choices=("hell", "dunkel"),
         aliases=("hintergrund", "farbe", "theme", "design", "modus"),
+    ),
+    Preference(
+        PALETTE,
+        "",
+        "auswahl",
+        "Farbschema",
+        choices=tuple(PALETTE_IDS),
+        aliases=("farbschemata", "farben", "farbmuster", "farbkombination", "schema"),
     ),
     Preference(
         "ort",
@@ -198,6 +222,17 @@ def coerce(preference: Preference, value: str) -> str:
         if low in _DARK:
             return "dunkel"
         raise BadValue("Fuer das Erscheinungsbild geht 'hell' oder 'dunkel'.")
+
+    if preference.name == PALETTE:
+        # "Tokyo Night", "rose-pine", "Rosé Pine" -- alles derselbe Wunsch.
+        raw = (
+            raw.lower()
+            .replace("é", "e")
+            .replace(" ", "_")
+            .replace("-", "_")
+        )
+        if raw in ("gruen", "grün", "jetzig", "normal"):
+            raw = "standard"
 
     if preference.kind == "schalter":
         low = raw.lower()

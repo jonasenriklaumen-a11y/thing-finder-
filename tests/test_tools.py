@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -1092,3 +1093,46 @@ def test_the_setting_tool_is_dispatched(settings: Settings) -> None:
     )
     box.call("change_setting", {"setting": "aussehen", "value": "dunkel"})
     assert ("appearance", {"theme": "dark"}) in events
+
+
+def test_the_recheck_filters_out_pages_already_read(settings: Settings) -> None:
+    """Eine zweite Runde auf denselben Seiten braeuchte niemand."""
+
+    def fake_search(query, **kwargs):
+        return [
+            SearchResult(title="Alt", url="https://gelesen.de/1", snippet="S"),
+            SearchResult(title="Neu", url="https://frisch.de/1", snippet="S"),
+        ]
+
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    with patch("cortex.tools.search_web", side_effect=fake_search):
+        box.avoid_domains = {"gelesen.de"}
+        result = box.web_search("frage")
+
+    urls = [hit["url"] for hit in result["results"]]
+    assert urls == ["https://frisch.de/1"]
+    assert "aussortiert" in result["note"]
+
+
+def test_nothing_left_after_filtering_is_better_than_nothing(settings: Settings) -> None:
+    """Eine leere Trefferliste waere schlechter als eine bekannte."""
+
+    def fake_search(query, **kwargs):
+        return [SearchResult(title="Alt", url="https://gelesen.de/1", snippet="S")]
+
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    with patch("cortex.tools.search_web", side_effect=fake_search):
+        box.avoid_domains = {"gelesen.de"}
+        result = box.web_search("frage")
+    assert len(result["results"]) == 1
+
+
+def test_without_a_recheck_nothing_is_filtered(settings: Settings) -> None:
+    def fake_search(query, **kwargs):
+        return [SearchResult(title="A", url="https://a.de/1", snippet="S")]
+
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    with patch("cortex.tools.search_web", side_effect=fake_search):
+        result = box.web_search("frage")
+    assert len(result["results"]) == 1
+    assert "note" not in result

@@ -173,6 +173,23 @@ teuerste Fehler ueberhaupt: sie sehen richtig aus und laufen nicht.
 - Musst du raten, sag es in einer Zeile ueber dem Block, statt es auszuschmuecken.
 """
 
+#: Die zweite Runde. Angehaengt, wenn jemand gegenpruefen laesst.
+RECHECK_PROMPT = """\
+Zweite Runde. Deine Antwort steht -- jetzt pruef sie gegen, mit ANDEREN Quellen.
+
+- Such noch einmal, mit anderen Worten als beim ersten Mal, und lies Seiten, die \
+du noch nicht gelesen hast. Die schon gelesenen sind aus den Treffern heraussortiert.
+- Achte besonders auf das, was sich widersprechen koennte: Preise, Zahlen, Daten, \
+Oeffnungszeiten, Versionen. Genau dort steht in einer einzigen Quelle am haeufigsten \
+etwas Falsches.
+- Danach gibst du die VOLLSTAENDIGE Antwort neu aus, nicht nur die Aenderungen. Sie \
+ersetzt die erste.
+- Was sich bestaetigt hat, schreibst du ohne Aufhebens hin. Wo zwei Quellen sich \
+uneinig sind, nennst du beide Angaben mit ihrer Quelle und sagst, welcher du eher \
+glaubst und warum.
+- Findest du nichts Neues, sagst du das in einer Zeile am Ende: "Gegengeprueft, \
+nichts widersprochen." Erfinde keine Korrektur, nur damit die Runde etwas hergibt."""
+
 BUDGET_PROMPT = """\
 Das Werkzeug-Budget ist aufgebraucht. Beantworte die Frage jetzt mit dem, was du bereits \
 gelesen hast -- und zwar vollstaendig: gib alle Fakten wieder, die du gesammelt hast, \
@@ -402,6 +419,10 @@ TOOL_SHARE = 0.35
 #: sein, was zurueckkam -- nicht die halbe Seite im Fenster stehen.
 TRACE_CHARS = 1200
 
+#: So viele Werkzeugaufrufe bekommt die Gegenpruefung mindestens. Weniger,
+#: und sie waere vorbei, bevor sie eine zweite Quelle gefunden hat.
+RECHECK_MIN_CALLS = 4
+
 #: Werkzeuge, die in derselben Runde nebeneinander laufen duerfen. Sie lesen
 #: nur: kein Schreiben, kein Schalten, kein Warten auf einen Menschen. Alles
 #: andere laeuft nacheinander, in der Reihenfolge, die das Modell gewaehlt hat.
@@ -480,6 +501,8 @@ class AgentResult:
     hit_limit: bool = False
     #: Jemand hat den Durchlauf abgebrochen -- die Antwort ist unvollstaendig.
     stopped: bool = False
+    #: Es lief eine zweite Runde mit anderen Quellen.
+    rechecked: bool = False
     error: str = ""
 
     def meta(self) -> dict[str, Any]:
@@ -518,6 +541,8 @@ class Agent:
         #: Denkt Cortex vor der Recherche? Aus heisst: kein Planen, keine
         #: Teilfragen -- die Agenten bekommen die Frage, wie sie gestellt wurde.
         self.thinking = True
+        #: Nach der Antwort noch einmal suchen, mit anderen Quellen.
+        self.recheck = False
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt(cache, self._home_prompt())}
         ]
@@ -569,7 +594,10 @@ class Agent:
             extra.append(HA_STATES_SCHEMA)
             if self.settings.ha_control:
                 extra.append(HA_CALL_SCHEMA)
-        if self.use_subagents:
+        # Ohne Denken gibt es dieses Werkzeug nicht. Sonst zerlegt das Modell
+        # die Frage eben selbst -- und der Schalter, der genau das abstellen
+        # soll, waere eine Bitte statt einer Entscheidung.
+        if self.use_subagents and self.thinking:
             extra.append(SUBAGENT_SCHEMA)
         # Subagenten bekommen diese Liste nie -- sie arbeiten mit TOOL_SCHEMAS
         # allein. Einstellungen aendert also nur der Hauptagent, und das ist
@@ -713,6 +741,7 @@ class Agent:
             on_event=self.on_event,
             parallel=self.settings.effective_parallel,
             stop=self._stop,
+            direct=not self.thinking,
         )
         for result in results:
             self.toolbox.stats.sources.extend(result.sources)
@@ -1019,6 +1048,7 @@ class Agent:
         stream: bool = True,
         mode: str = "",
         thinking: bool | None = None,
+        recheck: bool | None = None,
     ) -> AgentResult:
         """Beantwortet *question* -- sucht, liest und wertet aus.
 
@@ -1028,12 +1058,16 @@ class Agent:
             mode: "normal" oder "code". Leer laesst den bisherigen stehen.
             thinking: Vor der Recherche planen und zerlegen. `None` laesst den
                 bisherigen Stand stehen.
+            recheck: Nach der Antwort eine zweite Runde mit anderen Quellen.
+                `None` laesst den bisherigen Stand stehen.
         """
         question = question.strip()
         if mode:
             self._apply_mode(mode)
         if thinking is not None:
             self.thinking = bool(thinking)
+        if recheck is not None:
+            self.recheck = bool(recheck)
         self._stop.clear()
         self.toolbox.stats.reset()
         result = AgentResult(answer="")
@@ -1121,7 +1155,61 @@ class Agent:
                         }
                     )
 
+        if self.recheck and not result.stopped:
+            self._second_round(result, stream=stream)
         return self._finish(result, question)
+
+    def _second_round(self, result: AgentResult, *, stream: bool) -> None:
+        """Sucht noch einmal, mit anderen Quellen, und schreibt die Antwort neu.
+
+        Eine zweite Runde auf denselben Seiten waere keine: sie brachte
+        dieselben Zahlen zurueck und bestaetigte den eigenen Fehler. Deshalb
+        fallen die bereits gelesenen Domains fuer diese Runde aus den
+        Suchtreffern heraus.
+
+        Hat die erste Runde gar nichts gelesen -- Small Talk, eine Frage aus
+        dem Gedaechtnis --, gibt es auch nichts gegenzupruefen.
+        """
+        read = [source.get("domain", "") for source in self.toolbox.stats.sources]
+        read = [domain for domain in read if domain]
+        if not read:
+            return
+
+        self._emit("recheck", sources=len(set(read)))
+        before = set(self.toolbox.avoid_domains)
+        self.toolbox.avoid_domains.update(read)
+        # Eigenes Budget: mit dem Rest der ersten Runde waere die zweite oft
+        # vorbei, bevor sie angefangen hat.
+        budget = max(RECHECK_MIN_CALLS, self.settings.max_tool_calls // 2)
+        used = 0
+        self.messages.append({"role": "user", "content": RECHECK_PROMPT})
+
+        try:
+            while used < budget and not self.stopped:
+                self._trim_history()
+                try:
+                    message = self._completion_with_retry(self.messages, stream=stream)
+                except Exception as exc:
+                    # Die erste Antwort steht schon -- eine gescheiterte
+                    # Gegenpruefung darf sie nicht mitreissen.
+                    self._emit("error", message=f"Gegenpruefung: {exc}")
+                    return
+                calls = message.get("tool_calls") or []
+                self.messages.append(_assistant_message(message))
+                if not calls:
+                    result.answer = message.get("content", "") or result.answer
+                    result.rechecked = True
+                    return
+                calls = calls[: budget - used]
+                used += len(calls)
+                self._run_round(calls)
+            # Budget alle, aber noch keine Antwort: einmal ohne Werkzeuge.
+            if not self.stopped:
+                result.answer = self._final_answer(stream=stream) or result.answer
+                result.rechecked = True
+        finally:
+            self.toolbox.avoid_domains = before
+            self._emit("recheck_done", changed=result.rechecked)
 
     def cancel(self) -> None:
         """Bricht den laufenden Durchlauf ab.

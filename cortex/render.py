@@ -141,6 +141,12 @@ class ChatRenderer:
     def _on_subagents(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
         tasks = payload.get("tasks", [])
+        if payload.get("direct"):
+            # Ohne Denken wurde nichts zerlegt -- "1 Teilfrage" waere gelogen.
+            self.console.print(
+                Text.assemble(("  [Direkt] ", "bold magenta"), ("ohne Zerlegen", "white"))
+            )
+            return
         self.console.print(
             Text.assemble(("  [Teile] ", "bold magenta"), (f"{len(tasks)} Teilfragen", "white"))
         )

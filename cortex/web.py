@@ -284,6 +284,7 @@ class ChatSession:
         attachments: list[dict[str, Any]] | None = None,
         mode: str = "",
         thinking: bool | None = None,
+        recheck: bool | None = None,
     ) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
@@ -297,7 +298,7 @@ class ChatSession:
                 "waiting",
                 {
                     "reason": (
-                        "Es laeuft noch eine frueher gestellte Anfrage -- ich bin "
+                        "Es läuft noch eine früher gestellte Anfrage — ich bin "
                         "gleich da."
                     )
                 },
@@ -318,7 +319,9 @@ class ChatSession:
                 elif attachments:
                     context = self.attachments_text(agent, attachments, emit)
                     message = f"{context}\n\n{message}" if context else message
-                return agent.ask(message, stream=True, mode=mode, thinking=thinking)
+                return agent.ask(
+                    message, stream=True, mode=mode, thinking=thinking, recheck=recheck
+                )
             finally:
                 agent.on_event = None
                 agent.toolbox.on_event = None
@@ -1143,7 +1146,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                 return {
                     "ok": False,
                     "error": (
-                        "Nichts gefunden. Laeuft die Lagerverwaltung? Sonst die Adresse "
+                        "Nichts gefunden. Läuft die Lagerverwaltung? Sonst die Adresse "
                         "von Hand eintragen, z.B. 192.168.1.5:3000."
                     ),
                 }
@@ -1345,6 +1348,8 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         mode = str(payload.get("mode", "")).strip()
         thinking = payload.get("thinking")
         thinking = None if thinking is None else bool(thinking)
+        recheck = payload.get("recheck")
+        recheck = None if recheck is None else bool(recheck)
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return
@@ -1375,7 +1380,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
 
         def run() -> None:
             try:
-                SESSION.ask(message, emit, attachments, mode=mode, thinking=thinking)
+                SESSION.ask(
+                    message, emit, attachments, mode=mode, thinking=thinking, recheck=recheck
+                )
             except Exception as exc:
                 events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
             finally:
@@ -1512,7 +1519,7 @@ def addresses_for(host: str, port: int, token: str = "") -> list[tuple[str, str]
                 found.append((lan, "im heimischen Netz"))
             tailscale = tailscale_address()
             if tailscale:
-                found.append((tailscale, "ueber Tailscale"))
+                found.append((tailscale, "über Tailscale"))
         else:
             found.append((host, "wie angegeben"))
     found.append(("127.0.0.1", "auf diesem Rechner"))

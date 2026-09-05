@@ -605,7 +605,9 @@ SETTING_SCHEMA: dict[str, Any] = {
         "description": (
             "Aendert eine Einstellung, wenn der Nutzer darum bittet -- etwa 'mach den "
             "Hintergrund weiss', 'such lieber auf Englisch', 'nimm weniger Teilfragen'. "
-            "Moegliche Namen: aussehen (hell/dunkel), ort, sprache, land, suchmaschine, "
+            "Moegliche Namen: aussehen (hell/dunkel), farbschema (standard, nord, "
+            "catppuccin, gruvbox, tokyo_night, solarized, dracula, rose_pine), "
+            "ort, sprache, land, suchmaschine, "
             "formulierungen, subagenten (an/aus), subagenten_anzahl, werkzeug_budget, "
             "kontextfenster, browser_fallback (an/aus), modell. "
             "NICHT aenderbar sind Zugangsdaten und alles, was mir mehr Zugriff gaebe: "
@@ -725,6 +727,10 @@ class Toolbox:
         )
         #: Suchtreffer nach URL, damit blockierte Seiten wenigstens als Link taugen.
         self.seen_results: dict[str, SearchResult] = {}
+        #: In der Gegenpruefung: Quellen, die schon gelesen wurden. Sie fallen
+        #: dann aus den Suchtreffern heraus -- eine zweite Runde, die dieselben
+        #: Seiten noch einmal liest, ist keine zweite Runde.
+        self.avoid_domains: set[str] = set()
         #: Der Google-Zugriff wird erst beim ersten Aufruf gebaut -- ohne
         #: verbundenes Konto soll gar nichts davon geladen werden.
         self._google_client: Any = None
@@ -851,14 +857,33 @@ class Toolbox:
         for result in results:
             self.seen_results.setdefault(result.url, result)
 
+        skipped = 0
+        if self.avoid_domains:
+            fresh = [
+                result
+                for result in results
+                if (result.source_domain or domain_of(result.url)) not in self.avoid_domains
+            ]
+            skipped = len(results) - len(fresh)
+            # Bleibt nach dem Aussortieren nichts uebrig, ist die alte Liste
+            # immer noch besser als gar keine -- dann sagt die Notiz es eben.
+            if fresh:
+                results = fresh
+
         self._emit("search_done", query=label, hits=len(results), queries=used)
-        return {
+        payload = {
             "query": label,
             "queries": used,
             "country": country,
             "lang": lang,
             "results": [result.as_tool_dict() for result in results],
         }
+        if skipped:
+            payload["note"] = (
+                f"{skipped} Treffer von bereits gelesenen Seiten sind aussortiert -- "
+                "du sollst in dieser Runde andere Quellen finden."
+            )
+        return payload
 
     # -- Werkzeug 2 -------------------------------------------------------
     def fetch_page(self, url: str) -> dict[str, Any]:
@@ -1189,10 +1214,13 @@ class Toolbox:
 
         self._emit("setting", label=preference.label, value=stored)
 
-        if preference.name == preferences.APPEARANCE:
+        if preference.name in (preferences.APPEARANCE, preferences.PALETTE):
             # Aussehen ist Sache des Browsers -- es steht in keiner Datei. Die
             # Oberflaeche hoert auf dieses Ereignis und stellt es um.
-            self._emit("appearance", theme="light" if stored == "hell" else "dark")
+            if preference.name == preferences.APPEARANCE:
+                self._emit("appearance", theme="light" if stored == "hell" else "dark")
+            else:
+                self._emit("appearance", palette=preferences.PALETTE_IDS[stored])
             self.stats.settings_changed += 1
             return {
                 "changed": preference.label,

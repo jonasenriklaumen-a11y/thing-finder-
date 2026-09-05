@@ -25,6 +25,7 @@ class FakeToolbox:
         self.ask_handler: Any = None
         self.mode = ""
         self.thinking: bool | None = None
+        self.recheck: bool | None = None
 
 
 class FakeAgent:
@@ -51,10 +52,12 @@ class FakeAgent:
         stream: bool = True,
         mode: str = "",
         thinking: bool | None = None,
+        recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
         self.mode = mode
         self.thinking = thinking
+        self.recheck = recheck
         if self.raise_error is not None:
             raise self.raise_error
         for name, payload in self.script:
@@ -592,7 +595,7 @@ def test_a_waiting_device_is_told_so(session: web.ChatSession) -> None:
     started, release = threading.Event(), threading.Event()
 
     class Slow(FakeAgent):
-        def ask(self, question: str, *, stream: bool = True, mode="", thinking=None):
+        def ask(self, question, *, stream=True, mode="", thinking=None, recheck=None):
             started.set()
             release.wait(timeout=5)
             return AgentResult(answer="fertig")
@@ -704,6 +707,7 @@ class AskingAgent(FakeAgent):
         stream: bool = True,
         mode: str = "",
         thinking: bool | None = None,
+        recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
         self.on_event("ask", {"question": "Welches Budget?", "options": ["bis 800", "egal"]})
@@ -1050,16 +1054,84 @@ def test_the_ui_looks_like_the_new_design() -> None:
     assert "prefers-color-scheme" in html         # folgt dem System
 
 
-def test_the_palette_is_green_not_orange() -> None:
-    """Der Akzent traegt die ganze Oberflaeche -- er muss gruen sein."""
+def test_the_default_palette_is_green_not_orange() -> None:
+    """Der Akzent traegt die Oberflaeche -- im Standardschema ist er gruen.
+
+    Nur das Standardschema: die uebrigen Schemata sind ausdruecklich in
+    fremden Farben und werden erst auf Wunsch eingeschaltet.
+    """
     import re
 
     html = web.UI_FILE.read_text(encoding="utf-8")
-    accents = re.findall(r"--accent:\s*(#[0-9a-fA-F]{6})", html)
-    assert accents, "keine Akzentfarbe gefunden"
+    blocks = re.findall(r":root(?:\[data-theme=\"dark\"\])?\{(.*?)\}", html, re.S)
+    accents = [
+        found.group(1)
+        for block in blocks
+        if (found := re.search(r"--accent:\s*(#[0-9a-fA-F]{6})", block))
+    ]
+    assert len(accents) == 2, "hell und dunkel brauchen je einen Standardakzent"
     for colour in accents:
         red, green, blue = (int(colour[i : i + 2], 16) for i in (1, 3, 5))
         assert green > red and green > blue, f"{colour} ist nicht gruen"
+
+
+def test_every_palette_sets_the_same_variables() -> None:
+    """Ein Schema, dem eine Farbe fehlt, erbt sie -- und sieht dann falsch aus."""
+    import re
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    wanted = set(
+        re.findall(
+            r"--([a-z0-9-]+):",
+            re.search(r":root\{(.*?)\}", html, re.S).group(1),
+        )
+    ) - {"radius", "radius-lg", "serif", "sans", "mono", "shadow"}
+    blocks = re.findall(
+        r':root\[data-palette="([a-z]+)"\](\[data-theme="dark"\])?\{(.*?)\}', html, re.S
+    )
+    assert blocks, "keine Farbschemata gefunden"
+    seen: set[str] = set()
+    for name, _dark, body in blocks:
+        seen.add(name)
+        have = set(re.findall(r"--([a-z0-9-]+):", body))
+        assert wanted <= have, f"{name} fehlt: {sorted(wanted - have)}"
+    for name in seen:
+        pairs = [b for b in blocks if b[0] == name]
+        assert len(pairs) == 2, f"{name} braucht hell und dunkel"
+
+
+def test_the_settings_window_has_section_jumps() -> None:
+    """Das Formular ist lang -- der Kopf bleibt stehen und fuehrt hin."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="secnav"' in html
+    assert "sheet-head" in html
+    assert "position:sticky" in html
+    # Die Marken kommen aus den Abschnitten selbst, nicht aus einer Liste
+    # daneben -- sonst haette ein neuer Abschnitt keine.
+    assert "querySelectorAll(\"fieldset\")" in html
+
+
+def test_the_appearance_window_offers_modes_and_palettes() -> None:
+    """Ein Klick auf Erscheinungsbild oeffnet ein Fenster, keinen Umschalter."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="themebox"' in html
+    assert 'id="palettes"' in html
+    for mode in ("light", "dark", "system"):
+        assert f'data-tmode="{mode}"' in html
+    assert "cortex-palette" in html          # bleibt im Browser gespeichert
+    assert "prefers-color-scheme" in html    # "wie das System" folgt dem System
+
+
+def test_no_element_hardcodes_a_colour() -> None:
+    """Feste Farben in Bauteilen ueberleben keinen Schemawechsel."""
+    import re
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    style = html[html.index("<style>") : html.index("</style>")]
+    for line in style.splitlines():
+        if line.lstrip().startswith("--") or ":root" in line:
+            continue
+        assert not re.search(r"(?:color|background):\s*#", line), line.strip()
 
 
 def test_the_ui_shows_the_home_steps() -> None:
@@ -1697,7 +1769,7 @@ def test_a_silent_model_does_not_kill_the_connection(
         def set_ask_handler(self, handler):
             pass
 
-        def ask(self, message, stream=True, mode='', thinking=None):
+        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
             time.sleep(0.4)
             self.on_event("answer_chunk", {"text": "Da bin ich."})
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -1775,7 +1847,7 @@ def test_stopping_cancels_the_running_agent(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True, mode='', thinking=None):
+        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
             started.set()
             for _ in range(100):
                 if cancelled.is_set():
@@ -1909,7 +1981,7 @@ def test_a_closed_tab_ends_the_run(
         def cancel(self):
             cancelled.set()
 
-        def ask(self, message, stream=True, mode='', thinking=None):
+        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
             started.set()
             for _ in range(200):
                 if cancelled.is_set():
@@ -1963,7 +2035,7 @@ def test_the_waiting_notice_does_not_invent_another_device(
         def cancel(self):
             release.set()
 
-        def ask(self, message, stream=True, mode='', thinking=None):
+        def ask(self, message, stream=True, mode='', thinking=None, recheck=None):
             running.set()
             release.wait(timeout=10)
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -1994,7 +2066,7 @@ def test_the_waiting_notice_does_not_invent_another_device(
     waiting = [event for event in sse_events(result[0]) if event["type"] == "waiting"]
     assert waiting, "wer wartet, soll das sehen"
     assert "anderes Geraet" not in waiting[0]["reason"]
-    assert "frueher gestellte Anfrage" in waiting[0]["reason"]
+    assert "früher gestellte Anfrage" in waiting[0]["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -2165,3 +2237,100 @@ def test_the_thinking_switch_is_not_shadowed_by_a_local_name() -> None:
     assert "let answer" in body
     declared = body[body.index("let answer") : body.index("\n", body.index("let answer"))]
     assert "thinking" not in declared, f"verdeckt den Schalter: {declared}"
+
+
+# ---------------------------------------------------------------------------
+# Rückfragen im eigenen Fenster
+# ---------------------------------------------------------------------------
+def test_the_question_opens_its_own_window() -> None:
+    """Eine Karte mitten im Verlauf wird uebersehen, waehrend man auf die
+    Antwort schaut -- die Anfrage steht dann still und niemand merkt warum."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="askbox"' in html
+    assert 'role="dialog"' in html and 'aria-modal="true"' in html
+    assert "function openAsk(" in html
+    assert 'case "ask": openAsk(' in html
+
+
+def test_the_question_window_lies_above_the_settings() -> None:
+    """Sie haelt die Anfrage an und hat deshalb Vorrang."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert ".overlay.ask{z-index:100" in html
+    assert ".overlay{position:fixed;inset:0" in html
+    assert "z-index:80" in html, "die Einstellungen liegen darunter"
+
+
+def test_escape_skips_the_question_instead_of_hiding_it() -> None:
+    """Verschwaende die Frage nur, haenge die Anfrage an einer Antwort,
+    die nie kommt."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'if (e.key === "Escape" && asking) finishAsk("");' in html
+    assert "if (asking) return;              // die Rueckfrage liegt obenauf" in html
+
+
+def test_clicking_beside_the_window_does_not_dismiss_it() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "Nur daneben tippen soll die Frage NICHT wegwischen" in html
+
+
+def test_the_answer_stays_in_the_thread() -> None:
+    """Sonst versteht man die Antwort spaeter nicht mehr."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'note.className = "askcard"' in html
+    assert "(übersprungen)" in html
+
+
+def test_an_ended_run_closes_an_open_question() -> None:
+    """Sonst antwortet man ins Leere, weil niemand mehr wartet."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'if (!on && asking) finishAsk("", true);' in html
+
+
+def test_the_question_state_is_declared_before_it_is_used() -> None:
+    """`let` spaeter deklariert waere ein ReferenceError -- schon zweimal passiert."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert html.index("let asking = null") < html.index("function setBusy(")
+
+
+def test_a_direct_run_is_labelled_differently_in_the_ui() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "[Direkt]" in html
+    assert "ev.direct" in html
+
+
+def test_the_recheck_switch_sits_under_the_thinking_switch() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    picker = html[html.index('id="picker-models"') :]
+    picker = picker[: picker.index("picker-foot")]
+    assert picker.index('id="think"') < picker.index('id="recheck"')
+    assert "Gegenprüfen" in picker
+    assert "andere Seiten als beim ersten Mal" in picker
+
+
+def test_the_recheck_reaches_the_agent(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    client("POST", "/api/chat", {"message": "Frage", "recheck": True})
+    assert agent.recheck is True
+
+
+def test_the_recheck_is_off_unless_asked_for(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    """Es dauert etwa doppelt so lang -- das passiert nicht ungefragt."""
+    client("POST", "/api/chat", {"message": "Frage"})
+    assert agent.recheck is None
+    assert 'id="recheck"' in web.UI_FILE.read_text(encoding="utf-8")
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert '<input type="checkbox" id="recheck">' in html, "kein checked"
+
+
+def test_the_recheck_is_sent_with_every_question() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "message: text, attachments, mode, thinking, recheck" in html
+
+
+def test_a_running_recheck_is_visible() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "[Gegenprobe]" in html
+    assert '"gegenprüfen"' in html, "und steht in der Kopfzeile"

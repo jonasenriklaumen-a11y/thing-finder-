@@ -369,6 +369,7 @@ def run_subagents(
     on_event: EventHook | None = None,
     parallel: int = 2,
     stop: threading.Event | None = None,
+    direct: bool = False,
 ) -> list[SubagentResult]:
     """Bearbeitet *tasks* nebenlaeufig und gibt die Ergebnisse in Reihenfolge zurueck.
 
@@ -381,6 +382,9 @@ def run_subagents(
             zwei wenig, weil sie ohnehin nacheinander rechnen.
         stop: Wird sie gesetzt, brechen noch nicht begonnene Teilfragen ab und
             laufende enden nach ihrem naechsten Schritt.
+        direct: Es wurde nichts zerlegt -- die Agenten bekommen die Frage, wie
+            sie gestellt wurde. Nur fuer die Anzeige: "1 Teilfrage" waere eine
+            irrefuehrende Auskunft, wenn gar nicht geteilt wurde.
     """
     clean = [task.strip() for task in tasks if task and task.strip()]
     clean = clean[: max(1, settings.max_subagents)]
@@ -388,7 +392,7 @@ def run_subagents(
         return []
 
     if on_event:
-        on_event("subagents", {"tasks": clean})
+        on_event("subagents", {"tasks": clean, "direct": direct})
 
     # Ein gemeinsamer Fetcher fuer alle: dessen Drossel und robots.txt-Cache
     # gelten damit ueber die Subagenten hinweg. Mit je eigenem Fetcher wuerden

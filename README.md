@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.0.0                                      │
+│ Cortex AI 8.2.1                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -317,13 +317,14 @@ derselbe Agent wie im Terminal: dieselben zwei Werkzeuge, dieselben Subagenten,
 derselbe Verlauf, dieselbe `.env`. Die Zwischenschritte („Suche", „Lese", „Teile")
 laufen live mit, die Antwort wird Wort für Wort gestreamt.
 
-* **Grün auf Schwarz**, per Knopf umschaltbar auf Weiß. Die Versionsnummer steht klein
-  in der Kopfzeile.
-* **Einstellungen** öffnet ein Formular mit *allem*, was auch `cortex setup` fragt —
-  und ein Test hält das dauerhaft in Deckung: kommt im Terminal eine Frage dazu,
-  schlägt er fehl, bis das Formular nachzieht. Enthalten sind:
-  Haupt-, Vision- und Subagenten-Modell, API-Key, API-Basis, Suchmaschine samt Engine-
-  Liste und SearXNG-URL, Ort/Sprache/Land, Subagenten an/aus samt Budget und
+* **Hell oder dunkel**, in acht Farbschemata — unter *Erscheinungsbild* unten links
+  (siehe weiter unten). Die Versionsnummer steht klein in der Kopfzeile.
+* **Einstellungen** öffnet ein Formular mit *allem*, was auch `cortex setup` fragt.
+  Der Kopf bleibt beim Scrollen stehen und trägt eine Marke je Abschnitt — ein Klick
+  springt hin, statt durch das ganze Formular zu scrollen. Ein Test hält den Inhalt
+  dauerhaft in Deckung mit dem Terminal: kommt dort eine Frage dazu, schlägt er fehl,
+  bis das Formular nachzieht. Enthalten sind Haupt-, Vision- und Subagenten-Modell,
+  API-Key, API-Basis, Suchmaschine samt Engine-Liste und SearXNG-URL, Ort/Sprache/Land, Subagenten an/aus samt Budget und
   Parallelität, Werkzeug-Budget, Kontextfenster, Planungs-Zeitlimit und der
   Playwright-Fallback. Gespeichert wird in dieselbe `.env`, danach lädt der Agent neu.
   Ein leeres API-Key-Feld bedeutet „unverändert" — der vorhandene Key bleibt stehen.
@@ -333,9 +334,11 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   direkt übernommen. Bis zu 5 Dateien à 25 MB. Ein gescanntes PDF ohne Textebene sagt
   das offen — geraten wird nichts.
 * **Rückfragen:** braucht cortex etwas Entscheidendes (Budget, Ort, welches von
-  mehreren Dingen gemeint ist), fragt er nach — mit anklickbaren Antworten oder einem
-  Feld zum Selberschreiben. Er fragt höchstens zweimal je Anfrage und nur, wenn die
-  Antwort das Ergebnis wirklich ändert; sonst trifft er eine Annahme und sagt sie dazu.
+  mehreren Dingen gemeint ist), fragt er nach — in einem kleinen Fenster über dem
+  Chat, mit anklickbaren Antworten oder einem Feld zum Selberschreiben.
+  <kbd>Esc</kbd> heißt „überspringen". Er fragt höchstens zweimal je Anfrage und nur,
+  wenn die Antwort das Ergebnis wirklich ändert; sonst trifft er eine Annahme und
+  sagt sie dazu.
 * **Letzte Chats** in der Seitenleiste sind Chats, keine Einzelfragen. Ein Chat
   beginnt mit **Neuer Chat**, bekommt seinen Namen von der ersten Frage darin und
   sammelt alles Weitere, bis du den nächsten startest. Er erscheint in dem Moment in
@@ -363,10 +366,22 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Planung: die Agenten gehen direkt mit deiner Frage los, und auch das Modell selbst
   überlegt nicht mehr seitenlang vor. Bei einem Denk-Modell in der Cloud ist das der
   größte Zeitgewinn, den es hier gibt. Steht es aus, sagt es die Kopfzeile.
+* **Gegenprüfen**, der Schalter unter *Denken*. Ist er an, sucht dasselbe Modell
+  nach der Antwort ein zweites Mal — und lässt dabei jede Seite aus, die es beim
+  ersten Mal gelesen hat. Findet die zweite Runde etwas anderes, steht es in der
+  Antwort; findet sie nichts Neues, sagt sie das. Gut für Zahlen, die nur in einer
+  einzigen Quelle so stehen. Kostet ungefähr die doppelte Zeit.
+* **Erscheinungsbild** unten links in der Seitenleiste öffnet ein eigenes Fenster:
+  **hell**, **dunkel** oder **wie das System** — und darunter acht Farbschemata.
+  *Standard* sind die Farben, die du kennst (warmes Papier, grüner Akzent); dazu
+  kommen Nord, Catppuccin, Gruvbox, Tokyo Night, Solarized, Dracula und Rosé Pine,
+  jedes in einer hellen und einer dunklen Fassung. Der Aufbau der Oberfläche bleibt
+  in jedem Schema exakt derselbe — es wechseln nur die Farben. Die Wahl gilt sofort
+  und bleibt in dem Browser gespeichert, in dem du sie triffst.
 * **Einstellungen im Gespräch ändern:** „Mach den Hintergrund weiß", „such lieber
   auf Englisch", „nimm weniger Teilfragen" — das erledigt Cortex direkt, statt dich
-  ins Formular zu schicken. Änderbar sind Erscheinungsbild, Ort, Sprache, Land,
-  Suchmaschine, Formulierungen je Suche, Subagenten, Werkzeug-Budget, Kontextfenster,
+  ins Formular zu schicken. Änderbar sind Erscheinungsbild, Farbschema, Ort,
+  Sprache, Land, Suchmaschine, Formulierungen je Suche, Subagenten, Werkzeug-Budget, Kontextfenster,
   Browser-Fallback und das Modell.
 
   **Nicht änderbar sind Zugangsdaten und alles, was Cortex mehr Zugriff gäbe:**
@@ -414,7 +429,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.0.0                                                   │
+│ Cortex AI 8.2.1                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

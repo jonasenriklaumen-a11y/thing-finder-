@@ -1958,3 +1958,172 @@ def test_thinking_can_be_turned_back_on(
     assert agent.thinking is False
     agent.ask("zweite", stream=False, thinking=True)
     assert agent.thinking is True
+
+
+def test_without_thinking_the_model_cannot_split_the_question_itself(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Sonst zerlegt es die Frage eben selbst -- und der Schalter waere eine Bitte.
+
+    Genau das ist passiert: Planung und Vorpruefung entfielen, aber
+    `research_subtasks` stand weiter im Werkzeugkasten. Das Modell hat sich
+    die Teilfragen dann selbst gebaut.
+    """
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert "research_subtasks" in {s["function"]["name"] for s in agent.tools}
+
+    agent.thinking = False
+    assert "research_subtasks" not in {s["function"]["name"] for s in agent.tools}
+
+
+def test_the_tool_comes_back_when_thinking_is_on_again(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.thinking = False
+    agent.thinking = True
+    assert "research_subtasks" in {s["function"]["name"] for s in agent.tools}
+
+
+def test_the_direct_run_is_not_announced_as_splitting(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """"1 Teilfrage" waere eine irrefuehrende Auskunft, wenn nichts geteilt wurde."""
+    seen: dict[str, Any] = {}
+
+    def fake_run(tasks, *args, **kwargs):
+        seen.update(tasks=list(tasks), direct=kwargs.get("direct"))
+        return []
+
+    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False)
+    assert seen == {"tasks": ["Was kostet ein Lastenrad?"], "direct": True}
+
+
+# ---------------------------------------------------------------------------
+# Gegenprüfen: zweite Runde mit anderen Quellen
+# ---------------------------------------------------------------------------
+def test_the_second_round_locks_out_the_sources_of_the_first(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Eine zweite Runde auf denselben Seiten waere keine.
+
+    Sie brachte dieselben Zahlen zurueck und bestaetigte den eigenen Fehler.
+    """
+    seen: list[set[str]] = []
+
+    def fake_search(query, **kwargs):
+        seen.append(set(toolbox.avoid_domains))
+        return [SearchResult(title="T", url="https://cafe-sonntag.de/", snippet="S")]
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("web_search", {"query": "cafés"}, "c1")]),
+        _message(tool_calls=[_tool_call("fetch_page", {"url": "https://cafe-sonntag.de/"}, "c2")]),
+        _message(content="Erste Antwort."),
+        _message(tool_calls=[_tool_call("web_search", {"query": "cafés wlan"}, "c3")]),
+        _message(content="Zweite, geprüfte Antwort."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Finde Cafés", stream=False, recheck=True)
+
+    assert result.answer == "Zweite, geprüfte Antwort."
+    assert result.rechecked is True
+    assert seen[0] == set(), "die erste Runde sperrt nichts aus"
+    assert "cafe-sonntag.de" in seen[1], "die zweite meidet, was schon gelesen wurde"
+
+
+def test_the_lockout_is_lifted_afterwards(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Sonst faende die naechste Frage die besten Quellen nicht mehr."""
+    monkeypatch.setattr(
+        "cortex.tools.search_web",
+        lambda query, **kwargs: [SearchResult(title="T", url="https://a.de/1", snippet="S")],
+    )
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("fetch_page", {"url": "https://cafe-sonntag.de/"}, "c1")]),
+        _message(content="Erste."),
+        _message(content="Zweite."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Finde Cafés", stream=False, recheck=True)
+    assert toolbox.avoid_domains == set()
+
+
+def test_nothing_read_means_nothing_to_check(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Small Talk hat keine Quellen -- eine Gegenprobe waere Theater."""
+    llm = ScriptedLLM(_message(content="Hallo!"))
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Hallo", stream=False, recheck=True)
+    assert result.answer == "Hallo!"
+    assert result.rechecked is False
+
+
+def test_a_failed_second_round_keeps_the_first_answer(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Die erste Antwort steht schon -- sie darf nicht mitgerissen werden."""
+    monkeypatch.setattr(
+        "cortex.tools.search_web",
+        lambda query, **kwargs: [SearchResult(title="T", url="https://a.de/1", snippet="S")],
+    )
+    calls = {"n": 0}
+
+    def llm(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _message(
+                tool_calls=[_tool_call("fetch_page", {"url": "https://cafe-sonntag.de/"}, "c1")]
+            )
+        if calls["n"] == 2:
+            return _message(content="Erste Antwort.")
+        raise RuntimeError("Anbieter weg")
+
+    monkeypatch.setattr("litellm.completion", llm)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Finde Cafés", stream=False, recheck=True)
+    assert result.answer == "Erste Antwort."
+    assert result.rechecked is False
+
+
+def test_a_cancelled_run_skips_the_second_round(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Wer abbricht, will keine zweite Runde."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+
+    def fetch(url: str):
+        agent.cancel()
+        return {"url": url}
+
+    monkeypatch.setattr(toolbox, "fetch_page", fetch)
+    monkeypatch.setattr(
+        "litellm.completion",
+        ScriptedLLM(
+            _message(tool_calls=[_tool_call("fetch_page", {"url": "https://a.de/1"}, "c1")])
+        ),
+    )
+    result = agent.ask("Lies eine Seite", stream=False, recheck=True)
+    assert result.stopped is True
+    assert result.rechecked is False
+
+
+def test_the_second_round_prompt_forbids_inventing_a_correction() -> None:
+    """Sonst erfindet das Modell einen Widerspruch, damit die Runde etwas hergibt."""
+    from cortex.agent import RECHECK_PROMPT
+
+    assert "Erfinde keine Korrektur" in RECHECK_PROMPT
+    assert "ANDEREN Quellen" in RECHECK_PROMPT
+    assert "VOLLSTAENDIGE Antwort" in RECHECK_PROMPT

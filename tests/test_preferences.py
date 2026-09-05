@@ -168,9 +168,33 @@ def test_storing_writes_the_env_and_takes_effect(
 
 
 def test_every_catalogue_entry_has_a_key_except_the_appearance() -> None:
-    """Das Aussehen lebt im Browser -- alles andere braucht einen .env-Schluessel."""
+    """Aussehen und Farbschema leben im Browser -- der Rest braucht die .env."""
+    browser_only = {preferences.APPEARANCE, preferences.PALETTE}
     for preference in preferences.CATALOGUE:
-        if preference.name == preferences.APPEARANCE:
+        if preference.name in browser_only:
             assert preference.key == ""
         else:
             assert preference.key.startswith("CORTEX_"), preference.name
+
+
+def test_the_palette_is_recognised_however_it_is_written() -> None:
+    """"Tokyo Night", "rose-pine", "Rose Pine" -- derselbe Wunsch."""
+    palette = preferences.find("farbschema")
+    assert palette is not None
+    assert preferences.coerce(palette, "Tokyo Night") == "tokyo_night"
+    assert preferences.coerce(palette, "rose-pine") == "rose_pine"
+    assert preferences.coerce(palette, "Ros\u00e9 Pine") == "rose_pine"
+    assert preferences.coerce(palette, "gr\u00fcn") == "standard"
+    with pytest.raises(preferences.BadValue):
+        preferences.coerce(palette, "neonpink")
+
+
+def test_every_palette_has_a_name_in_the_stylesheet() -> None:
+    """Ein Schema ohne Gegenstueck im CSS waere eine Einstellung ins Leere."""
+    from cortex import web
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for value, css_name in preferences.PALETTE_IDS.items():
+        assert value in preferences.find("farbschema").choices
+        if css_name:
+            assert f'[data-palette="{css_name}"]' in html, css_name
