@@ -712,6 +712,12 @@ class Agent:
         spent = sum(int(result.get("tool_calls", 0) or 0) for result in results)
 
         findings = format_findings(results)
+        if not useful_findings(results):
+            # Kam nichts zurueck, waere die "Quellenlage" ein leeres Blatt mit
+            # der Aufforderung, daraus zu schreiben -- und genau das taete das
+            # Modell dann auch. Ohne den Block antwortet es einfach selbst.
+            self._emit("subagents_empty", tasks=len(results))
+            return min(spent, max(0, budget - 1))
         self.messages.append(
             {
                 "role": "user",
@@ -1092,9 +1098,20 @@ class Agent:
             # Denken aus: kein Planungsaufruf, keine Zerlegung. Die Agenten
             # bekommen die Frage so, wie sie gestellt wurde -- das spart die
             # Runde fuer die Vorpruefung und die fuer den Plan.
-            self._planned_tasks = [question]
-            if self.use_subagents:
-                used += self._auto_research(question, budget)
+            #
+            # Die Heuristik bleibt trotzdem: "Hallo" ist keine Recherche. Sie
+            # kostet nichts (ein regulaerer Ausdruck, kein Modellaufruf) und
+            # ist auch kein Denken -- ohne sie schickte ein Gruss einen Agenten
+            # los, der nichts findet, und das Nichts landete als "Quellenlage"
+            # im Kontext. Die Antwort darauf war eine Ausrede statt eines
+            # Grusses.
+            text = question.strip()
+            if not text or SMALL_TALK_RE.match(text):
+                self._emit("triage", decision="chat", source="heuristik")
+            else:
+                self._planned_tasks = [question]
+                if self.use_subagents:
+                    used += self._auto_research(question, budget)
         elif self._auto_subagents_wanted() and self._needs_research(question):
             used += self._auto_research(question, budget)
 
@@ -1563,6 +1580,16 @@ class Agent:
 # ---------------------------------------------------------------------------
 # Hilfen
 # ---------------------------------------------------------------------------
+def useful_findings(results: list[dict[str, Any]]) -> bool:
+    """Steht in der Vorrecherche ueberhaupt etwas, womit sich arbeiten laesst?"""
+    for result in results:
+        if result.get("error"):
+            continue
+        if str(result.get("summary", "")).strip() or result.get("sources"):
+            return True
+    return False
+
+
 def format_findings(results: list[dict[str, Any]]) -> str:
     """Vorrecherche als lesbarer Text statt JSON.
 

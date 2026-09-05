@@ -191,8 +191,6 @@ body.collapsed aside{margin-left:-260px}
   border-radius:9px;padding:9px 10px;cursor:pointer;font-size:13.5px;color:var(--text-2);
   text-align:left}
 .side-btn:hover{background:var(--surface);color:var(--text)}
-.side-btn .dot{width:7px;height:7px;border-radius:50%;background:var(--text-3);flex:0 0 auto}
-.side-btn .dot.on{background:var(--accent)}
 
 /* ============================== Rahmen ================================== */
 .pane{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
@@ -698,8 +696,6 @@ input:focus,select:focus{border-color:var(--accent)}
   <div class="side-title">Letzte Chats</div>
   <div class="recents" id="recents"></div>
   <div class="side-foot">
-    <button class="side-btn" id="btn-home"><span class="dot" id="home-dot"></span>
-      <span id="home-label">Zuhause</span></button>
     <button class="side-btn" id="btn-notes">☰ Merkzettel</button>
     <button class="side-btn" id="btn-settings">⚙ Einstellungen</button>
     <button class="side-btn" id="btn-theme">◐ Erscheinungsbild</button>
@@ -1598,6 +1594,12 @@ async function ask(text){
           s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
           s.querySelector(".sub").textContent = t; steps.appendChild(s);
         }); break;
+      case "subagents_empty":
+        // Die Vorrecherche kam mit leeren Haenden zurueck. Das wandert
+        // bewusst NICHT in den Kontext -- sonst schriebe das Modell eine
+        // Erklaerung darueber statt einer Antwort.
+        step(steps, "[Vorab]", "nichts gefunden — ich mache selbst weiter",
+             "warn"); break;
       case "subagent_done":
         step(steps, "[Fertig]", ev.task + (ev.error ? "  (fehlgeschlagen)" : ""),
              ev.error ? "warn" : ""); break;
@@ -1711,10 +1713,6 @@ $("#btn-new").addEventListener("click", async () => {
 $("#btn-notes").addEventListener("click", () => {
   if (narrow()) document.body.classList.add("collapsed");
   ask("/notes");
-});
-$("#btn-home").addEventListener("click", () => {
-  $("#btn-settings").click();
-  setTimeout(() => document.querySelector('[name="CORTEX_HA_URL"]')?.focus(), 120);
 });
 /* ---------- Erscheinungsbild ---------- */
 // Zwei Dinge, die unabhaengig voneinander sind: wie hell es ist und in
@@ -2642,8 +2640,6 @@ async function refreshHeader(){
     if (cfg.values.CORTEX_MEMORY === "true") bits.push("Speicher an");
     flash($("#status"), bits.join(" · "));
     $("#status").title = cfg.problems?.length ? cfg.problems.join("; ") : "";
-    $("#home-dot").className = "dot" + (cfg.ha_connected ? " on" : "");
-    $("#home-label").textContent = cfg.ha_connected ? "Zuhause verbunden" : "Zuhause verbinden";
   } catch { /* Server weg -- die Oberflaeche bleibt trotzdem bedienbar */ }
 }
 greet();

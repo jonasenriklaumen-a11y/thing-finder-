@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 
+from cortex import agent as agent_module
 from cortex.agent import Agent, _parse_spec_json
 from cortex.config import Settings
 from cortex.fetch import Fetcher, RobotsPolicy
@@ -1924,6 +1925,64 @@ def test_without_thinking_the_agents_get_the_question_as_it_was_asked(
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent.ask("Was kostet ein gebrauchtes Lastenrad in Bremen?", stream=False, thinking=False)
     assert seen == [["Was kostet ein gebrauchtes Lastenrad in Bremen?"]]
+
+
+def test_a_greeting_starts_no_agent_even_without_thinking(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """"Hallo" ist keine Recherche -- auch mit ausgeschaltetem Denken nicht.
+
+    Ohne diese Pruefung lief ein Agent auf den Gruss los, fand nichts, und
+    das Nichts landete als "Quellenlage" im Kontext. Die Antwort darauf war
+    dann eine Erklaerung, warum die Anfrage zu unbestimmt sei.
+    """
+    gestartet: list[list[str]] = []
+    monkeypatch.setattr(
+        "cortex.subagents.run_subagents",
+        lambda tasks, *a, **k: gestartet.append(list(tasks)) or [],
+    )
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Hallo!")))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    for gruss in ("Hallo", "danke dir", "  hey!  "):
+        agent.clear()
+        agent.ask(gruss, stream=False, thinking=False)
+    assert gestartet == [], "fuer einen Gruss laeuft kein Agent"
+
+
+def test_an_empty_pre_research_is_not_pushed_into_the_context(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ein leeres Blatt mit der Aufforderung, daraus zu schreiben, waere fatal."""
+    from cortex.subagents import SubagentResult
+
+    monkeypatch.setattr(
+        "cortex.subagents.run_subagents",
+        lambda tasks, *a, **k: [
+            SubagentResult(task=task, summary="", error="nichts gefunden")
+            for task in tasks
+        ],
+    )
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False)
+    angehaengt = [
+        message
+        for message in agent.messages
+        if str(message.get("content", "")).startswith(agent_module.PRE_RESEARCH_PREFIX)
+    ]
+    assert angehaengt == [], "ohne Ergebnis wird nichts angehaengt"
+
+
+def test_findings_count_as_useful_when_something_is_in_them() -> None:
+    from cortex.agent import useful_findings
+
+    assert not useful_findings([])
+    assert not useful_findings([{"task": "a", "error": "weg"}])
+    assert not useful_findings([{"task": "a", "summary": "   "}])
+    assert useful_findings([{"task": "a", "summary": "Ein Fund."}])
+    assert useful_findings([{"task": "a", "sources": ["https://example.org"]}])
 
 
 def test_without_thinking_the_model_does_not_reason_either(
