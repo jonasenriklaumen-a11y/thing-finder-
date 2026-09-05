@@ -123,8 +123,8 @@ button,.btn,.tool,.pal,.tmode,.chip,.side-btn{transition:background .12s ease,
 /* Wer mit der Tastatur bedient, muss sehen, wo er steht -- mit der Maus
    stoert derselbe Rahmen. Deshalb :focus-visible statt :focus. */
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
-@media (prefers-reduced-motion:reduce){*{transition:none!important;
-  animation-duration:.01ms!important}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{
+  transition:none!important;animation:none!important}}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 var(--sans);
   display:flex;overflow:hidden;-webkit-font-smoothing:antialiased}
@@ -414,6 +414,99 @@ body.dragging::after{content:"Datei hier ablegen";position:fixed;inset:14px;z-in
   color:var(--accent-text);font-weight:600}
 fieldset{scroll-margin-top:13rem}
 
+/* ============================== Bewegung ================================= */
+/* Erst nachgesehen, was als angenehm gilt, dann gebaut: Eintritte laufen mit
+   ease-out aus, Austritte mit ease-in an; 100-150 ms fuer Kleinigkeiten,
+   200-300 ms fuer Fenster, nie mehr als eine halbe Sekunde. Bewegt werden nur
+   transform und opacity -- alles andere zwingt den Browser zu neuem Layout.
+   Und: Bewegung sagt etwas. Ein Fenster waechst aus der Mitte, weil es sich in
+   den Vordergrund schiebt; ein Schritt kommt von links, weil dort die Zeile
+   beginnt; die Liste laeuft gestaffelt ein, damit man die Reihenfolge sieht.
+   Wer im System "weniger Bewegung" eingestellt hat, bekommt nichts davon --
+   die Regel dazu steht ganz unten in diesem Block. */
+:root{
+  --ease-out:cubic-bezier(.16,1,.3,1);   /* kommt an und bremst aus */
+  --ease-in:cubic-bezier(.4,0,1,1);      /* zieht an und geht weg */
+  --ease-pop:cubic-bezier(.34,1.56,.64,1); /* eine Spur ueber das Ziel hinaus */
+  --t-fast:130ms; --t-mid:220ms; --t-slow:300ms;
+}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+@keyframes fade-out{from{opacity:1}to{opacity:0}}
+@keyframes sheet-in{from{opacity:0;transform:translateY(14px) scale(.97)}
+  to{opacity:1;transform:none}}
+@keyframes sheet-out{from{opacity:1;transform:none}
+  to{opacity:0;transform:translateY(8px) scale(.985)}}
+@keyframes pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+@keyframes slide-left{from{opacity:0;transform:translateX(-7px)}
+  to{opacity:1;transform:none}}
+@keyframes slide-up{from{opacity:0;transform:translateY(14px)}
+  to{opacity:1;transform:none}}
+@keyframes shoot{40%{transform:translateY(-4px) scale(.94)}
+  100%{transform:none}}
+@keyframes nudge{50%{transform:scale(1.14)}100%{transform:none}}
+
+/* Fenster: Hintergrund und Blatt bewegen sich als ein Stueck -- gleiche
+   Kurve, gleiche Dauer, nur unterschiedliche Wege. */
+.overlay.open{animation:fade-in var(--t-mid) var(--ease-out)}
+.overlay.open>.sheet{animation:sheet-in var(--t-slow) var(--ease-out)}
+.overlay.ask.open>.sheet{animation:pop var(--t-mid) var(--ease-pop)}
+.overlay.closing{animation:fade-out var(--t-fast) var(--ease-in) forwards}
+.overlay.closing>.sheet,
+/* Die Rueckfrage kommt mit einer eigenen Kurve herein; ohne diese Zeile
+   bliebe beim Schliessen die staerkere Einblende-Regel oben stehen. */
+.overlay.ask.closing>.sheet{animation:sheet-out var(--t-fast) var(--ease-in) forwards}
+.backdrop{animation:fade-in var(--t-fast) var(--ease-out)}
+.picker{animation:slide-up var(--t-mid) var(--ease-out)}
+.picker.closing{animation:fade-out var(--t-fast) var(--ease-in) forwards}
+.chatmenu{animation:pop var(--t-fast) var(--ease-out);transform-origin:top right}
+
+/* Listen und Zeilen: gestaffelt, damit die Reihenfolge lesbar bleibt. Die
+   Verzoegerung setzt das Skript, gedeckelt -- sonst wartet der letzte
+   Eintrag einer langen Liste spuerbar lange. */
+.recents.fresh .recent{animation:slide-left var(--t-mid) var(--ease-out) both}
+.step{animation:slide-left var(--t-fast) var(--ease-out)}
+.askcard{animation:pop var(--t-mid) var(--ease-out)}
+.pick{animation:slide-left var(--t-fast) var(--ease-out) both}
+.pal{animation:pop var(--t-mid) var(--ease-out) both}
+.hello .star{animation:pop 420ms var(--ease-pop) both}
+.hello h1{animation:slide-up var(--t-slow) var(--ease-out) 60ms both}
+.hello p{animation:slide-up var(--t-slow) var(--ease-out) 120ms both}
+.chips{animation:slide-up var(--t-slow) var(--ease-out) 180ms both}
+.recent input.rename{animation:pop var(--t-fast) var(--ease-out)}
+.file{animation:pop var(--t-fast) var(--ease-pop)}
+body.dragging::after{animation:fade-in var(--t-fast) var(--ease-out)}
+.picker-think input:checked{animation:nudge var(--t-fast) var(--ease-pop)}
+/* Ein Wert, der sich geaendert hat, blitzt kurz auf -- sonst uebersieht man
+   in der Kopfzeile, dass gerade etwas anderes gilt. */
+.flash{animation:nudge var(--t-mid) var(--ease-pop)}
+.where.flash{animation:fade-in var(--t-mid) var(--ease-out)}
+/* Ein zurueckgeholter Chat baut sich auf, statt fertig dazustehen. */
+.thread.fresh .msg{animation:rise var(--t-mid) var(--ease-out) both}
+
+/* Kleinigkeiten unter dem Finger: ein Knopf gibt nach, ein gewaehlter
+   Eintrag hebt sich, der Abbruch atmet, solange er etwas zu beenden hat. */
+.btn:active,.tool:active,.side-btn:active,.mode:active,.tmode:active,
+.secnav button:active,.chip:active{transform:scale(.97)}
+.send:active{transform:scale(.9)}
+.send.sent{animation:shoot 320ms var(--ease-out)}
+.btn.primary:hover{transform:translateY(-1px)}
+.pal:hover{transform:translateY(-2px)}
+.pal.on .peek{animation:pop var(--t-mid) var(--ease-pop)}
+.tmode.on .glyph{animation:nudge var(--t-mid) var(--ease-pop)}
+.secnav button.on{animation:nudge var(--t-fast) var(--ease-out)}
+.check input:checked{animation:nudge var(--t-fast) var(--ease-pop)}
+.tool.stop{animation:pulse 1.9s ease-in-out infinite}
+.newchat .plus{transition:transform var(--t-mid) var(--ease-pop)}
+.newchat:hover .plus{transform:rotate(90deg)}
+.iconbtn:active{transform:scale(.9)}
+.meter span{transition:width 420ms var(--ease-out)}
+
+/* Farbwechsel: beim Umstellen des Erscheinungsbilds blenden die Farben
+   ineinander, statt hart umzuspringen. Nur fuer den Moment des Wechsels --
+   dauerhaft wuerde jede Auswahl im Formular nachziehen. */
+:root.theming *{transition:background-color var(--t-slow) ease,
+  color var(--t-slow) ease,border-color var(--t-slow) ease!important}
+
 /* ========================= Erscheinungsbild ============================= */
 /* Helligkeit und Farbschema in einem Fenster. Die Vorschau zeigt denselben
    Aufbau wie die Seite -- Leiste, Flaeche, Akzent -- damit man vor dem
@@ -517,6 +610,9 @@ input:focus,select:focus{border-color:var(--accent)}
 @media (max-width:900px){
   /* Auf dem Handy kommt die Rueckfrage von unten -- dort ist der Daumen. */
   .overlay.ask{align-items:flex-end;padding:0}
+  /* Am Handy sitzt die Rueckfrage unten am Rand -- dann faehrt sie von dort
+     herein, statt aus der Mitte zu wachsen. */
+  .overlay.ask.open>.sheet{animation:slide-up var(--t-mid) var(--ease-out)}
   .ask-sheet{max-width:100%;border-radius:18px 18px 0 0;
     padding-bottom:calc(20px + env(safe-area-inset-bottom))}
   /* Die Seitenleiste liegt ueber dem Chat statt daneben und ist zu. */
@@ -1170,6 +1266,42 @@ const scroll = () => {
   main.scrollTop = main.scrollHeight;
 };
 
+/* ---------- Bewegung ---------- */
+// Ein Fenster, das beim Schliessen einfach verschwindet, wirkt wie ein
+// Aussetzer. Also: erst die Ausblende spielen, dann wegnehmen. Die Dauer
+// steht hier genauso wie im Stilblock -- sie muss zusammenpassen.
+const CLOSE_MS = 140;
+function openOverlay(box){
+  clearTimeout(box._closing);   // eine laufende Ausblende gilt nicht mehr
+  box.classList.remove("closing");
+  box.classList.add("open");
+}
+function closeOverlay(box, after){
+  if (!box.classList.contains("open") || box.classList.contains("closing")) return;
+  box.classList.add("closing");
+  box._closing = setTimeout(() => {
+    box.classList.remove("open", "closing");
+    after?.();
+  }, CLOSE_MS);
+}
+// Gestaffelt einlaufen lassen: der zehnte Eintrag wartet sonst spuerbar,
+// und ab da bringt die Staffelung nichts mehr.
+function stagger(nodes, step = 26, cap = 10){
+  [...nodes].forEach((node, index) => {
+    node.style.animationDelay = `${Math.min(index, cap) * step}ms`;
+  });
+}
+
+// Setzt einen Text und laesst ihn kurz aufblitzen -- aber nur, wenn er sich
+// wirklich geaendert hat. Sonst zappelt die Kopfzeile bei jedem Abgleich.
+function flash(node, text){
+  if (node.textContent === text) return;
+  node.textContent = text;
+  node.classList.remove("flash");
+  void node.offsetWidth;
+  node.classList.add("flash");
+}
+
 /* ---------- Anhaenge ---------- */
 const MAX_FILES = 5, MAX_BYTES = 25000000;
 const filesBox = $("#files"), picker = $("#picker");
@@ -1284,7 +1416,7 @@ function openAsk(bubble, question, options){
   });
   const field = $("#ask-free");
   field.value = "";
-  askBox.classList.add("open");
+  openOverlay(askBox);
   // Gibt es Vorschlaege, liegt der Finger auf dem ersten; sonst tippt man.
   setTimeout(() => (options?.length ? box.firstElementChild : field).focus(), 40);
 }
@@ -1294,7 +1426,7 @@ async function finishAsk(text, quiet){
   if (!open || open.sent) return;
   open.sent = true;
   asking = null;
-  askBox.classList.remove("open");
+  closeOverlay(askBox);
 
   // Was gefragt und geantwortet wurde, bleibt im Verlauf stehen -- sonst
   // versteht man die Antwort spaeter nicht mehr.
@@ -1541,7 +1673,13 @@ input.addEventListener("input", () => {
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); ask(input.value); }
 });
-send.addEventListener("click", () => ask(input.value));
+send.addEventListener("click", () => {
+  // Der Pfeil schnellt kurz nach oben -- die Frage ist weg.
+  send.classList.remove("sent");
+  void send.offsetWidth;          // erzwingt den Neustart der Animation
+  send.classList.add("sent");
+  ask(input.value);
+});
 document.querySelectorAll(".chip").forEach(c =>
   c.addEventListener("click", () => {
     input.value = c.textContent; input.focus();
@@ -1617,8 +1755,13 @@ function darkNow(){
   if (themeMode !== "system") return themeMode === "dark";
   try { return matchMedia("(prefers-color-scheme: dark)").matches; } catch { return false; }
 }
+let themingTimer = null;
 function applyAppearance(){
   const root = document.documentElement;
+  // Nur fuer den Moment des Wechsels: die Farben blenden ineinander.
+  root.classList.add("theming");
+  clearTimeout(themingTimer);
+  themingTimer = setTimeout(() => root.classList.remove("theming"), 340);
   root.setAttribute("data-theme", darkNow() ? "dark" : "light");
   if (palette) root.setAttribute("data-palette", palette);
   else root.removeAttribute("data-palette");
@@ -1661,16 +1804,17 @@ function paintAppearance(){
     card.addEventListener("click", () => setPalette(entry.id));
     box.appendChild(card);
   }
+  stagger(box.querySelectorAll(".pal"), 24);
 }
 document.querySelectorAll("#tmodes .tmode").forEach(button =>
   button.addEventListener("click", () => setTheme(button.dataset.tmode)));
 $("#theme-reset").addEventListener("click", () => { setTheme("system"); setPalette(""); });
 const themeBox = $("#themebox");
-function closeTheme(){ themeBox.classList.remove("open"); }
+function closeTheme(){ closeOverlay(themeBox); }
 $("#btn-theme").addEventListener("click", () => {
   if (narrow()) document.body.classList.add("collapsed");
   paintAppearance();
-  themeBox.classList.add("open");
+  openOverlay(themeBox);
 });
 $("#theme-close").addEventListener("click", closeTheme);
 themeBox.addEventListener("click", (e) => { if (e.target === themeBox) closeTheme(); });
@@ -1707,6 +1851,11 @@ function chatGroup(touched){
   return "Älter";
 }
 
+// Woraus die Liste zuletzt gezeichnet wurde. Steht hier oben, nicht unter
+// der Funktion: eine Deklaration mit let gilt vor ihrer Zeile als nicht
+// vorhanden, und die Funktion darueber wuerde darueber stolpern.
+let drawnChats = "";
+
 function drawRecents(){
   const box = $("#recents");
   box.innerHTML = "";
@@ -1740,6 +1889,10 @@ function drawRecents(){
     });
     box.appendChild(row);
   }
+  const signature = chats.map(chat => `${chat.session_id}:${chat.title}`).join("|");
+  box.classList.toggle("fresh", signature !== drawnChats);
+  drawnChats = signature;
+  stagger(box.querySelectorAll(".recent"));
 }
 
 async function loadRecents(){
@@ -1904,12 +2057,17 @@ async function openChat(sessionId){
   thread.innerHTML = "";
   leaveStart();
   // Den Verlauf so wieder aufbauen, wie er beim Schreiben aussah.
+  // Der zurueckgeholte Chat baut sich gestaffelt auf, statt fertig
+  // dazustehen -- so sieht man, dass er gerade geladen wurde.
+  thread.classList.add("fresh");
   data.turns.forEach(turn => {
     addUser(turn.question);
     const { steps, bubble } = addBot();
     steps.remove();
     bubble.innerHTML = md(turn.answer || "");
   });
+  stagger(thread.querySelectorAll(".msg"), 30, 8);
+  setTimeout(() => thread.classList.remove("fresh"), 900);
   loadRecents();
   input.focus();
 }
@@ -1919,9 +2077,14 @@ const modelBox = $("#picker-models");
 let backdrop = null;
 
 function closePicker(){
-  modelBox.hidden = true;
+  if (modelBox.hidden) return;
+  modelBox.classList.add("closing");
   backdrop?.remove();
   backdrop = null;
+  setTimeout(() => {
+    modelBox.hidden = true;
+    modelBox.classList.remove("closing");
+  }, CLOSE_MS);
 }
 
 async function openPicker(){
@@ -1957,6 +2120,7 @@ async function openPicker(){
     item.addEventListener("click", () => chooseModel(model));
     list.appendChild(item);
   });
+  stagger(list.querySelectorAll(".pick"), 22);
 }
 
 async function chooseModel(model){
@@ -2057,10 +2221,10 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
   $("#savenote").textContent = ""; $("#savenote").className = "note";
   $("#ha-note").textContent = ""; $("#ha-note").className = "note";
-  overlay.classList.add("open");
+  openOverlay(overlay);
 });
 function closeSettings(){
-  overlay.classList.remove("open");
+  closeOverlay(overlay);
   stopLoad();   // sonst fragt die Auslastung im Hintergrund weiter
 }
 $("#cancel").addEventListener("click", closeSettings);
@@ -2466,7 +2630,7 @@ async function refreshHeader(){
     $("#version").textContent = "v" + cfg.version;
     document.title = `Cortex AI ${cfg.version}`;
     currentModel = cfg.values.CORTEX_MODEL || "";
-    $("#model-name").textContent = currentModel.split("/").pop() || "Modell wählen";
+    flash($("#model-name"), currentModel.split("/").pop() || "Modell wählen");
     // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
     // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.
     const bits = [cfg.values.CORTEX_LOCATION || "kein Ortsfilter"];
@@ -2476,7 +2640,7 @@ async function refreshHeader(){
     if (recheck) bits.push("gegenprüfen");
     if (cfg.ha_connected) bits.push("Zuhause verbunden");
     if (cfg.values.CORTEX_MEMORY === "true") bits.push("Speicher an");
-    $("#status").textContent = bits.join(" · ");
+    flash($("#status"), bits.join(" · "));
     $("#status").title = cfg.problems?.length ? cfg.problems.join("; ") : "";
     $("#home-dot").className = "dot" + (cfg.ha_connected ? " on" : "");
     $("#home-label").textContent = cfg.ha_connected ? "Zuhause verbunden" : "Zuhause verbinden";

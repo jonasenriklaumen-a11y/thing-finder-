@@ -1100,6 +1100,56 @@ def test_every_palette_sets_the_same_variables() -> None:
         assert len(pairs) == 2, f"{name} braucht hell und dunkel"
 
 
+def test_the_interface_moves_within_researched_timings() -> None:
+    """Bewegung ja -- aber kurz. Ueber einer halben Sekunde nervt sie."""
+    import re
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    style = html[html.index("<style>") : html.index("</style>")]
+    assert "--ease-out:" in style and "--ease-pop:" in style
+    for name in ("sheet-in", "sheet-out", "pop", "slide-left", "slide-up", "fade-in"):
+        assert f"@keyframes {name}{{" in style, name
+    dauern: list[int] = []
+    for line in style.splitlines():
+        if "infinite" in line:      # das Atmen des Abbruchs laeuft absichtlich lang
+            continue
+        dauern += [int(f) for f in re.findall(r"(?<![\w.])(\d+)ms\b", line)]
+        dauern += [
+            round(float(f) * 1000) for f in re.findall(r"(?<![\w])(\d*\.?\d+)s\b", line)
+        ]
+    assert dauern, "keine Zeiten gefunden"
+    assert not [ms for ms in dauern if ms > 500], f"zu lange Animationen: {sorted(dauern)[-3:]}"
+
+
+def test_only_cheap_properties_are_animated() -> None:
+    """transform und opacity kosten den Browser nichts -- alles andere schon."""
+    import re
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    style = html[html.index("<style>") : html.index("</style>")]
+    erlaubt = {"transform", "opacity"}
+    for block in re.findall(r"@keyframes\s+[\w-]+\{(.*?)\}\s*(?=@|\.|:|#|/\*|\n\w)", style, re.S):
+        for prop in re.findall(r"([a-z-]+)\s*:", block):
+            assert prop in erlaubt, f"{prop} gehoert nicht in ein Keyframe"
+
+
+def test_motion_can_be_switched_off_by_the_system() -> None:
+    """Wer "weniger Bewegung" eingestellt hat, bekommt gar keine."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    block = html[html.index("@media (prefers-reduced-motion:reduce)") :][:200]
+    assert "animation:none!important" in block
+    assert "transition:none!important" in block
+
+
+def test_windows_close_with_an_animation_before_they_vanish() -> None:
+    """Ein Fenster, das einfach verschwindet, wirkt wie ein Aussetzer."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert ".overlay.closing" in html
+    assert "function closeOverlay" in html and "function openOverlay" in html
+    # Die Wartezeit im Skript muss zur Dauer im Stilblock passen.
+    assert "CLOSE_MS = 140" in html and "--t-fast:130ms" in html
+
+
 def test_the_settings_window_has_section_jumps() -> None:
     """Das Formular ist lang -- der Kopf bleibt stehen und fuehrt hin."""
     html = web.UI_FILE.read_text(encoding="utf-8")

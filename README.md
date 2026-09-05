@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.2.1                                      │
+│ Cortex AI 8.2.4                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -378,6 +378,16 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   jedes in einer hellen und einer dunklen Fassung. Der Aufbau der Oberfläche bleibt
   in jedem Schema exakt derselbe — es wechseln nur die Farben. Die Wahl gilt sofort
   und bleibt in dem Browser gespeichert, in dem du sie triffst.
+* **Bewegung.** Fenster wachsen aus der Mitte und blenden beim Schließen wieder
+  aus, die Liste der Chats läuft gestaffelt ein, jeder Zwischenschritt kommt von
+  links herein, der Senden-Pfeil schnellt kurz nach oben, gewählte Farbschemata
+  blenden ineinander statt umzuspringen. Gebaut nach dem, was sich als angenehm
+  durchgesetzt hat: Eintritte laufen mit `ease-out` aus, Austritte mit `ease-in`
+  an, 130 ms für Kleinigkeiten, 220–300 ms für Fenster, nie mehr als eine halbe
+  Sekunde — ein Test hält diese Obergrenze fest. Bewegt werden nur `transform`
+  und `opacity`, die den Browser nichts kosten; auch das prüft ein Test. Wer im
+  System „weniger Bewegung" eingestellt hat, bekommt gar keine. Fortschritts-
+  oder Statusbalken gibt es bewusst nicht.
 * **Einstellungen im Gespräch ändern:** „Mach den Hintergrund weiß", „such lieber
   auf Englisch", „nimm weniger Teilfragen" — das erledigt Cortex direkt, statt dich
   ins Formular zu schicken. Änderbar sind Erscheinungsbild, Farbschema, Ort,
@@ -429,7 +439,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.2.1                                                   │
+│ Cortex AI 8.2.4                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
