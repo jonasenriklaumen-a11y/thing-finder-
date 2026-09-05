@@ -1136,3 +1136,16 @@ def test_without_a_recheck_nothing_is_filtered(settings: Settings) -> None:
         result = box.web_search("frage")
     assert len(result["results"]) == 1
     assert "note" not in result
+
+
+def test_a_read_page_claims_its_domain_when_asked_to(settings: Settings) -> None:
+    """So meidet der naechste Agent, was dieser schon gelesen hat."""
+    langer_text = "<p>" + ("Ein Satz mit genug Text, damit die Seite zaehlt. " * 30) + "</p>"
+    fetcher = _mock_fetcher(_html_handler(f"<html><body>{langer_text}</body></html>"))
+    box = Toolbox(settings, cache=None, fetcher=fetcher)
+    box.fetch_page("https://example.org/a")
+    assert box.avoid_domains == set(), "ohne Anweisung traegt niemand etwas ein"
+
+    box.claim_sources = True
+    box.fetch_page("https://beispiel.de/b")
+    assert "beispiel.de" in box.avoid_domains

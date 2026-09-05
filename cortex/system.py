@@ -61,7 +61,7 @@ PROVIDER_LABELS: dict[str, str] = {
 
 #: Ein uebliches Modell je Anbieter, damit die Auswahl nicht leer bleibt.
 PROVIDER_MODELS: dict[str, str] = {
-    "anthropic": "anthropic/claude-sonnet-4-6",
+    "anthropic": "anthropic/claude-sonnet-5",
     "openai": "openai/gpt-4o",
     "gemini": "gemini/gemini-2.0-flash",
     "nvidia_nim": "nvidia_nim/meta/llama-3.3-70b-instruct",
@@ -77,6 +77,30 @@ PROVIDER_MODELS: dict[str, str] = {
 }
 
 #: Anbieter, deren Schluessel unter diesem Namen in der Umgebung steht.
+#: Fuers Programmieren das jeweils staerkste Modell eines Anbieters -- dort,
+#: wo es ein anderes ist als das Standardmodell aus PROVIDER_MODELS.
+CODING_MODELS: dict[str, str] = {
+    "anthropic": "anthropic/claude-opus-5",
+}
+
+#: Grobe Rangfolge fuers Programmieren. Sie entscheidet nur, welcher der
+#: eingerichteten Anbieter im Code-Modus zum Zug kommt -- wer eine andere
+#: Meinung hat, traegt unter CORTEX_CODE_MODEL sein Modell selbst ein.
+CODING_ORDER: tuple[str, ...] = (
+    "anthropic",
+    "openai",
+    "deepseek",
+    "gemini",
+    "mistral",
+    "xai",
+    "groq",
+    "cerebras",
+    "together_ai",
+    "fireworks_ai",
+    "openrouter",
+    "perplexity",
+)
+
 PROVIDER_KEYS: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
@@ -208,6 +232,44 @@ def snapshot(data_dir: Path | str | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Auswahl der Modelle
 # ---------------------------------------------------------------------------
+def strongest_model(settings: Any) -> str:
+    """Das staerkste Modell, das gerade erreichbar ist -- fuer den Code-Modus.
+
+    Die Reihenfolge: ein von Hand eingetragenes Code-Modell schlaegt alles.
+    Sonst gewinnt der beste eingerichtete Cloud-Anbieter nach `CODING_ORDER`.
+    Gibt es keinen, nimmt Cortex das groesste lokal installierte Modell --
+    bei Ollama ist die Groesse der beste Anhaltspunkt, den es ohne Messung gibt.
+
+    Returns:
+        Eine Modell-Kennung, oder "" wenn nichts Besseres zu finden war als
+        das ohnehin eingestellte Modell.
+    """
+    from cortex.local_model import DEFAULT_OLLAMA_URL, installed_models, model_size_gb
+
+    wanted = str(getattr(settings, "code_model", "") or "").strip()
+    if wanted:
+        return wanted
+
+    for provider in CODING_ORDER:
+        key_name = PROVIDER_KEYS.get(provider, "")
+        if not key_name or not os.environ.get(key_name, "").strip():
+            continue
+        model_id = CODING_MODELS.get(provider) or PROVIDER_MODELS.get(provider, "")
+        if model_id:
+            return model_id
+
+    base = getattr(settings, "api_base", "") or DEFAULT_OLLAMA_URL
+    try:
+        local = installed_models(base)
+    except Exception:
+        local = []
+    if not local:
+        return ""
+    sized = [(model_size_gb(name, base) or 0.0, name) for name in local]
+    name = max(sized)[1]
+    return f"ollama_chat/{name}" if name else ""
+
+
 def available_models(settings: Any) -> list[dict[str, str]]:
     """Alles, worauf sich gerade umschalten laesst.
 

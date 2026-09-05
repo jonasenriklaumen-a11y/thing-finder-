@@ -731,6 +731,11 @@ class Toolbox:
         #: dann aus den Suchtreffern heraus -- eine zweite Runde, die dieselben
         #: Seiten noch einmal liest, ist keine zweite Runde.
         self.avoid_domains: set[str] = set()
+        #: Traegt jede gelesene Seite selbst in `avoid_domains` ein. Teilen
+        #: sich mehrere Agenten dieselbe Menge, meidet jeder von ihnen, was ein
+        #: anderer schon gelesen hat -- so kommen aus einer Zerlegung wirklich
+        #: verschiedene Quellen zurueck und nicht dreimal dieselbe Seite.
+        self.claim_sources = False
         #: Der Google-Zugriff wird erst beim ersten Aufruf gebaut -- ohne
         #: verbundenes Konto soll gar nichts davon geladen werden.
         self._google_client: Any = None
@@ -908,13 +913,18 @@ class Toolbox:
 
         if page.ok:
             self.stats.fetched.append(page.final_url or url)
+            domain = page.source_domain or domain_of(url)
             self.stats.sources.append(
                 {
                     "url": page.final_url or url,
                     "title": page.title,
-                    "domain": page.source_domain or domain_of(url),
+                    "domain": domain,
                 }
             )
+            if self.claim_sources and domain:
+                # Ab jetzt gehoert diese Seite mir -- andere Agenten suchen
+                # weiter, ohne sie noch einmal vorgeschlagen zu bekommen.
+                self.avoid_domains.add(domain)
             for product in page.products:
                 self.stats.products.append(product)
             self._emit("fetch_done", url=url, title=page.title, words=page.word_count)

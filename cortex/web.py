@@ -60,6 +60,7 @@ SETTING_KEYS: tuple[str, ...] = (
     "CORTEX_MODEL",
     "CORTEX_VISION_MODEL",
     "CORTEX_SUBAGENT_MODEL",
+    "CORTEX_CODE_MODEL",
     "CORTEX_API_BASE",
     "CORTEX_SEARCH_BACKEND",
     "CORTEX_SEARCH_ENGINES",
@@ -651,6 +652,7 @@ def current_values() -> dict[str, str]:
         "CORTEX_MODEL": settings.model,
         "CORTEX_VISION_MODEL": settings.vision_model,
         "CORTEX_SUBAGENT_MODEL": settings.subagent_model,
+        "CORTEX_CODE_MODEL": settings.code_model,
         "CORTEX_API_BASE": settings.api_base,
         "CORTEX_SEARCH_BACKEND": settings.search_backend,
         "CORTEX_SEARCH_ENGINES": settings.search_engines,
@@ -745,7 +747,12 @@ def save_values(payload: dict[str, Any]) -> Path:
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
     }
-    for key in ("CORTEX_MODEL", "CORTEX_VISION_MODEL", "CORTEX_SUBAGENT_MODEL"):
+    for key in (
+        "CORTEX_MODEL",
+        "CORTEX_VISION_MODEL",
+        "CORTEX_SUBAGENT_MODEL",
+        "CORTEX_CODE_MODEL",
+    ):
         if values.get(key):
             values[key] = fix_model_id(values[key])
     ha_token = str(payload.get(HA_TOKEN_FIELD, "")).strip()

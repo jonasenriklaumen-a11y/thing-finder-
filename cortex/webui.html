@@ -717,18 +717,21 @@ input:focus,select:focus{border-color:var(--accent)}
     <div class="picker-head">Modell wählen</div>
     <div class="picker-list" id="model-list"></div>
     <label class="picker-think" for="think">
-      <input type="checkbox" id="think" checked>
+      <input type="checkbox" id="think">
       <span><b>Denken</b>
-        <span class="why">Zerlegt die Frage erst in Teilfragen und plant.
-          Gründlicher. Ausgeschaltet gehen die Agenten direkt mit deiner Frage
-          los — deutlich schneller.</span></span>
+        <span class="why">Zerlegt die Frage in Teilfragen, schickt für jede
+          einen Agenten los — jeder auf anderen Seiten — und schreibt daraus
+          eine ausführliche Antwort mit Quellen. Ausgeschaltet führst du ein
+          normales Gespräch: Cortex antwortet selbst und sucht nur, wenn die
+          Frage es braucht oder du ihn darum bittest. Das ist schneller.</span></span>
     </label>
     <label class="picker-think" for="recheck">
       <input type="checkbox" id="recheck">
       <span><b>Gegenprüfen</b>
-        <span class="why">Sucht nach der Antwort noch einmal — und liest dabei
-          andere Seiten als beim ersten Mal. Findet Zahlen, die nur in einer
-          Quelle so stehen. Dauert etwa doppelt so lang.</span></span>
+        <span class="why">Sucht nach der Antwort garantiert noch einmal — und
+          zwar ausschließlich auf Seiten, die beim ersten Mal nicht dran waren.
+          Findet Zahlen, die nur in einer einzigen Quelle so stehen. Dauert
+          etwa doppelt so lang.</span></span>
     </label>
     <div class="picker-foot">Weitere Anbieter und Schlüssel unter
       <button class="linkish" id="picker-settings">Einstellungen</button>.</div>
@@ -754,10 +757,11 @@ input:focus,select:focus{border-color:var(--accent)}
       <div class="crow">
         <button class="tool" id="clip" title="Bild oder PDF anhängen">📎 Anhängen</button>
         <button class="tool stop" id="stop" title="Anfrage abbrechen" hidden>◼ Abbrechen</button>
-        <div class="modes" id="modes" role="group" aria-label="Arbeitsweise">
-          <button class="mode on" data-mode="normal" title="Ausführliche Antworten">
-            Normal</button>
-          <button class="mode" data-mode="code" title="Code statt Prosa">Code</button>
+          <div class="modes" id="modes" role="group" aria-label="Arbeitsweise">
+          <button class="mode on" data-mode="normal"
+            title="Normales Gespräch — sucht, wenn die Frage es braucht">Normal</button>
+          <button class="mode" data-mode="code"
+            title="Code statt Prosa, auf dem stärksten Modell">Code</button>
         </div>
         <span class="spacer"></span>
         <button class="send" id="send" title="Senden (Enter)">↑</button>
@@ -831,6 +835,12 @@ input:focus,select:focus{border-color:var(--accent)}
             <input type="text" name="CORTEX_VISION_MODEL"></label>
           <label><span class="lbl">Subagenten-Modell (leer = Hauptmodell)</span>
             <input type="text" name="CORTEX_SUBAGENT_MODEL"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Code-Modell
+            <span class="why">Für den Code-Modus. Leer = Cortex nimmt das stärkste,
+              das es erreichen kann</span></span>
+            <input type="text" name="CORTEX_CODE_MODEL"></label>
         </div>
         <label><span class="lbl">Eigene Adresse <span class="why">Nur nötig, wenn das Modell nicht beim Anbieter selbst liegt</span></span>
           <input type="text" name="CORTEX_API_BASE" placeholder="http://localhost:11434"></label>
@@ -1120,9 +1130,11 @@ $("#recheck").addEventListener("change", (e) => setRecheck(e.target.checked));
 
 try {
   setMode(localStorage.getItem("cortex-mode") || "normal");
-  setThinking(localStorage.getItem("cortex-think") !== "0");
+  // Standard ist das Gespraech: Denken ist ein Schalter, den man umlegt,
+  // wenn eine Frage wirklich Recherche braucht -- nicht der Normalzustand.
+  setThinking(localStorage.getItem("cortex-think") === "1");
   setRecheck(localStorage.getItem("cortex-recheck") === "1");
-} catch { setMode("normal"); setThinking(true); setRecheck(false); }
+} catch { setMode("normal"); setThinking(false); setRecheck(false); }
 // Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
 // soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
 // eines allein reicht nicht.
@@ -1581,19 +1593,15 @@ async function ask(text){
       case "recheck_done":
         step(steps, "[Gegenprobe]", ev.changed ? "abgeschlossen" : "nichts Neues"); break;
       case "subagents":
-        // Ohne Denken wurde nichts zerlegt -- "1 Teilfrage" waere eine
-        // irrefuehrende Auskunft und sah aus, als daechte er doch.
-        if (ev.direct){
-          step(steps, "[Direkt]", `${ev.tasks.length === 1 ? "ein Agent"
-            : ev.tasks.length + " Agenten"} mit deiner Frage`);
-          break;
-        }
         step(steps, "[Teile]", `${ev.tasks.length} Teilfragen`);
         ev.tasks.forEach(t => {
           const s = document.createElement("div");
           s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
           s.querySelector(".sub").textContent = t; steps.appendChild(s);
         }); break;
+      case "code_model":
+        // Im Code-Modus zaehlt das staerkste Modell, nicht das eingestellte.
+        step(steps, "[Code]", `stärkstes Modell: ${ev.model}`); break;
       case "subagents_empty":
         // Die Vorrecherche kam mit leeren Haenden zurueck. Das wandert
         // bewusst NICHT in den Kontext -- sonst schriebe das Modell eine
@@ -2281,6 +2289,7 @@ function fillProviders(){
 
 // Nur die Felder aus dem Modell-Abschnitt speichern, nicht das ganze Formular.
 const MODEL_FIELDS = ["CORTEX_MODEL", "CORTEX_VISION_MODEL", "CORTEX_SUBAGENT_MODEL",
+  "CORTEX_CODE_MODEL",
                       "CORTEX_API_BASE"];
 
 $("#save-model").addEventListener("click", async () => {

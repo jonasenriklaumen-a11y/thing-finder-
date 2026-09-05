@@ -15,7 +15,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from cortex.cache import Cache
 from cortex.config import Settings
@@ -149,6 +149,26 @@ samt Grund (blockiert, nicht oeffentlich, nirgends genannt).
 muesstest -- Vollstaendigkeit ersetzt niemals Genauigkeit.
 """
 
+#: Der Standardmodus ohne Denken: ein Gespraech. Kein Recherchebericht, keine
+#: Pflicht zur Vollstaendigkeit -- aber dieselben Werkzeuge, falls die Frage
+#: sie braucht. Ein "Wie spaet ist es in Tokio?" soll eine Zeile ergeben, kein
+#: Dossier mit Abschnitt "Nicht gefunden".
+CHAT_PROMPT = """\
+Antwortformat -- du fuehrst ein Gespraech:
+- Antworte direkt und in normaler Gespraechslaenge. Kein Bericht, keine \
+Gliederung, kein Abschnitt "Nicht gefunden", kein Fazit unter jeder Antwort.
+- Was du sicher weisst, sagst du einfach. Du musst nicht fuer jeden Satz suchen.
+- Suchen sollst du, wenn die Frage es verlangt: alles Aktuelle oder Oertliche, \
+Preise, Zahlen, Termine, Versionen, Namen und alles, was sich geaendert haben \
+koennte -- und immer, wenn der Nutzer dich darum bittet ("such mal", "guck nach", \
+"stimmt das?"). Dann nutzt du deine Werkzeuge von selbst, ohne zu fragen.
+- Hast du gesucht, nennst du die Quelle zu dem, was du von dort hast. Ohne Suche \
+brauchst du keine Quelle -- aber sag dazu, wenn du dir unsicher bist oder dein \
+Wissen alt sein koennte.
+- Erfinden ist auch hier verboten. Lieber "das weiss ich nicht, soll ich suchen?" \
+als eine erfundene Zahl.
+"""
+
 #: Der Code-Modus. Ersetzt den ausfuehrlichen Antwortteil, wenn jemand
 #: programmiert -- dann ist eine Seite Prosa vor dem Codeblock kein Service,
 #: sondern etwas, das man wegscrollen muss.
@@ -172,6 +192,17 @@ belegst du weiterhin mit der Quelle. Erfundene Funktionsnamen sind hier der \
 teuerste Fehler ueberhaupt: sie sehen richtig aus und laufen nicht.
 - Musst du raten, sag es in einer Zeile ueber dem Block, statt es auszuschmuecken.
 """
+
+#: Die Gegenprobe holt zuerst selbst frische Treffer -- dieser Text erklaert
+#: dem Modell, was es da bekommt.
+RECHECK_FRESH = """\
+Frische Treffer fuer die Gegenprobe. Alle Seiten, die du in der ersten Runde \
+gelesen hast, sind ausgeschlossen -- was hier steht, ist neu:
+
+%s
+
+Lies davon, was zur Pruefung taugt, und gib danach die vollstaendige Antwort neu \
+aus."""
 
 #: Die zweite Runde. Angehaengt, wenn jemand gegenpruefen laesst.
 RECHECK_PROMPT = """\
@@ -543,6 +574,10 @@ class Agent:
         self.thinking = True
         #: Nach der Antwort noch einmal suchen, mit anderen Quellen.
         self.recheck = False
+        #: Im Code-Modus das staerkste erreichbare Modell. Einmal ermittelt,
+        #: dann gemerkt -- die Suche danach fragt bei Ollama nach und soll
+        #: nicht vor jeder Frage neu laufen. "" heisst "nichts gefunden".
+        self._code_model: str | None = None
         self.messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt(cache, self._home_prompt())}
         ]
@@ -736,6 +771,36 @@ class Agent:
         )
         return min(spent, max(0, budget - 1))
 
+    def _fresh_hits(self, question: str) -> str:
+        """Sucht fuer die Gegenprobe selbst -- nur auf noch ungelesenen Seiten.
+
+        Returns:
+            Die Treffer als Text, oder "" wenn nichts Neues zu finden war.
+        """
+        if not question.strip() or self.stopped:
+            return ""
+        try:
+            payload = self.toolbox.web_search(question)
+        except Exception as exc:
+            self._emit("error", message=f"Gegenprobe: {exc}")
+            return ""
+        hits = payload.get("results") or []
+        known = {domain for domain in self.toolbox.avoid_domains if domain}
+        fresh = [
+            hit
+            for hit in hits
+            if str(hit.get("domain") or hit.get("source_domain") or "") not in known
+        ]
+        if not fresh:
+            return ""
+        lines = []
+        for hit in fresh[:8]:
+            title = str(hit.get("title", "")).strip()
+            url = str(hit.get("url", "")).strip()
+            snippet = str(hit.get("snippet", "")).strip()
+            lines.append(f"- {title} ({url})\n  {snippet}"[:400])
+        return "\n".join(lines)
+
     def _run_subagents(self, tasks: list[str]) -> list[dict[str, Any]]:
         """Fuehrt Teilfragen parallel aus und zaehlt ihr Budget mit."""
         from cortex.subagents import run_subagents
@@ -747,7 +812,6 @@ class Agent:
             on_event=self.on_event,
             parallel=self.settings.effective_parallel,
             stop=self._stop,
-            direct=not self.thinking,
         )
         for result in results:
             self.toolbox.stats.sources.extend(result.sources)
@@ -816,19 +880,54 @@ class Agent:
                 parts.append(HA_CONTROL_PROMPT)
         return "".join(parts)
 
-    def _llm_kwargs(self) -> dict[str, Any]:
-        """Aufrufargumente fuer das Hauptmodell -- mit oder ohne Denken.
+    #: Wie gruendlich das Modell je Betriebsart ueberlegen soll. Denkaufwand
+    #: ist der eine Regler, der Tempo und Qualitaet gegeneinander stellt --
+    #: also wird er je Aufgabe gesetzt statt einmal fuer alles:
+    #: Gespraech schnell, Recherche gruendlich, Code am gruendlichsten (dort
+    #: kostet ein Fehler am meisten, weil er erst beim Ausfuehren auffaellt).
+    EFFORT: ClassVar[dict[str, str]] = {"chat": "low", "research": "medium", "code": "high"}
 
-        Ist das Denken aus, wird auch dem Modell selbst gesagt, dass es nicht
-        erst seitenlang ueberlegen soll. Bei einem Denk-Modell ist das der
-        groesste Zeitgewinn ueberhaupt; Anbieter, die den Wunsch nicht kennen,
-        lassen ihn dank `drop_params` einfach weg.
+    def _llm_kwargs(self) -> dict[str, Any]:
+        """Aufrufargumente fuer das Modell dieses Turns.
+
+        Anbieter, die `reasoning_effort` nicht kennen, lassen es dank
+        `drop_params` einfach weg -- der Aufruf scheitert deswegen nie.
         """
-        kwargs = dict(self.settings.llm_kwargs())
-        if not self.thinking:
-            kwargs.setdefault("reasoning_effort", "low")
-            kwargs["drop_params"] = True
+        kwargs = dict(self.settings.llm_kwargs_for(self.active_model))
+        if clean_mode(self.mode) == "code":
+            role = "code"
+        elif self.thinking:
+            role = "research"
+        else:
+            role = "chat"
+        kwargs.setdefault("reasoning_effort", self.EFFORT[role])
+        kwargs["drop_params"] = True
         return kwargs
+
+    @property
+    def active_model(self) -> str:
+        """Das Modell fuer diesen Turn.
+
+        Im Code-Modus das staerkste, das gerade erreichbar ist -- programmieren
+        ist die Aufgabe, bei der ein schwaecheres Modell am teuersten wird:
+        Code, der falsch aussieht, erkennt man; Code, der falsch IST, nicht.
+        """
+        if clean_mode(self.mode) == "code":
+            return self._strongest_model() or self.settings.model
+        return self.settings.model
+
+    def _strongest_model(self) -> str:
+        """Sucht einmal je Sitzung, was das staerkste erreichbare Modell ist."""
+        if self._code_model is None:
+            from cortex.system import strongest_model
+
+            try:
+                self._code_model = strongest_model(self.settings)
+            except Exception:
+                # Die Suche darf nie eine Antwort verhindern -- notfalls
+                # bleibt es beim eingestellten Modell.
+                self._code_model = ""
+        return self._code_model
 
     def _apply_mode(self, mode: str) -> None:
         """Tauscht den Antwortteil des Systemprompts fuer diesen Turn.
@@ -838,17 +937,27 @@ class Agent:
         Deshalb wird hier die Systemnachricht neu geschrieben statt der Agent
         neu gebaut.
         """
-        mode = clean_mode(mode)
-        if mode == self.mode and self.messages:
-            return
-        self.mode = mode
+        self.mode = clean_mode(mode)
+        self._refresh_system()
+
+    def _refresh_system(self) -> None:
+        """Schreibt die Systemnachricht neu -- Modus und Denken bestimmen sie.
+
+        Ohne Denken ist Cortex ein Gespraechspartner mit Werkzeugen, mit Denken
+        ein Rechercheagent. Das steht im Systemtext, nicht nur in der Regie.
+        """
         if self.messages and self.messages[0].get("role") == "system":
             self.messages[0]["content"] = self._system_prompt(
-                self.cache, self._home_prompt(), mode=mode
+                self.cache, self._home_prompt(), mode=self.mode, thinking=self.thinking
             )
 
     @staticmethod
-    def _system_prompt(cache: Cache | None, extras: str = "", mode: str = "normal") -> str:
+    def _system_prompt(
+        cache: Cache | None,
+        extras: str = "",
+        mode: str = "normal",
+        thinking: bool = True,
+    ) -> str:
         """Systemprompt plus Tagesdatum und Merkzettel.
 
         Lokale Modelle mit altem Wissensstand suchen sonst nach "Test 2024",
@@ -861,8 +970,15 @@ class Agent:
             "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"
         )
         today = date.today()
-        # Der Antwortteil wechselt mit dem Modus, alles davor bleibt gleich.
-        answer = CODE_PROMPT if clean_mode(mode) == "code" else ANSWER_PROMPT
+        # Der Antwortteil wechselt mit der Lage, alles davor bleibt gleich.
+        # Code schlaegt alles; sonst entscheidet das Denken zwischen Bericht
+        # und Gespraech.
+        if clean_mode(mode) == "code":
+            answer = CODE_PROMPT
+        elif thinking:
+            answer = ANSWER_PROMPT
+        else:
+            answer = CHAT_PROMPT
         prompt = (
             f"{SYSTEM_PROMPT}{answer}{extras}\n"
             f"Heute ist {weekdays[today.weekday()]}, der {today.strftime('%d.%m.%Y')}. "
@@ -892,6 +1008,7 @@ class Agent:
 
     def set_model(self, model: str) -> None:
         self.settings.model = model.strip()
+        self._code_model = None
 
     def set_ask_handler(self, handler: Any) -> None:
         """Meldet an, dass jemand da ist, der Rueckfragen beantworten kann.
@@ -965,7 +1082,7 @@ class Agent:
 
         litellm.suppress_debug_info = True
         response = litellm.completion(
-            model=self.settings.model,
+            model=self.active_model,
             messages=messages,
             tools=self.tools,
             tool_choice="auto",
@@ -1068,12 +1185,22 @@ class Agent:
                 `None` laesst den bisherigen Stand stehen.
         """
         question = question.strip()
+        before = (self.mode, self.thinking)
         if mode:
-            self._apply_mode(mode)
+            self.mode = clean_mode(mode)
         if thinking is not None:
             self.thinking = bool(thinking)
         if recheck is not None:
             self.recheck = bool(recheck)
+        # Der Systemtext haengt an beidem. Nur neu schreiben, wenn sich etwas
+        # geaendert hat: er sitzt am Anfang des Verlaufs, und wer ihn bei jeder
+        # Frage anfasst, wirft beim Anbieter den zwischengespeicherten Prefix weg.
+        if (self.mode, self.thinking) != before:
+            self._refresh_system()
+        if clean_mode(self.mode) == "code":
+            picked = self._strongest_model()
+            if picked and picked != self.settings.model:
+                self._emit("code_model", model=picked)
         self._stop.clear()
         self.toolbox.stats.reset()
         result = AgentResult(answer="")
@@ -1095,23 +1222,12 @@ class Agent:
         # laufen parallel, bevor der Hauptagent uebernimmt. Was die
         # Subagenten schon gefunden haben, steht ihm dann zur Verfuegung.
         if not self.thinking:
-            # Denken aus: kein Planungsaufruf, keine Zerlegung. Die Agenten
-            # bekommen die Frage so, wie sie gestellt wurde -- das spart die
-            # Runde fuer die Vorpruefung und die fuer den Plan.
-            #
-            # Die Heuristik bleibt trotzdem: "Hallo" ist keine Recherche. Sie
-            # kostet nichts (ein regulaerer Ausdruck, kein Modellaufruf) und
-            # ist auch kein Denken -- ohne sie schickte ein Gruss einen Agenten
-            # los, der nichts findet, und das Nichts landete als "Quellenlage"
-            # im Kontext. Die Antwort darauf war eine Ausrede statt eines
-            # Grusses.
-            text = question.strip()
-            if not text or SMALL_TALK_RE.match(text):
-                self._emit("triage", decision="chat", source="heuristik")
-            else:
-                self._planned_tasks = [question]
-                if self.use_subagents:
-                    used += self._auto_research(question, budget)
+            # Denken aus ist der Standard und heisst: ein Gespraech. Kein
+            # Planungsaufruf, keine Zerlegung, keine Agenten -- das Modell
+            # antwortet selbst und greift zu seinen Werkzeugen, wenn die Frage
+            # es braucht oder der Nutzer es verlangt. Das ist die schnellste
+            # Betriebsart, die es hier gibt: eine Runde zum Modell.
+            self._emit("triage", decision="chat", source="standard")
         elif self._auto_subagents_wanted() and self._needs_research(question):
             used += self._auto_research(question, budget)
 
@@ -1173,10 +1289,10 @@ class Agent:
                     )
 
         if self.recheck and not result.stopped:
-            self._second_round(result, stream=stream)
+            self._second_round(result, question=question, stream=stream)
         return self._finish(result, question)
 
-    def _second_round(self, result: AgentResult, *, stream: bool) -> None:
+    def _second_round(self, result: AgentResult, *, question: str, stream: bool) -> None:
         """Sucht noch einmal, mit anderen Quellen, und schreibt die Antwort neu.
 
         Eine zweite Runde auf denselben Seiten waere keine: sie brachte
@@ -1184,13 +1300,14 @@ class Agent:
         fallen die bereits gelesenen Domains fuer diese Runde aus den
         Suchtreffern heraus.
 
-        Hat die erste Runde gar nichts gelesen -- Small Talk, eine Frage aus
-        dem Gedaechtnis --, gibt es auch nichts gegenzupruefen.
+        Und die Runde sucht selbst, bevor das Modell zu Wort kommt: gebeten
+        wurde um eine Gegenprobe, nicht um eine zweite Meinung aus demselben
+        Kopf. Frueher konnte das Modell die Aufforderung ueberlesen und die
+        alte Antwort einfach noch einmal hinschreiben -- jetzt liegen die
+        frischen Treffer schon auf dem Tisch.
         """
         read = [source.get("domain", "") for source in self.toolbox.stats.sources]
         read = [domain for domain in read if domain]
-        if not read:
-            return
 
         self._emit("recheck", sources=len(set(read)))
         before = set(self.toolbox.avoid_domains)
@@ -1199,6 +1316,10 @@ class Agent:
         # vorbei, bevor sie angefangen hat.
         budget = max(RECHECK_MIN_CALLS, self.settings.max_tool_calls // 2)
         used = 0
+        fresh = self._fresh_hits(question)
+        if fresh:
+            used += 1
+            self.messages.append({"role": "user", "content": RECHECK_FRESH % fresh})
         self.messages.append({"role": "user", "content": RECHECK_PROMPT})
 
         try:
@@ -1451,7 +1572,7 @@ class Agent:
         sanitize_history(self.messages)
         try:
             response = litellm.completion(
-                model=self.settings.model,
+                model=self.active_model,
                 messages=self.messages,
                 stream=stream,
                 **self._llm_kwargs(),
@@ -1561,7 +1682,7 @@ class Agent:
         litellm.suppress_debug_info = True
         try:
             response = litellm.completion(
-                model=self.settings.model,
+                model=self.active_model,
                 messages=[
                     {
                         "role": "user",

@@ -2342,10 +2342,13 @@ def test_the_question_state_is_declared_before_it_is_used() -> None:
     assert html.index("let asking = null") < html.index("function setBusy(")
 
 
-def test_a_direct_run_is_labelled_differently_in_the_ui() -> None:
+def test_the_standard_mode_starts_no_agents_in_the_ui() -> None:
+    """Ohne Denken laeuft keine Vorrecherche -- also gibt es dafuer auch keine
+    Anzeige mehr. Der Code-Modus meldet stattdessen sein Modell."""
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "[Direkt]" in html
-    assert "ev.direct" in html
+    assert "[Direkt]" not in html
+    assert "ev.direct" not in html
+    assert 'case "code_model"' in html and "stärkstes Modell" in html
 
 
 def test_the_recheck_switch_sits_under_the_thinking_switch() -> None:
@@ -2354,7 +2357,7 @@ def test_the_recheck_switch_sits_under_the_thinking_switch() -> None:
     picker = picker[: picker.index("picker-foot")]
     assert picker.index('id="think"') < picker.index('id="recheck"')
     assert "Gegenprüfen" in picker
-    assert "andere Seiten als beim ersten Mal" in picker
+    assert "nicht dran waren" in picker
 
 
 def test_the_recheck_reaches_the_agent(

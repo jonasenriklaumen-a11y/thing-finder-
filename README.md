@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.2.5                                      │
+│ Cortex AI 8.3.5                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -354,23 +354,38 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   der Browser hört auf zuzuhören *und* der Agent hört auf zu arbeiten. Was bis
   dahin da war, bleibt stehen. Danach ist der Knopf wieder das Anhängen.
 * **Zwei Arbeitsweisen**, umschaltbar unten neben *Anhängen*:
-  **Normal** antwortet ausführlich — Vergleiche, Fazit, ein Abschnitt „Nicht
-  gefunden". **Code** dreht das um: der Codeblock steht zuerst, Erklärungen nur
+  **Normal** ist ein Gespräch — Cortex antwortet selbst, in normaler Länge, und
+  sucht, wenn die Frage es braucht (alles Aktuelle, Örtliche, Preise, Zahlen,
+  Versionen) oder wenn du ihn darum bittest („such mal", „stimmt das?"). Kein
+  Bericht, keine Vorrecherche im Hintergrund, keine Agenten: eine Runde zum
+  Modell, und das ist die schnellste Betriebsart, die es hier gibt.
+  **Code** dreht das um: der Codeblock steht zuerst, Erklärungen nur
   wenn sie etwas hinzufügen, das nicht im Code steht. Vollständiger, lauffähiger
-  Code statt Ausschnitten mit „…", Kommentare sagen *warum* statt *was*. Die
-  Quellenpflicht bleibt: erfundene Funktionsnamen sind hier der teuerste Fehler
-  überhaupt — sie sehen richtig aus und laufen nicht.
-* **Denken an oder aus**, in der Modellauswahl oben. Mit Denken zerlegt Cortex die
-  Frage erst in Teilfragen und plant — gründlicher, aber es kostet zwei Runden zum
-  Modell, bevor die erste Suche losgeht. Ohne Denken entfallen Vorprüfung und
-  Planung: die Agenten gehen direkt mit deiner Frage los, und auch das Modell selbst
-  überlegt nicht mehr seitenlang vor. Bei einem Denk-Modell in der Cloud ist das der
-  größte Zeitgewinn, den es hier gibt. Steht es aus, sagt es die Kopfzeile.
-* **Gegenprüfen**, der Schalter unter *Denken*. Ist er an, sucht dasselbe Modell
-  nach der Antwort ein zweites Mal — und lässt dabei jede Seite aus, die es beim
-  ersten Mal gelesen hat. Findet die zweite Runde etwas anderes, steht es in der
-  Antwort; findet sie nichts Neues, sagt sie das. Gut für Zahlen, die nur in einer
-  einzigen Quelle so stehen. Kostet ungefähr die doppelte Zeit.
+  Code statt Ausschnitten mit „…", Kommentare sagen *warum* statt *was*. Und
+  Cortex nimmt dafür **automatisch das stärkste Modell, das er erreichen kann**
+  — beim Programmieren ist ein schwaches Modell am teuersten: Code, der falsch
+  aussieht, erkennt man; Code, der falsch *ist*, nicht. Welches es war, steht in
+  den Zwischenschritten; wer ein bestimmtes will, trägt es unter *Einstellungen
+  → Modell → Code-Modell* ein. Die Quellenpflicht bleibt: erfundene
+  Funktionsnamen sind hier der teuerste Fehler überhaupt — sie sehen richtig aus
+  und laufen nicht.
+* **Denken an oder aus**, in der Modellauswahl oben — aus ist der Normalfall.
+  Angeschaltet wird Cortex vom Gesprächspartner zum Rechercheagenten: er zerlegt
+  die Frage in Teilfragen, schickt für jede einen Agenten los und schreibt aus
+  deren Funden eine ausführliche Antwort mit Quellen, Vergleich, Fazit und einem
+  Abschnitt „Nicht gefunden". **Die Agenten teilen sich dabei eine Liste der
+  schon gelesenen Seiten und meiden sie** — sonst laufen drei Teilfragen zum
+  selben Thema auf dieselben zwei Seiten zu und die Zerlegung bringt keine
+  Breite. Das kostet zwei Runden zum Modell, bevor die erste Suche losgeht;
+  ausgeschaltet entfallen beide. Steht es an, sagt es die Kopfzeile.
+* **Gegenprüfen**, der Schalter unter *Denken*. Ist er an, wird nach der Antwort
+  garantiert noch einmal gesucht — Cortex holt die frischen Treffer selbst, bevor
+  das Modell wieder zu Wort kommt, und lässt dabei jede Seite aus, die beim ersten
+  Mal dran war. (Vorher konnte das Modell die Aufforderung überlesen und seine
+  alte Antwort einfach noch einmal hinschreiben.) Findet die zweite Runde etwas
+  anderes, steht es in der Antwort; findet sie nichts Neues, sagt sie das. Gut für
+  Zahlen, die nur in einer einzigen Quelle so stehen. Kostet ungefähr die doppelte
+  Zeit.
 * **Erscheinungsbild** unten links in der Seitenleiste öffnet ein eigenes Fenster:
   **hell**, **dunkel** oder **wie das System** — und darunter acht Farbschemata.
   *Standard* sind die Farben, die du kennst (warmes Papier, grüner Akzent); dazu
@@ -444,7 +459,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.2.5                                                   │
+│ Cortex AI 8.3.5                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1026,10 +1041,18 @@ der eigenen Grafikkarte. Am ersten lässt sich etwas machen, und das ist hier ge
   Denk-Modell überlegt dafür sekundenlang, bevor drei Stichworte kommen. Bei lokalen
   Modellen war das schon abgeschaltet, jetzt auch in der Cloud — dort kostet es am
   meisten.
-* **Die Vorrecherche ist der größte Posten.** Sie zerlegt die Frage und lässt die Teile
-  parallel recherchieren; das ist gründlicher, verdoppelt aber die Wartezeit. Wer es
-  eilig hat, schaltet sie in den Einstellungen unter *Subagenten* ab oder setzt
-  `CORTEX_SUBAGENTS_AUTO=false`.
+* **Die Vorrecherche ist der größte Posten — und sie läuft nur noch auf Wunsch.**
+  Sie zerlegt die Frage und lässt die Teile parallel recherchieren; das ist
+  gründlicher, verdoppelt aber die Wartezeit. Sie hängt jetzt am Schalter *Denken*:
+  aus heißt Gespräch, an heißt Recherche. Dauerhaft abschalten geht weiterhin unter
+  *Subagenten* oder mit `CORTEX_SUBAGENTS_AUTO=false`.
+* **Der Denkaufwand richtet sich nach der Aufgabe.** Ein Gespräch bekommt
+  `reasoning_effort=low`, eine Recherche `medium`, der Code-Modus `high` — dort
+  kostet ein Fehler am meisten, weil er erst beim Ausführen auffällt. Anbieter, die
+  den Wunsch nicht kennen, lassen ihn dank `drop_params` einfach weg.
+* **Der Systemtext bleibt stehen, solange sich die Lage nicht ändert.** Er steht am
+  Anfang jeder Anfrage; wer ihn bei jeder Frage neu schreibt, wirft den beim Anbieter
+  zwischengespeicherten Prefix weg und zahlt ihn noch einmal — an Geld und an Zeit.
 
 Bleibt es zäh, liegt es am Modell, nicht am Weg dorthin: ein kleineres Modell desselben
 Anbieters oder ein lokales über `cortex install-model` ist dann der wirksamste Hebel.
@@ -1447,7 +1470,21 @@ uv venv && uv pip install -e ".[dev]"
 
 uv run pytest        # alle Tests, Netzwerk und LLM gemockt
 uv run ruff check .  # Linting
+
+python tools/rundgang.py            # die Oberfläche im Browser durchgehen
+python tools/rundgang.py --bilder   # dabei Bildschirmfotos ablegen
+python tools/rundgang.py --nur chat,einstellungen   # nur einzelne Abschnitte
 ```
+
+**Der Rundgang** unter `tools/rundgang.py` bedient die Weboberfläche wie ein Mensch:
+Frage stellen, abbrechen, Modus wechseln, Denken und Gegenprüfen umlegen, Rückfrage
+beantworten, Chat umbenennen und löschen, jeden Abschnitt der Einstellungen anspringen,
+jeden Prüfknopf drücken, jedes Farbschema in Hell und Dunkel durchklicken, eine Datei
+anhängen, Slash-Befehle tippen — dazu dasselbe noch einmal auf einem Handy-Schirm und
+einmal mit „weniger Bewegung". Am Ende steht, was geprüft und was beanstandet wurde; der
+Rückgabewert ist die Anzahl der Beanstandungen. Der Agent dahinter ist gestellt, es
+laufen also weder Modelle noch Suchanfragen. `pytest` führt ihn als eigenen Prozess mit
+aus und überspringt ihn, wo Playwright oder der Browser fehlen.
 
 Die Tests fassen kein echtes Netz an: Suchergebnisse und LLM-Antworten sind gemockt,
 Seitenabrufe laufen über `httpx.MockTransport` gegen gespeicherte HTML-Fixtures echter

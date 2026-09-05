@@ -496,3 +496,29 @@ def test_subagent_prompt_asks_for_detail() -> None:
     assert "400 Woerter" in SUBAGENT_PROMPT
     assert "hoechstens 200 Woerter" not in SUBAGENT_PROMPT
     assert "Rate nie" in SUBAGENT_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Verschiedene Quellen je Agent
+# ---------------------------------------------------------------------------
+def test_agents_share_one_list_of_claimed_domains(monkeypatch, tmp_path) -> None:
+    """Drei Teilfragen zum selben Thema sollen nicht dieselbe Seite lesen."""
+    from cortex.config import Settings
+    from cortex.subagents import SubagentResult, run_subagents
+
+    gesehen: list[object] = []
+
+    def fake_one(task, settings, cache, on_event, toolbox=None, stop=None):
+        gesehen.append(toolbox)
+        toolbox.avoid_domains.add(f"{task}.example")
+        return SubagentResult(task=task, summary="ok")
+
+    monkeypatch.setattr("cortex.subagents._run_one", fake_one)
+    settings = Settings(data_dir=tmp_path, max_subagents=3)
+    run_subagents(["a", "b", "c"], settings, parallel=1)
+
+    assert len(gesehen) == 3
+    geteilt = {id(box.avoid_domains) for box in gesehen}
+    assert len(geteilt) == 1, "alle Agenten teilen sich dieselbe Menge"
+    assert all(box.claim_sources for box in gesehen), "jeder traegt selbst ein"
+    assert gesehen[0].avoid_domains == {"a.example", "b.example", "c.example"}

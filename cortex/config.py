@@ -26,7 +26,7 @@ ENV_CANDIDATES: tuple[Path, ...] = (
 #: Ort, an den `cortex setup` schreibt, wenn noch keine `.env` existiert.
 DEFAULT_ENV_PATH = Path.home() / ".config" / "cortex" / ".env"
 
-DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
+DEFAULT_MODEL = "anthropic/claude-sonnet-5"
 
 #: Welcher API-Key-Name gehoert zu welchem LiteLLM-Provider-Praefix?
 PROVIDER_KEYS: dict[str, str] = {
@@ -259,6 +259,9 @@ class Settings:
     context_tokens: int = 16384
     #: Eigenes, leichtes Modell fuer die Subagenten. Leer = Hauptmodell.
     subagent_model: str = ""
+    #: Modell fuer den Code-Modus. Leer heisst: Cortex sucht sich das
+    #: staerkste erreichbare selbst aus.
+    code_model: str = ""
     #: Werkzeug-Budget je Subagent.
     subagent_budget: int = 6
     #: Wie viele Subagenten gleichzeitig laufen. Bei lokalen Modellen bringt
@@ -460,6 +463,7 @@ def get_settings() -> Settings:
         planner_timeout=float(_env_int("CORTEX_PLANNER_TIMEOUT", 20)),
         context_tokens=_env_int("CORTEX_CONTEXT_TOKENS", 16384),
         subagent_model=_env_str("CORTEX_SUBAGENT_MODEL"),
+        code_model=_env_str("CORTEX_CODE_MODEL"),
         subagent_budget=_env_int("CORTEX_SUBAGENT_BUDGET", 6),
         subagent_parallel=_env_int("CORTEX_SUBAGENT_PARALLEL", 0),
         ha_url=_env_str("CORTEX_HA_URL"),

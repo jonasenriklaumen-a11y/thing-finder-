@@ -1910,9 +1910,14 @@ def test_without_thinking_there_is_no_planning_call(
     assert planned == [], "kein Planungsaufruf"
 
 
-def test_without_thinking_the_agents_get_the_question_as_it_was_asked(
+def test_without_thinking_no_agent_runs_at_all(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
+    """Der Standardmodus ist ein Gespraech: das Modell antwortet selbst.
+
+    Werkzeuge hat es weiterhin -- es entscheidet nur selbst, ob es sie
+    braucht. Was es nicht mehr gibt, ist die Vorrecherche im Hintergrund.
+    """
     seen: list[list[str]] = []
 
     def fake_run(tasks, *args, **kwargs):
@@ -1924,7 +1929,10 @@ def test_without_thinking_the_agents_get_the_question_as_it_was_asked(
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent.ask("Was kostet ein gebrauchtes Lastenrad in Bremen?", stream=False, thinking=False)
-    assert seen == [["Was kostet ein gebrauchtes Lastenrad in Bremen?"]]
+    assert seen == [], "ohne Denken laeuft keine Vorrecherche"
+    assert any(schema["function"]["name"] == "web_search" for schema in agent.tools), (
+        "die Werkzeuge bleiben trotzdem da"
+    )
 
 
 def test_a_greeting_starts_no_agent_even_without_thinking(
@@ -1985,17 +1993,22 @@ def test_findings_count_as_useful_when_something_is_in_them() -> None:
     assert useful_findings([{"task": "a", "sources": ["https://example.org"]}])
 
 
-def test_without_thinking_the_model_does_not_reason_either(
+def test_the_thinking_effort_follows_the_job(
     settings: Settings, toolbox: Toolbox
 ) -> None:
-    """Bei einem Denk-Modell ist das der groesste Zeitgewinn ueberhaupt."""
+    """Gespraech schnell, Recherche gruendlich, Code am gruendlichsten."""
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    assert "reasoning_effort" not in agent._llm_kwargs()
 
     agent.thinking = False
     kwargs = agent._llm_kwargs()
     assert kwargs["reasoning_effort"] == "low"
     assert kwargs["drop_params"] is True, "Anbieter ohne den Wunsch duerfen ihn weglassen"
+
+    agent.thinking = True
+    assert agent._llm_kwargs()["reasoning_effort"] == "medium"
+
+    agent._apply_mode("code")
+    assert agent._llm_kwargs()["reasoning_effort"] == "high"
 
 
 def test_thinking_stays_on_unless_someone_turns_it_off(
@@ -2044,27 +2057,165 @@ def test_the_tool_comes_back_when_thinking_is_on_again(
     assert "research_subtasks" in {s["function"]["name"] for s in agent.tools}
 
 
-def test_the_direct_run_is_not_announced_as_splitting(
+def test_the_standard_mode_talks_instead_of_reporting(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ohne Denken steht der Gespraechstext im Systemprompt, nicht der Bericht."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("", thinking=False)          # setzt nur den Zustand
+    system = agent.messages[0]["content"]
+    assert "du fuehrst ein Gespraech" in system
+    assert "Nicht gefunden:" not in system
+
+    agent.ask("", thinking=True)
+    system = agent.messages[0]["content"]
+    assert "sei ausfuehrlich" in system
+
+
+def test_the_system_prompt_only_changes_when_the_situation_does(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
-    """"1 Teilfrage" waere eine irrefuehrende Auskunft, wenn nichts geteilt wurde."""
-    seen: dict[str, Any] = {}
-
-    def fake_run(tasks, *args, **kwargs):
-        seen.update(tasks=list(tasks), direct=kwargs.get("direct"))
-        return []
-
-    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    """Der Systemtext steht am Anfang -- wer ihn anfasst, wirft den beim
+    Anbieter zwischengespeicherten Prefix weg und zahlt ihn neu."""
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
-
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False)
-    assert seen == {"tasks": ["Was kostet ein Lastenrad?"], "direct": True}
+
+    agent.ask("Erste Frage", stream=False, thinking=False)
+    vorher = agent.messages[0]["content"]
+    agent.ask("Zweite Frage", stream=False, thinking=False, mode="normal")
+    assert agent.messages[0]["content"] is vorher, "unveraendert heisst unangetastet"
+
+    agent.ask("Dritte Frage", stream=False, thinking=True)
+    assert agent.messages[0]["content"] is not vorher, "andere Lage, anderer Text"
+
+
+# ---------------------------------------------------------------------------
+# Code-Modus: das staerkste Modell
+# ---------------------------------------------------------------------------
+def test_code_mode_runs_on_the_strongest_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Beim Programmieren kostet ein schwaches Modell am meisten."""
+    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert agent.active_model == settings.model
+
+    agent._apply_mode("code")
+    assert agent.active_model == "anthropic/claude-opus-5"
+
+    agent._apply_mode("normal")
+    assert agent.active_model == settings.model
+
+
+def test_a_hand_picked_code_model_wins(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Wer selbst eins eintraegt, bekommt seins -- ohne Rangliste."""
+    from cortex.system import strongest_model
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    settings = Settings(model="ollama_chat/llama3.1", code_model="openai/gpt-4o")
+    assert strongest_model(settings) == "openai/gpt-4o"
+
+
+def test_the_strongest_model_follows_the_available_providers(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cortex.system import strongest_model
+
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
+    settings = Settings(model="ollama_chat/llama3.1")
+    assert strongest_model(settings) == ""
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    assert strongest_model(settings).startswith("deepseek/")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    assert strongest_model(settings) == "anthropic/claude-opus-5"
+
+
+def test_without_any_cloud_key_the_biggest_local_model_wins(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from cortex.system import PROVIDER_KEYS, strongest_model
+
+    for key_name in PROVIDER_KEYS.values():
+        monkeypatch.delenv(key_name, raising=False)
+    monkeypatch.setattr(
+        "cortex.local_model.installed_models", lambda *a, **k: ["klein:3b", "gross:70b"]
+    )
+    monkeypatch.setattr(
+        "cortex.local_model.model_size_gb",
+        lambda name, base=None: 2.0 if name.startswith("klein") else 40.0,
+    )
+    assert strongest_model(Settings()) == "ollama_chat/gross:70b"
 
 
 # ---------------------------------------------------------------------------
 # Gegenprüfen: zweite Runde mit anderen Quellen
 # ---------------------------------------------------------------------------
+def test_the_second_round_searches_before_it_asks_the_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Gebeten wurde um eine Gegenprobe, nicht um eine zweite Meinung."""
+    gesucht: list[str] = []
+
+    def fake_search(query, *args, **kwargs):
+        gesucht.append(query)
+        return {
+            "query": query,
+            "results": [
+                {"title": "Neue Seite", "url": "https://neu.example/a",
+                 "domain": "neu.example", "snippet": "Ein anderer Preis."}
+            ],
+        }
+
+    monkeypatch.setattr(toolbox, "web_search", fake_search)
+    monkeypatch.setattr(
+        "litellm.completion", ScriptedLLM(_message(content="Erste."), _message(content="Neu."))
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    toolbox.stats.sources.append({"url": "https://alt.example/x", "domain": "alt.example"})
+
+    result = agent.ask("Was kostet ein Lastenrad?", stream=False, thinking=False, recheck=True)
+    assert gesucht == ["Was kostet ein Lastenrad?"], "die Gegenprobe sucht selbst"
+    angeboten = [
+        message["content"]
+        for message in agent.messages
+        if str(message.get("content", "")).startswith("Frische Treffer")
+    ]
+    assert angeboten and "neu.example" in angeboten[0]
+    assert result.rechecked is True
+
+
+def test_the_second_round_ignores_hits_from_pages_already_read(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Eine alte Seite unter neuen Treffern waere keine neue Quelle."""
+    monkeypatch.setattr(
+        toolbox,
+        "web_search",
+        lambda query, *a, **k: {
+            "results": [
+                {"title": "Alt", "url": "https://alt.example/x", "domain": "alt.example"}
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "litellm.completion", ScriptedLLM(_message(content="Erste."), _message(content="Neu."))
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    # Was die erste Runde gelesen hat, steht beim Start der zweiten in
+    # avoid_domains -- hier direkt gesetzt, statt eine Runde nachzustellen.
+    toolbox.avoid_domains.add("alt.example")
+    agent.ask("Frage", stream=False, thinking=False, recheck=True)
+    assert not [
+        message
+        for message in agent.messages
+        if str(message.get("content", "")).startswith("Frische Treffer")
+    ]
+
+
 def test_the_second_round_locks_out_the_sources_of_the_first(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:

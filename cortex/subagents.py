@@ -369,7 +369,6 @@ def run_subagents(
     on_event: EventHook | None = None,
     parallel: int = 2,
     stop: threading.Event | None = None,
-    direct: bool = False,
 ) -> list[SubagentResult]:
     """Bearbeitet *tasks* nebenlaeufig und gibt die Ergebnisse in Reihenfolge zurueck.
 
@@ -382,9 +381,6 @@ def run_subagents(
             zwei wenig, weil sie ohnehin nacheinander rechnen.
         stop: Wird sie gesetzt, brechen noch nicht begonnene Teilfragen ab und
             laufende enden nach ihrem naechsten Schritt.
-        direct: Es wurde nichts zerlegt -- die Agenten bekommen die Frage, wie
-            sie gestellt wurde. Nur fuer die Anzeige: "1 Teilfrage" waere eine
-            irrefuehrende Auskunft, wenn gar nicht geteilt wurde.
     """
     clean = [task.strip() for task in tasks if task and task.strip()]
     clean = clean[: max(1, settings.max_subagents)]
@@ -392,7 +388,7 @@ def run_subagents(
         return []
 
     if on_event:
-        on_event("subagents", {"tasks": clean, "direct": direct})
+        on_event("subagents", {"tasks": clean})
 
     # Ein gemeinsamer Fetcher fuer alle: dessen Drossel und robots.txt-Cache
     # gelten damit ueber die Subagenten hinweg. Mit je eigenem Fetcher wuerden
@@ -407,6 +403,16 @@ def run_subagents(
         enable_browser=settings.enable_playwright,
     )
     boxes = [Toolbox(settings, cache=cache, fetcher=shared_fetcher) for _ in clean]
+    # Eine Menge fuer alle: was ein Agent gelesen hat, ist fuer die anderen
+    # verbraucht. Ohne das laufen drei Teilfragen zum selben Thema auf
+    # dieselben zwei Seiten zu und die Zerlegung bringt keine Breite.
+    # Zugegriffen wird darauf aus mehreren Threads; set.add und die Pruefung
+    # beim Filtern sind jeweils ein einzelner Bytecode-Schritt, da braucht es
+    # kein Schloss.
+    shared_domains: set[str] = set()
+    for box in boxes:
+        box.avoid_domains = shared_domains
+        box.claim_sources = True
     try:
         workers = max(1, min(parallel, len(clean)))
         if workers == 1:
