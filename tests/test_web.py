@@ -2507,7 +2507,11 @@ def test_the_recheck_is_off_unless_asked_for(
     assert agent.recheck is None
     assert 'id="recheck"' in web.UI_FILE.read_text(encoding="utf-8")
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert '<input type="checkbox" id="recheck">' in html, "kein checked"
+    # Kein "checked" im Element selbst -- der Wortlaut des Elements darf sich
+    # aendern, das Fehlen des Hakens nicht.
+    element = html[html.index('id="recheck"') - 200 : html.index('id="recheck"') + 40]
+    element = element[element.rindex("<input") :]
+    assert " checked" not in element, f"Gegenpruefen steht auf an: {element}"
 
 
 def test_the_recheck_is_sent_with_every_question() -> None:

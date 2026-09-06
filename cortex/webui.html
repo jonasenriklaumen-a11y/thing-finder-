@@ -18,6 +18,11 @@
   --on-accent:#ffffff; --user-bubble:#f0efe8;
   --warn:#9a6b1f; --err:#a8433a;
   --shadow:0 2px 12px rgba(38,37,31,.07);
+  /* Der Knopf im Schalter. Er bleibt in jedem Schema weiss -- so macht es
+     auch iOS im Dunkelmodus, und nur so hebt er sich von der gruenen Pille
+     ab. Trotzdem als Wert und nicht festgenagelt: wer ein Schema baut, in
+     dem das nicht passt, kann ihn umstellen. */
+  --knob:#ffffff;
   --radius:14px; --radius-lg:22px;
   --serif:ui-serif,"Iowan Old Style",Georgia,"Palatino Linotype",Palatino,serif;
   --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -494,7 +499,7 @@ body.code-mode .only-normal{display:none}
   background:var(--line-2);cursor:pointer;outline:none;
   transition:background-color 250ms var(--ease-out)}
 .schalter::after{content:"";position:absolute;top:2px;left:2px;
-  width:22px;height:22px;border-radius:999px;background:#fff;
+  width:22px;height:22px;border-radius:999px;background:var(--knob);
   box-shadow:0 3px 8px rgba(0,0,0,.18),0 1px 1px rgba(0,0,0,.16);
   transition:transform 250ms var(--ease-pop),width 160ms var(--ease-out)}
 .schalter:checked{background:var(--accent)}
