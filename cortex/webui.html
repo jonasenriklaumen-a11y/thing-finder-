@@ -763,7 +763,8 @@ input:focus,select:focus{border-color:var(--accent)}
           Code wirklich ausführt, statt zu behaupten, er laufe: ein Prozessorkern,
           1 GB Arbeitsspeicher, 4 GB Platte, <b>kein Netz</b>. Dort darf er alles —
           nur nicht heraus. 20 Minuten nach der letzten Nachricht wird sie samt
-          Inhalt gelöscht; die nächste Frage baut eine neue.</span></span>
+          Inhalt gelöscht; die nächste Frage baut eine neue. Nachschlagen im Web
+          kann Cortex weiterhin — nur die Maschine selbst hat kein Netz.</span></span>
     </label>
     <label class="picker-think only-normal" for="online">
       <input type="checkbox" id="online" checked>
@@ -1637,7 +1638,12 @@ async function ask(text){
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
-        message: text, attachments, mode, structured, recheck, effort, online, sandbox,
+        message: text, attachments, mode, structured, recheck, effort, sandbox,
+        // Im Code-Modus gibt es den Web-Schalter nicht -- also darf er dort
+        // auch nichts abschalten. Sonst haette ein "aus" aus dem
+        // Standardmodus das Nachschlagen still mitgenommen, ohne dass ein
+        // Schalter dafuer sichtbar waere.
+        online: mode === "code" ? true : online,
       }),
       signal: running.signal,
     });

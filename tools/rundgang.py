@@ -320,6 +320,8 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.wait_for_timeout(1200)
         letzte = agent.gesehen[-1]
         log.pruefe(letzte["werkstatt"] is True, f"der Schalter kommt an ({letzte['werkstatt']})")
+        log.pruefe(letzte["web"] is True,
+                   "und nachschlagen darf er weiterhin — nur die Maschine hat kein Netz")
         schritte = pg.inner_text(".steps >> nth=-1")
         log.pruefe("[Werkstatt]" in schritte, "die Werkstatt meldet sich")
         log.pruefe("lief durch" in schritte, "und sagt, was herauskam")

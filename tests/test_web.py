@@ -2440,6 +2440,21 @@ def test_the_workshop_reaches_the_agent(
     assert agent.sandbox is True
 
 
+def test_the_code_mode_always_keeps_the_web(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    """Der Web-Schalter steht nur im Standardmodus -- also darf ein "aus" von
+    dort das Nachschlagen im Code-Modus nicht heimlich mitnehmen.
+
+    Die Werkstatt hat kein Netz; der Agent davor schon. Genau so soll es sein:
+    Signatur nachschlagen, Code in der Werkstatt ausprobieren.
+    """
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    body = html[html.index("async function ask(text){") :]
+    korb = body[body.index("JSON.stringify({") : body.index("signal: running.signal")]
+    assert 'online: mode === "code" ? true : online' in korb
+
+
 def test_the_workshop_reports_what_it_does() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     for event in ("vm_start", "vm_run", "vm_write", "vm_done", "vm_stop"):

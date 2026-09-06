@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.5.1                                      │
+│ Cortex AI 8.5.2                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -408,6 +408,12 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Schlüssel sehen die Werkstatt nie) und **kein** Verzeichnis deines Rechners.
   Dateien gehen nur durch das Werkzeug hinein und heraus.
 
+  **Nachschlagen geht weiter.** Die Werkstatt hat kein Netz — Cortex davor schon:
+  er darf die Signatur einer Bibliothek im Web nachlesen und den Code dann in der
+  Werkstatt ausprobieren. Der Schalter *Im Web suchen* gehört zum Standardmodus; im
+  Code-Modus ist Nachschlagen immer erlaubt, damit ein „aus" von nebenan es nicht
+  stillschweigend mitnimmt.
+
   **Danach bleibt nichts.** 20 Minuten nach der letzten Nachricht werden Behälter und
   Datenträger gelöscht — die nächste Frage baut eine neue, leere Werkstatt. Beim
   Beenden von Cortex ebenso, und beim Start räumt er weg, was ein Absturz
@@ -521,7 +527,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.5.1                                                   │
+│ Cortex AI 8.5.2                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
