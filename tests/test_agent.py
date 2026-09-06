@@ -1577,6 +1577,58 @@ def test_the_write_prompt_says_drafts_are_not_sent(
     assert "Loeschen kannst du auch nichts" in prompt
 
 
+def test_the_question_goes_through_the_window_in_every_mode(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Eine Frage an den Nutzer gehoert in `ask_user`, nicht in die Antwort.
+
+    Im Fliesstext ist sie keine Frage, sondern das Ende des Turns: das
+    Fenster geht nie auf, und der Nutzer sitzt vor einer Antwort, die keine
+    ist.
+    """
+    toolbox.ask_handler = lambda frage, optionen=None: "egal"
+    for modus, struktur in (("normal", False), ("normal", True), ("code", False)):
+        agent = Agent(settings, cache=None, toolbox=toolbox)
+        agent.mode, agent.structured = modus, struktur
+        agent._refresh_system()
+        prompt = agent.messages[0]["content"]
+        assert "AUSSCHLIESSLICH mit `ask_user`" in prompt, modus
+        assert "ask_user" in [schema["function"]["name"] for schema in agent.tools]
+
+
+def test_the_chat_prompt_does_not_forbid_what_the_ask_prompt_demands(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Zwei Saetze im selben Prompt hatten sich widersprochen.
+
+    Der Gespraechsteil sagte "ohne zu fragen" (gemeint war: ohne um
+    Erlaubnis zu bitten) und zeigte als Beispiel eine Rueckfrage im
+    Fliesstext -- also genau den Weg, den der Rueckfrage-Teil verbietet.
+    Das Modell folgte dem naeheren Satz und fragte nie ueber das Fenster.
+    """
+    toolbox.ask_handler = lambda frage, optionen=None: "egal"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.mode, agent.structured = "normal", False
+    agent._refresh_system()
+    prompt = agent.messages[0]["content"]
+    assert "ohne zu fragen" not in prompt
+    assert "soll ich suchen?" not in prompt
+    assert "ohne vorher um Erlaubnis" in prompt, "gemeint war die Erlaubnis"
+
+
+def test_without_anyone_to_ask_the_prompt_stays_honest(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ohne Gegenueber darf nichts zum Fragen auffordern -- das waere eine
+    Sackgasse."""
+    toolbox.ask_handler = None
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    prompt = agent.messages[0]["content"]
+    assert "Rueckfragen sind hier nicht moeglich" in prompt
+    assert "AUSSCHLIESSLICH mit `ask_user`" not in prompt
+    assert "ask_user" not in [schema["function"]["name"] for schema in agent.tools]
+
+
 # ---------------------------------------------------------------------------
 # Wer ist das hier eigentlich
 # ---------------------------------------------------------------------------
