@@ -2227,6 +2227,13 @@ async function ask(text){
       case "chunk":
         answer += ev.text;
         bubble.innerHTML = md(answer) + '<span class="cursor"></span>'; scroll(); break;
+      // Cortex hat gemerkt, dass seine Antwort nur eine Frage war, und setzt
+      // neu an. Was schon dasteht, ist damit hinfaellig -- bliebe es stehen,
+      // klebte die Frage ueber der Antwort, die gleich kommt.
+      case "answer_reset":
+        answer = "";
+        bubble.innerHTML = '<span class="cursor"></span>';
+        break;
       case "done":
         bubble.innerHTML = md(answer || "(keine Antwort)");
         answerTools(bubble, answer, text);

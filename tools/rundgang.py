@@ -116,6 +116,11 @@ class FakeAgent:
         if "frag" in text:
             self.on_event("ask", {"question": "Welches Budget?", "options": ["bis 800 €"]})
             self.ask_handler("Welches Budget?", ["bis 800 €"])
+        # Der Fall, in dem Cortex merkt, dass seine Antwort nur eine Frage
+        # war: das Angefangene wird verworfen und neu angesetzt.
+        if "neuansatz" in text:
+            self.on_event("answer_chunk", {"text": "Fuer welchen Ort soll ich nachsehen?"})
+            self.on_event("answer_reset", {"reason": "rueckfrage"})
         if "langsam" in text:
             for _ in range(40):
                 time.sleep(0.1)
@@ -710,6 +715,19 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         )
         pg.reload(wait_until="networkidle")
         pg.wait_for_timeout(400)
+
+    if dran("neuansatz"):
+        log.abschnitt("10e. Aus einer Frage wird ein Neuansatz")
+        pg.fill("#input", "neuansatz bitte")
+        pg.click("#send")
+        pg.wait_for_selector("#stop", state="hidden", timeout=25000)
+        pg.wait_for_timeout(600)
+        letzte = pg.inner_text(".msg.bot .bubble >> nth=-1")
+        log.pruefe(
+            "Fuer welchen Ort" not in letzte,
+            f"die verworfene Frage steht nicht mehr da ({letzte[:50]!r})",
+        )
+        log.pruefe(bool(letzte.strip()), "die richtige Antwort steht da")
 
     if dran("suche"):
         log.abschnitt("11. Chats durchsuchen")

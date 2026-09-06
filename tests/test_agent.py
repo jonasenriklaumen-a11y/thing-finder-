@@ -1630,6 +1630,151 @@ def test_without_anyone_to_ask_the_prompt_stays_honest(
 
 
 # ---------------------------------------------------------------------------
+# Eine Frage gehoert in das Fenster -- notfalls nach einem Anstoss
+# ---------------------------------------------------------------------------
+def test_a_pure_question_is_recognised() -> None:
+    """Nicht "kommt ein Fragezeichen vor" -- was bleibt ohne die Fragesaetze."""
+    from cortex.agent import is_only_a_question as frage
+
+    assert frage("Für welchen Ort soll ich das Wetter nachsehen?")
+    assert frage("Ich sehe gern nach. Für welchen Ort?")
+    assert frage("Klar, mach ich. Welchen Zeitraum meinst du?")
+
+
+def test_an_answer_with_a_question_at_the_end_is_an_answer() -> None:
+    """Wer etwas gesagt hat und dann nachfragt, hat geantwortet."""
+    from cortex.agent import is_only_a_question as frage
+
+    assert not frage(
+        "Das Wetter morgen in Bremen: 12 Grad, bewölkt, etwas Regen am Nachmittag. "
+        "Soll ich auch das Wochenende nachsehen?"
+    )
+    assert not frage("Der Preis liegt bei etwa 500 Euro und schwankt je nach Händler.")
+    assert not frage("Hier ist der Code:\n```python\nprint(1)\n```\nPasst das so?")
+    assert not frage("")
+    assert not frage("Ja.")
+
+
+def test_a_question_in_the_text_is_sent_back(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Der eigentliche Punkt: die Frage im Fliesstext kommt nicht durch."""
+    gefragt: list[str] = []
+    toolbox.ask_handler = lambda frage, optionen=None: gefragt.append(frage) or "Bremen"
+    llm = ScriptedLLM(
+        _message(content="Für welchen Ort soll ich nachsehen?"),
+        _message(tool_calls=[_tool_call("ask_user", {"question": "Welcher Ort?"})]),
+        _message(content="In Bremen wird es morgen 12 Grad."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Wie wird das Wetter morgen?", stream=False)
+
+    assert result.answer == "In Bremen wird es morgen 12 Grad."
+    assert gefragt == ["Welcher Ort?"], "die Frage ging durch das Fenster"
+    # Der Anstoss steht im Verlauf, damit das Modell weiss, warum.
+    angestossen = [m for m in agent.messages if "nur aus einer Frage" in str(m.get("content"))]
+    assert len(angestossen) == 1
+
+
+def test_the_model_may_decide_against_asking(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Der Ausweg. Wer sich beim Nachdenken dagegen entscheidet, darf das.
+
+    Sonst geriete ein Modell, das die Angabe schon kennt oder sie für
+    entbehrlich hält, in eine Schleife.
+    """
+    toolbox.ask_handler = lambda frage, optionen=None: "egal"
+    llm = ScriptedLLM(
+        _message(content="Für welchen Ort soll ich nachsehen?"),
+        _message(content="Ich gehe von Bremen aus: morgen 12 Grad und bewölkt."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Wie wird das Wetter morgen?", stream=False)
+    assert result.answer.startswith("Ich gehe von Bremen aus")
+
+
+def test_the_nudge_happens_at_most_once(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Bleibt es bei der Frage, gilt sie. Eine Schleife wäre schlimmer."""
+    toolbox.ask_handler = lambda frage, optionen=None: "egal"
+    llm = ScriptedLLM(
+        _message(content="Für welchen Ort soll ich nachsehen?"),
+        _message(content="Also, für welchen Ort denn?"),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Wie wird das Wetter morgen?", stream=False)
+    assert result.answer == "Also, für welchen Ort denn?"
+    assert llm.responses == [], "genau zwei Aufrufe, kein dritter"
+
+
+def test_nothing_is_sent_back_when_nobody_can_answer(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Im Terminal ohne Gegenüber wäre der Anstoß eine Aufforderung ins Leere."""
+    toolbox.ask_handler = None
+    llm = ScriptedLLM(_message(content="Für welchen Ort soll ich nachsehen?"))
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert agent.ask("Wetter?", stream=False).answer.endswith("nachsehen?")
+
+
+def test_a_follow_up_question_after_research_stays(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Wer gesucht hat und dann nachfragt, wird nicht zurückgeschickt."""
+    toolbox.ask_handler = lambda frage, optionen=None: "egal"
+    llm = ScriptedLLM(
+        _message(tool_calls=[_tool_call("web_search", {"query": "cafés"})]),
+        _message(content="Soll ich eines davon näher ansehen?"),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Finde Cafés", stream=False)
+    assert result.answer == "Soll ich eines davon näher ansehen?"
+
+
+def test_the_code_mode_keeps_its_own_way(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Dort steht die Rückfrage als erster Punkt im Antwortformat."""
+    toolbox.ask_handler = lambda frage, optionen=None: "egal"
+    llm = ScriptedLLM(_message(content="Welche Python-Version soll es sein?"))
+    monkeypatch.setattr("litellm.completion", llm)
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Schreib mir eine Funktion", stream=False, mode="code")
+    assert result.answer == "Welche Python-Version soll es sein?"
+
+
+def test_the_screen_is_cleared_before_the_second_try(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Sonst klebte die Frage über der Antwort, die gleich kommt."""
+    toolbox.ask_handler = lambda frage, optionen=None: "egal"
+    llm = ScriptedLLM(
+        _message(content="Für welchen Ort soll ich nachsehen?"),
+        _message(content="Ich gehe von Bremen aus: 12 Grad."),
+    )
+    monkeypatch.setattr("litellm.completion", llm)
+
+    ereignisse: list[str] = []
+    agent = Agent(settings, cache=None, toolbox=toolbox,
+                  on_event=lambda name, nutz: ereignisse.append(name))
+    agent.ask("Wetter?", stream=False)
+    assert "answer_reset" in ereignisse
+
+
+# ---------------------------------------------------------------------------
 # Wer ist das hier eigentlich
 # ---------------------------------------------------------------------------
 def test_the_agent_introduces_itself_as_cortex(settings: Settings, toolbox: Toolbox) -> None:

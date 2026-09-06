@@ -547,6 +547,50 @@ selbst herausfinden kannst. Frag VOR der Recherche, nicht mittendrin, und hoechs
 zweimal je Anfrage. Gib zwei bis vier Antwortmoeglichkeiten mit, wenn es klar \
 abgrenzbare gibt ("heute", "morgen", "am Wochenende")."""
 
+#: Was der Agent zu hoeren bekommt, wenn seine Antwort nur eine Frage war.
+#: Der zweite Satz ist der wichtige: er laesst dem Modell den Ausweg. Wer
+#: sich beim Nachdenken bewusst gegen die Rueckfrage entschieden hat, soll
+#: nicht in eine Schleife geraten -- er sagt dann eben, wovon er ausgeht.
+FORCE_ASK_PROMPT = """\
+Deine Antwort bestand nur aus einer Frage an den Nutzer. So kommt sie nicht an: \
+im Fliesstext ist eine Frage das Ende des Zuges -- es oeffnet sich kein Fenster, \
+und niemand wartet auf eine Antwort.
+
+Stell die Frage jetzt mit `ask_user`. Willst du bei naeherem Nachdenken doch nicht \
+fragen -- weil die Angabe schon im Gespraech steht, weil du sie selbst herausfinden \
+kannst oder weil sie fuer die Antwort gar nicht noetig ist --, dann antworte \
+stattdessen und nenne in einem Halbsatz, wovon du ausgehst. Beides ist recht; nur \
+die Frage im Text ist es nicht."""
+
+#: Kuerzer als das ist keine Antwort mehr, sondern Beiwerk um eine Frage
+#: herum ("Klar, mach ich."). Grosszuegig gewaehlt: im Zweifel gilt der Text
+#: als Antwort und der Agent wird in Ruhe gelassen.
+ANSWER_SUBSTANCE_CHARS = 40
+
+#: Ab dieser Laenge ist ein Text eine Antwort, auch wenn eine Frage darin
+#: vorkommt. Wer drei Absaetze schreibt und am Ende nachfragt, hat geantwortet.
+MAX_QUESTION_CHARS = 600
+
+
+def is_only_a_question(text: str) -> bool:
+    """Ist *text* im Kern nur eine Rueckfrage an den Nutzer?
+
+    Geprueft wird nicht "kommt ein Fragezeichen vor" -- das taete es auch in
+    einer Antwort, die am Ende noch etwas anbietet. Geprueft wird, was
+    uebrig bleibt, wenn man die Fragesaetze wegnimmt: bleibt nichts von
+    Gewicht, war der ganze Zug eine Frage.
+    """
+    text = (text or "").strip()
+    if not text or len(text) > MAX_QUESTION_CHARS or "```" in text:
+        return False
+    if not text.rstrip().endswith("?"):
+        return False
+    # Saetze trennen und alles wegwerfen, was mit einem Fragezeichen endet.
+    saetze = [teil.strip() for teil in re.split(r"(?<=[.!?])\s+", text) if teil.strip()]
+    rest = " ".join(satz for satz in saetze if not satz.endswith("?"))
+    return len(rest) < ANSWER_SUBSTANCE_CHARS
+
+
 #: Dasselbe in kurz, wenn niemand da ist, der antworten koennte. Ohne
 #: Gegenueber waere eine Rueckfrage eine Sackgasse -- dann muss die fehlende
 #: Angabe wenigstens benannt werden, statt sie zu erfinden.
@@ -1482,6 +1526,8 @@ class Agent:
 
         budget = max(1, self.settings.max_tool_calls)
         used = 0
+        #: Hoechstens einmal je Anfrage zurueckschicken (siehe unten).
+        genudged = False
 
         # Automatische Vorrecherche: die Anfrage wird zerlegt und die Teile
         # laufen parallel, bevor der Hauptagent uebernimmt. Was die
@@ -1523,7 +1569,21 @@ class Agent:
             self.messages.append(_assistant_message(message))
 
             if not tool_calls:
-                result.answer = message.get("content", "")
+                antwort = message.get("content", "")
+                # Eine Frage gehoert in das Fenster, nicht in den Text. Das
+                # steht so im Systemtext -- aber ein Systemtext ist eine
+                # Bitte, und manche Modelle ueberlesen sie. Also einmal
+                # zurueckschicken. Nur einmal: entscheidet sich das Modell
+                # dann wieder dagegen, gilt seine Entscheidung. Eine
+                # Schleife waere schlimmer als die Frage im Text.
+                if not genudged and self._should_force_ask(antwort, used):
+                    genudged = True
+                    # Was schon auf dem Bildschirm steht, ist hinfaellig --
+                    # sonst klebte die Frage ueber der spaeteren Antwort.
+                    self._emit("answer_reset", reason="rueckfrage")
+                    self.messages.append({"role": "user", "content": FORCE_ASK_PROMPT})
+                    continue
+                result.answer = antwort
                 break
 
             if len(tool_calls) > remaining:
@@ -1863,6 +1923,30 @@ class Agent:
         self._note_usage(self.messages, {"role": "assistant", "content": text})
         self.messages.append({"role": "assistant", "content": text})
         return text
+
+    def _should_force_ask(self, answer: str, used: int) -> bool:
+        """Soll die Antwort zurueckgehen, weil sie nur eine Frage war?
+
+        Vier Bedingungen, und jede haelt einen Fall heraus, in dem das
+        Zurueckschicken falsch waere:
+
+        * **Es muss jemand da sein.** Ohne Rueckfrage-Empfaenger gibt es kein
+          Fenster; dann waere der Anstoss eine Aufforderung ins Leere.
+        * **Es darf noch nichts getan worden sein.** Wer gesucht, gelesen und
+          dann noch etwas nachfragt, hat geantwortet -- das ist eine
+          Anschlussfrage und keine Ausweichbewegung.
+        * **Der Text muss im Kern eine Frage sein** (siehe
+          :func:`is_only_a_question`).
+        * **Und im Code-Modus gilt es nicht**: dort steht die Rueckfrage
+          ohnehin als erster Punkt im Antwortformat, und eine Zeile
+          "Annahme: Python 3.11" ist dort der uebliche, gewollte Weg.
+        """
+        return (
+            self.toolbox.ask_handler is not None
+            and used == 0
+            and self.mode != "code"
+            and is_only_a_question(answer)
+        )
 
     def _finish(self, result: AgentResult, question: str = "") -> AgentResult:
         stats = self.toolbox.stats
