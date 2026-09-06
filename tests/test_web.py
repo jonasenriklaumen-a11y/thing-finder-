@@ -1186,7 +1186,10 @@ def test_the_appearance_window_offers_modes_and_palettes() -> None:
     assert 'id="palettes"' in html
     for mode in ("light", "dark", "system"):
         assert f'data-tmode="{mode}"' in html
-    assert "cortex-palette" in html          # bleibt im Browser gespeichert
+    # Das Schema liegt beim Server, nicht im Browser -- sonst waere es auf
+    # dem Handy ein anderes als am Rechner.
+    assert "cortex-palette" not in html
+    assert "merkeZustand({ palette })" in html
     assert "prefers-color-scheme" in html    # "wie das System" folgt dem System
 
 
@@ -2273,13 +2276,20 @@ def test_the_effort_reaches_the_agent(
     assert agent.effort == "high"
 
 
-def test_without_a_choice_nothing_is_forced(
+def test_without_a_choice_the_stored_state_applies(
     client, session: web.ChatSession, agent: FakeAgent
 ) -> None:
-    """Ein alter Browser ohne die neuen Felder soll weiterlaufen wie bisher."""
+    """Schickt der Browser nichts mit, weiss der Server es selbst.
+
+    Frueher hiess "nichts mitgeschickt" auch "nichts entschieden", und der
+    Agent behielt, was zufaellig noch stand. Jetzt gilt der gespeicherte
+    Zustand -- derselbe, den die Oberflaeche anzeigt.
+    """
     client("POST", "/api/chat", {"message": "Frage"})
-    assert agent.mode == ""
-    assert agent.structured is None
+    assert agent.mode == "normal"
+    assert agent.structured is False
+    assert agent.online is True
+    assert agent.effort == "medium"
 
 
 def test_the_composer_offers_both_modes() -> None:
@@ -2508,7 +2518,7 @@ def test_the_recheck_is_off_unless_asked_for(
 ) -> None:
     """Es dauert etwa doppelt so lang -- das passiert nicht ungefragt."""
     client("POST", "/api/chat", {"message": "Frage"})
-    assert agent.recheck is None
+    assert agent.recheck is False
     assert 'id="recheck"' in web.UI_FILE.read_text(encoding="utf-8")
     html = web.UI_FILE.read_text(encoding="utf-8")
     # Kein "checked" im Element selbst -- der Wortlaut des Elements darf sich
@@ -2897,3 +2907,128 @@ def test_switching_to_the_same_mode_changes_nothing() -> None:
     """Zweimal auf „Normal" darf den Chat nicht wegwerfen."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "const anders = button.dataset.mode !== mode;" in html
+
+
+# ---------------------------------------------------------------------------
+# Dem Browser nichts glauben
+# ---------------------------------------------------------------------------
+def test_a_number_field_with_letters_is_refused(client) -> None:
+    """Sonst meldet das Formular „gespeichert" und die Einstellung tut nichts."""
+    status, data = client("POST", "/api/config", {"CORTEX_CONTEXT_TOKENS": "achtundzwanzig"})
+    assert status == 400
+    antwort = json.loads(data)
+    assert antwort["ok"] is False
+    assert "CORTEX_CONTEXT_TOKENS" in antwort["error"]
+    assert "keine Zahl" in antwort["error"]
+
+
+def test_a_number_outside_its_range_is_refused(client) -> None:
+    status, data = client("POST", "/api/config", {"CORTEX_MAX_SUBAGENTS": "5000"})
+    assert status == 400
+    assert "ausserhalb" in json.loads(data)["error"]
+
+
+def test_an_invented_choice_is_refused(client) -> None:
+    status, data = client("POST", "/api/config", {"CORTEX_STORAGE_ACCESS": "alles"})
+    assert status == 400
+    assert "off, read, write" in json.loads(data)["error"]
+
+
+def test_an_absurdly_long_value_is_refused(client) -> None:
+    status, data = client("POST", "/api/config", {"CORTEX_LOCATION": "x" * 5000})
+    assert status == 400
+    assert "zu lang" in json.loads(data)["error"]
+
+
+def test_a_refused_form_writes_nothing(client, web_settings: Settings) -> None:
+    """Halb gespeicherte Einstellungen wären schlimmer als gar keine."""
+    vorher = web_settings.env_path.read_text() if web_settings.env_path.exists() else ""
+    client(
+        "POST", "/api/config",
+        {"CORTEX_LOCATION": "Bremen", "CORTEX_CONTEXT_TOKENS": "viel"},
+    )
+    nachher = web_settings.env_path.read_text() if web_settings.env_path.exists() else ""
+    assert nachher == vorher
+    assert "Bremen" not in nachher
+
+
+def test_good_values_still_get_through(client) -> None:
+    status, data = client(
+        "POST", "/api/config",
+        {"CORTEX_CONTEXT_TOKENS": "32000", "CORTEX_STORAGE_ACCESS": "read"},
+    )
+    assert status == 200
+    assert json.loads(data)["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Der Zustand der Oberfläche kommt vom Server
+# ---------------------------------------------------------------------------
+def test_the_state_can_be_read_and_written(client) -> None:
+    status, data = client("GET", "/api/prefs")
+    assert status == 200
+    assert json.loads(data)["mode"] == "normal"
+
+    status, data = client("POST", "/api/prefs", {"mode": "code", "effort": "high"})
+    assert status == 200
+    neu = json.loads(data)
+    assert neu["mode"] == "code" and neu["effort"] == "high"
+    assert json.loads(client("GET", "/api/prefs")[1])["mode"] == "code"
+
+
+def test_the_state_does_not_believe_everything(client) -> None:
+    status, data = client(
+        "POST", "/api/prefs",
+        {"mode": "rm -rf", "effort": "unendlich", "admin": True, "structured": "false"},
+    )
+    assert status == 200
+    stand = json.loads(data)
+    assert stand["mode"] == "normal", "ein erfundener Modus kommt nicht durch"
+    assert stand["effort"] == "medium"
+    assert "admin" not in stand, "unbekannte Felder gibt es nicht"
+    assert stand["structured"] is False, 'die Zeichenkette "false" heißt aus'
+
+
+def test_the_page_carries_its_state_along(client) -> None:
+    """Damit nichts blinkt und der Browser nichts zu entscheiden hat."""
+    client("POST", "/api/prefs", {"theme": "dark", "palette": "nord", "mode": "code"})
+    status, body = client("GET", "/")
+    html = body.decode("utf-8")
+    assert status == 200
+    assert 'data-theme="dark"' in html
+    assert 'data-palette="nord"' in html
+    assert "code-mode" in html[: html.index("</head>") + 200] or 'class="start code-mode"' in html
+    assert "window.__CORTEX_STATE__" in html
+
+
+def test_the_chat_uses_the_stored_state(client, agent: FakeAgent) -> None:
+    client("POST", "/api/prefs", {"mode": "code", "effort": "low", "structured": True})
+    client("POST", "/api/chat", {"message": "Frage"})
+    assert agent.mode == "code"
+    assert agent.effort == "low"
+    assert agent.structured is True
+
+
+def test_what_the_chat_sends_is_checked_too(client, agent: FakeAgent) -> None:
+    """Der Weg über /api/chat darf keine Hintertür an der Prüfung vorbei sein."""
+    client("POST", "/api/chat", {"message": "Frage", "mode": "rm -rf", "effort": "viel"})
+    assert agent.mode == "normal"
+    assert agent.effort == "medium"
+
+
+def test_a_chat_choice_is_remembered(client, agent: FakeAgent) -> None:
+    """Was man beim Fragen umstellt, gilt auch beim nächsten Mal."""
+    client("POST", "/api/chat", {"message": "Frage", "mode": "code"})
+    assert json.loads(client("GET", "/api/prefs")[1])["mode"] == "code"
+
+
+def test_an_endless_message_is_cut(client, agent: FakeAgent) -> None:
+    """Was länger ist als eine Frage, ist eine Datei -- die gehört an die Klammer."""
+    client("POST", "/api/chat", {"message": "x" * 500_000})
+    assert len(agent.asked[0]) <= web.MAX_MESSAGE_CHARS
+
+
+def test_more_attachments_than_allowed_are_cut(client, agent: FakeAgent) -> None:
+    viele = [{"name": f"{i}.txt", "data": encode(b"hallo")} for i in range(50)]
+    status, _ = client("POST", "/api/chat", {"message": "Was ist das?", "attachments": viele})
+    assert status == 200

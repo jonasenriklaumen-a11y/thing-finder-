@@ -88,6 +88,30 @@ SETTING_KEYS: tuple[str, ...] = (
     "CORTEX_MEMORY",
 )
 
+#: Zahlenfelder mit dem Bereich, in dem sie sinnvoll sind. Geprueft wird
+#: hier und nicht erst in `config.py`: dort faellt ein unsinniger Wert nur
+#: still auf den Standard zurueck -- das Formular meldet dann "gespeichert",
+#: und die Einstellung tut trotzdem nichts. Das ist schlimmer als eine
+#: Fehlermeldung, weil man es erst Tage spaeter merkt.
+NUMBERS: dict[str, tuple[int, int]] = {
+    "CORTEX_SEARCH_VARIANTS": (1, 10),
+    "CORTEX_MAX_SUBAGENTS": (1, 12),
+    "CORTEX_SUBAGENT_BUDGET": (1, 40),
+    "CORTEX_SUBAGENT_PARALLEL": (1, 12),
+    "CORTEX_MAX_TOOL_CALLS": (1, 200),
+    "CORTEX_CONTEXT_TOKENS": (2_000, 2_000_000),
+    "CORTEX_PLANNER_TIMEOUT": (1, 600),
+}
+
+#: Felder, die nur bestimmte Woerter annehmen.
+CHOICES: dict[str, tuple[str, ...]] = {
+    "CORTEX_STORAGE_ACCESS": ("off", "read", "write"),
+}
+
+#: Wie lang ein Formularwert hoechstens sein darf. Eine Adresse ist keine
+#: Textdatei; was laenger ist, ist ein Versehen oder ein Versuch.
+MAX_VALUE_CHARS = 2_000
+
 #: Platzhalter im Formular -- ein leeres Key-Feld darf den Key nicht loeschen.
 API_KEY_FIELD = "__API_KEY__"
 
@@ -109,6 +133,12 @@ MAX_UPLOAD_BYTES = 25_000_000
 
 #: So viele Dateien duerfen an einer Nachricht haengen.
 MAX_UPLOADS = 5
+
+#: Wie lang eine einzelne Frage sein darf. Alles darueber ist keine Frage
+#: mehr, sondern eine Datei -- und die gehoert an die Klammer, wo sie
+#: ausgelesen und gekuerzt wird, statt ungeprueft ins Kontextfenster zu
+#: laufen.
+MAX_MESSAGE_CHARS = 100_000
 
 #: Der ganze Anfragekoerper. Base64 blaeht um ein Drittel auf, dazu kommt der
 #: Rest der Nachricht -- ohne Grenze koennte ein einziger Aufruf den Arbeits-
@@ -740,6 +770,13 @@ def resolve_image(target: Path) -> Path:
 
 SESSION = ChatSession()
 
+
+def ui_state() -> Any:
+    """Der Zustand der Oberflaeche -- er liegt beim Server, nicht im Browser."""
+    from cortex.uistate import UIState
+
+    return UIState(SESSION.settings().db_path)
+
 #: Der Taktgeber fuer die Auftraege. Wird beim Start gesetzt; im Test laeuft
 #: kein Server und damit auch keiner.
 SCHEDULER: Any = None
@@ -844,11 +881,44 @@ def google_redirect(host: str = "") -> str:
     return f"http://localhost:{port}/google"
 
 
+def check_values(values: dict[str, str]) -> str:
+    """Prueft die Formularwerte. Returns: die Beanstandung, oder "".
+
+    Der Browser kann alles schicken -- ein Zahlenfeld mit Buchstaben darin,
+    eine Auswahl mit einem Wort, das es nicht gibt, eine Adresse von einer
+    Laenge, die niemand tippt. Hier ist die Stelle, an der das auffaellt.
+    """
+    for key, wert in values.items():
+        if len(wert) > MAX_VALUE_CHARS:
+            return f"{key}: zu lang ({len(wert)} Zeichen, erlaubt sind {MAX_VALUE_CHARS})."
+        if key in NUMBERS and wert:
+            von, bis = NUMBERS[key]
+            try:
+                zahl = int(wert)
+            except ValueError:
+                return f"{key}: '{wert}' ist keine Zahl."
+            if not von <= zahl <= bis:
+                return f"{key}: {zahl} liegt ausserhalb von {von} bis {bis}."
+        if key in CHOICES and wert and wert not in CHOICES[key]:
+            erlaubt = ", ".join(CHOICES[key])
+            return f"{key}: '{wert}' gibt es nicht. Erlaubt sind: {erlaubt}."
+    return ""
+
+
 def save_values(payload: dict[str, Any]) -> Path:
-    """Schreibt die Formularwerte in die `.env` und laedt neu."""
+    """Schreibt die Formularwerte in die `.env` und laedt neu.
+
+    Raises:
+        ValueError: Wenn ein Wert nicht durch die Pruefung kommt. Dann wird
+            nichts geschrieben -- halb gespeicherte Einstellungen waeren
+            schlimmer als gar keine.
+    """
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
     }
+    beanstandung = check_values(values)
+    if beanstandung:
+        raise ValueError(beanstandung)
     for key in (
         "CORTEX_MODEL",
         "CORTEX_VISION_MODEL",
@@ -927,6 +997,53 @@ def chat_markdown(title: str, entries: list[Any]) -> str:
         zeilen += [str(entry.answer or "").strip(), ""]
     zeilen += ["---", "", "Aufgezeichnet von Cortex AI."]
     return "\n".join(zeilen)
+
+
+def with_state(html: str) -> str:
+    """Gibt der Seite den Zustand gleich mit auf den Weg.
+
+    Zwei Gruende, das hier zu tun und nicht im Browser:
+
+    * **Es blinkt nicht.** Wer das Erscheinungsbild erst per Skript setzt,
+      sieht die Seite einen Wimpernschlag lang hell, bevor sie dunkel wird.
+      Steht es im ausgelieferten HTML, ist sie von der ersten Zeile an
+      richtig.
+    * **Der Browser haelt nichts fest.** Er bekommt gesagt, was gilt. Was
+      er selbst gespeichert haette, muesste man ihm glauben -- und das ist
+      genau das, was hier nicht mehr passieren soll.
+    """
+    try:
+        stand = ui_state().read()
+    except Exception:  # pragma: no cover - eine Seite ohne Zustand ist besser als keine
+        from cortex.uistate import defaults
+
+        stand = defaults()
+
+    attrs = ""
+    if stand.get("theme") in ("light", "dark"):
+        attrs += f' data-theme="{stand["theme"]}"'
+    if stand.get("palette"):
+        attrs += f' data-palette="{stand["palette"]}"'
+    html = html.replace('<html lang="de">', f'<html lang="de"{attrs}>', 1)
+
+    # Die Klassen am Koerper stehen sonst erst, wenn das Skript durch ist.
+    koerper = ["start"]
+    if stand.get("mode") == "code":
+        koerper.append("code-mode")
+    if stand.get("tracing"):
+        koerper.append("tracing")
+    if stand.get("denken"):
+        koerper.append("denken")
+    html = html.replace('<body class="start">', f'<body class="{" ".join(koerper)}">', 1)
+
+    # `json.dumps` sorgt fuer gueltiges JSON; `</` wird zerlegt, damit ein
+    # Wert das Skript nicht vorzeitig beenden kann. Die Werte kommen zwar
+    # alle aus einer Weissliste -- aber genau das ist der Punkt: man baut
+    # die Absicherung ein, bevor jemand die Liste erweitert.
+    roh = json.dumps(stand, ensure_ascii=False).replace("</", "<\\/")
+    return html.replace(
+        "<script>", f"<script>window.__CORTEX_STATE__ = {roh};</script>\n<script>", 1
+    )
 
 
 def safe_name(name: str) -> str:
@@ -1277,6 +1394,8 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                 }
             )
+        elif route == "/api/prefs":
+            self._json(ui_state().read())
         elif route == "/api/models":
             from cortex.system import available_models
 
@@ -1355,6 +1474,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._chat_edit(self._read_json()))
         elif route == "/api/jobs":
             self._json(self._job_edit(self._read_json()))
+        elif route == "/api/prefs":
+            # Der Browser schlaegt vor, der Server entscheidet -- zurueck
+            # kommt, was wirklich gilt, nicht was geschickt wurde.
+            self._json(ui_state().write(self._read_json()))
         elif route == "/api/stop":
             self._json({"ok": SESSION.stop()})
         elif route == "/api/answer":
@@ -1372,6 +1495,11 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/config":
             try:
                 written = save_values(self._read_json())
+            except ValueError as exc:
+                # Ein unsinniger Wert ist ein Tippfehler, kein Serverfehler --
+                # und die Meldung soll sagen, welches Feld gemeint ist.
+                self._json({"ok": False, "error": str(exc)}, 400)
+                return
             except Exception as exc:
                 self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 500)
                 return
@@ -1641,7 +1769,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         So braucht nur der erste Aufruf die lange Adresse; danach kennt der
         Browser das Wort von selbst.
         """
-        body = UI_FILE.read_bytes()
+        body = with_state(UI_FILE.read_text(encoding="utf-8")).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -1675,26 +1803,39 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
     def _chat(self) -> None:
         """Fuehrt die Anfrage aus und streamt die Ereignisse als SSE."""
         payload = self._read_json()
-        message = str(payload.get("message", "")).strip()
+        message = str(payload.get("message", "")).strip()[:MAX_MESSAGE_CHARS]
         raw = payload.get("attachments")
         attachments = (
-            [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+            [item for item in raw if isinstance(item, dict)][:MAX_UPLOADS]
+            if isinstance(raw, list)
+            else []
         )
         # Arbeitsweise, Struktur und Denktiefe gehoeren zur einzelnen Frage,
         # nicht zur Sitzung: dieselbe Person will mal eine ausfuehrliche
-        # Recherche und im naechsten Satz nur den Code. Der Browser schickt
-        # alles mit. "thinking" ist der alte Name von "structured" -- eine
-        # Oberflaeche aus dem Cache soll deswegen nicht aufhoeren zu arbeiten.
-        mode = str(payload.get("mode", "")).strip()
-        structured = payload.get("structured", payload.get("thinking"))
-        structured = None if structured is None else bool(structured)
-        recheck = payload.get("recheck")
-        recheck = None if recheck is None else bool(recheck)
-        effort = str(payload.get("effort", "")).strip()
-        online = payload.get("online")
-        online = None if online is None else bool(online)
-        sandbox = payload.get("sandbox")
-        sandbox = None if sandbox is None else bool(sandbox)
+        # Recherche und im naechsten Satz nur den Code.
+        #
+        # Was der Browser dazu schickt, ist ein Vorschlag. Geprueft wird er
+        # gegen dieselben Listen wie im Einstellungsfenster, und was gilt,
+        # wird gleich vermerkt -- damit der naechste Aufruf und das naechste
+        # Geraet denselben Stand vorfinden. Kommt nichts mit, gilt der
+        # gespeicherte Stand: der Server weiss ihn selbst.
+        #
+        # "thinking" ist der alte Name von "structured" -- eine Oberflaeche
+        # aus dem Cache soll deswegen nicht aufhoeren zu arbeiten.
+        wunsch = {
+            name: payload[name]
+            for name in ("mode", "effort", "structured", "recheck", "online", "sandbox")
+            if name in payload
+        }
+        if "structured" not in wunsch and "thinking" in payload:
+            wunsch["structured"] = payload["thinking"]
+        stand = ui_state().write(wunsch) if wunsch else ui_state().read()
+        mode = str(stand["mode"])
+        effort = str(stand["effort"])
+        structured = bool(stand["structured"])
+        recheck = bool(stand["recheck"])
+        online = bool(stand["online"])
+        sandbox = bool(stand["sandbox"])
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return

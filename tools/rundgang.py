@@ -643,6 +643,74 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.click('#modes .mode[data-mode="normal"]')
         pg.wait_for_timeout(600)
 
+    if dran("zustand"):
+        log.abschnitt("10d. Der Zustand liegt beim Server")
+        # Etwas umstellen, neu laden, nachsehen: was der Server weiss,
+        # ueberlebt das Neuladen -- und den Wechsel des Geraets.
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        pg.check("#recheck")
+        pg.wait_for_timeout(200)
+        pg.click('#efforts .eff[data-effort="high"]')
+        pg.wait_for_timeout(500)
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+
+        gemerkt = pg.evaluate("() => Object.keys(localStorage)")
+        log.pruefe(
+            [name for name in gemerkt if name != "cortex-token"] == [],
+            f"der Browser haelt nichts fest ausser dem Zugangswort ({gemerkt})",
+        )
+
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_timeout(500)
+        log.pruefe(
+            pg.eval_on_selector("#recheck", "e => e.checked"),
+            "nach dem Neuladen steht die Gegenprobe noch an",
+        )
+        log.pruefe(
+            pg.eval_on_selector('#efforts .eff[data-effort="high"]',
+                                "e => e.classList.contains('on')"),
+            "und die Denktiefe auch",
+        )
+        # Der Server sagt dasselbe wie der Bildschirm.
+        vom_server = pg.evaluate(
+            "async () => await (await fetch('/api/prefs')).json()")
+        log.pruefe(
+            vom_server.get("recheck") is True and vom_server.get("effort") == "high",
+            f"der Server weiss es selbst ({vom_server.get('effort')}, "
+            f"recheck={vom_server.get('recheck')})",
+        )
+
+        # Und er glaubt nicht alles: Unsinn faellt auf den Standard zurueck.
+        geprueft = pg.evaluate(
+            """async () => await (await fetch("/api/prefs", {
+                 method: "POST", headers: {"Content-Type": "application/json"},
+                 body: JSON.stringify({ mode: "rm -rf", effort: "unendlich",
+                                        admin: true, structured: "false" }),
+               })).json()"""
+        )
+        log.pruefe(
+            geprueft.get("mode") == "normal" and geprueft.get("effort") == "high",
+            f"unerlaubte Werte kommen nicht durch ({geprueft.get('mode')}, "
+            f"{geprueft.get('effort')})",
+        )
+        log.pruefe("admin" not in geprueft, "unbekannte Felder auch nicht")
+        log.pruefe(
+            geprueft.get("structured") is False,
+            'die Zeichenkette "false" heisst aus, nicht an',
+        )
+
+        # Aufraeumen, damit die folgenden Abschnitte nicht darauf stossen.
+        pg.evaluate(
+            """async () => await fetch("/api/prefs", {
+                 method: "POST", headers: {"Content-Type": "application/json"},
+                 body: JSON.stringify({ recheck: false, effort: "medium" }),
+               })"""
+        )
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_timeout(400)
+
     if dran("suche"):
         log.abschnitt("11. Chats durchsuchen")
         vorher = pg.locator(".recent").count()
@@ -770,6 +838,76 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         log.pruefe(not oben, f"keine Statusleiste am oberen Rand ({oben})")
 
 
+def geraet(pg: Any, log: Protokoll, name: str, nummer: str,
+           bilder: Path | None) -> None:
+    """Was auf jedem Geraet stimmen muss -- geprueft in jeder Groesse.
+
+    Es sind wenige Dinge, aber es sind die, die man auf dem eigenen
+    Bildschirm nie sieht: dass nichts seitlich uebersteht, dass kein Fenster
+    breiter ist als das Fenster, dass die Knoepfe gross genug fuer einen
+    Daumen sind und dass sich nichts ueberlappt.
+    """
+    log.abschnitt(f"{nummer}. {name}")
+    breite = pg.evaluate("() => window.innerWidth")
+
+    log.pruefe(
+        pg.eval_on_selector("body", "e => e.scrollWidth <= window.innerWidth + 1"),
+        f"nichts steht seitlich ueber ({breite}px breit)",
+    )
+    # Die Kopfzeile und die Modellauswahl duerfen sich nicht schneiden.
+    pg.click("#btn-model")
+    pg.wait_for_timeout(500)
+    ueberschnitten = pg.evaluate(
+        """() => {
+             const p = document.querySelector("#picker-models").getBoundingClientRect();
+             const b = document.querySelector(".topbar").getBoundingClientRect();
+             return p.top < b.bottom - 1;
+           }"""
+    )
+    log.pruefe(not ueberschnitten, "die Modellauswahl liegt unter der Kopfzeile")
+    log.pruefe(
+        pg.eval_on_selector("#picker-models",
+                            "e => e.getBoundingClientRect().width <= window.innerWidth"),
+        "und passt in die Breite",
+    )
+    # Ein Schalter, den man mit dem Daumen treffen soll, braucht Flaeche.
+    hoehe = pg.eval_on_selector("#online",
+                                "e => e.closest('label').getBoundingClientRect().height")
+    log.pruefe(hoehe >= 40, f"die Schalterzeilen sind {hoehe:.0f}px hoch")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
+
+    # Das Einstellungsfenster ist das laengste -- wenn eines quer laeuft,
+    # dann dieses.
+    if breite < 900:
+        pg.click("#btn-side")
+        pg.wait_for_timeout(400)
+    pg.click("#btn-settings")
+    pg.wait_for_selector("#overlay.open", state="visible")
+    pg.wait_for_timeout(700)
+    log.pruefe(
+        pg.eval_on_selector("#overlay .sheet", "e => e.scrollWidth <= e.clientWidth + 1"),
+        "das Formular passt in die Breite",
+    )
+    log.pruefe(
+        pg.eval_on_selector("#overlay .sheet",
+                            "e => e.getBoundingClientRect().height <= window.innerHeight"),
+        "und in die Hoehe",
+    )
+    spalten = pg.eval_on_selector(
+        ".row", "e => getComputedStyle(e).gridTemplateColumns.split(' ').length"
+    )
+    erwartet = 1 if breite < 600 else 2
+    log.pruefe(
+        spalten == erwartet,
+        f"die Formularreihen stehen zu {spalten} (erwartet {erwartet})",
+    )
+    if bilder:
+        pg.screenshot(path=str(bilder / f"{nummer}-{name.lower().replace(' ', '-')}.png"))
+    pg.click("#cancel")
+    pg.wait_for_timeout(500)
+
+
 def handy(pg: Any, log: Protokoll, bilder: Path | None) -> None:
     """Dasselbe noch einmal, aber auf einem schmalen Schirm."""
     log.abschnitt("19. Auf dem Handy")
@@ -856,6 +994,28 @@ def main() -> int:
         seite.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
 
         rundgang(seite, log, agent, bilder, nur)
+
+        # Dieselbe Oberflaeche auf drei Groessen. Was auf dem eigenen
+        # Bildschirm gut aussieht, muss es auf den anderen zweien nicht.
+        if not nur or "geraete" in nur:
+            for name, nummer, breit, hoch in (
+                ("Handy", "19a", 390, 844),
+                ("Tablet hoch", "19b", 820, 1180),
+                ("Tablet quer", "19c", 1180, 820),
+                ("Grosser Schirm", "19d", 1512, 900),
+            ):
+                gross = breit >= 900
+                seite2 = browser.new_page(
+                    viewport={"width": breit, "height": hoch},
+                    is_mobile=not gross, has_touch=not gross,
+                )
+                seite2.on(
+                    "pageerror",
+                    lambda e, n=name: fehler.append(f"Skriptfehler ({n}): {e}"),
+                )
+                seite2.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
+                geraet(seite2, log, name, nummer, bilder)
+                seite2.close()
 
         if not nur or "handy" in nur:
             klein = browser.new_page(

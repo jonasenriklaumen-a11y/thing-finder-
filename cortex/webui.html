@@ -717,6 +717,10 @@ input[type=text],input[type=password],select{width:100%;background:var(--surface
   font:inherit;font-size:14px;outline:none}
 input:focus,select:focus{border-color:var(--accent)}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* Ein einzelnes Feld in einer Zweierreihe stand bisher links und liess
+   rechts eine Luecke -- als fehle dort etwas. Es nimmt jetzt die ganze
+   Zeile, wie die Felder ausserhalb einer Reihe auch. */
+.row>label:only-child{grid-column:1 / -1}
 /* Auch im Formular Schalter statt Haken -- zwei verschiedene Bauarten fuer
    dieselbe Ja/Nein-Frage waeren nur verwirrend. Etwas kleiner als in der
    Modellauswahl, damit sie neben dem Fliesstext nicht dominieren. */
@@ -821,6 +825,45 @@ input:focus,select:focus{border-color:var(--accent)}
   .topbar .spacer:first-of-type{flex:0 0 auto}
 }
 
+/* ===================== Tablets: dazwischen ============================= */
+/* Zwischen Handy und Rechner liegt eine Groesse, die lange keine eigene
+   Behandlung hatte: das Tablet im Hochformat. Es bekam das Handy-Layout,
+   weil es unter 900px breit ist -- und damit Masse, die fuer 390px gedacht
+   sind. Auf 820px sah das aus wie eine aufgeblasene Handy-Seite: die
+   Eingabe von Rand zu Rand, die Modellauswahl 800px breit, zwei
+   Beispielfragen statt drei.
+   Die Seitenleiste bleibt hier ueber dem Chat statt daneben -- im
+   Hochformat waere sie sonst ein Drittel der Breite fuer eine Liste, die
+   man selten braucht. Alles andere kehrt zu den Massen des Rechners
+   zurueck. */
+@media (min-width:600px) and (max-width:900px){
+  /* Die Textspalte bekommt ihre Breite zurueck. Eine Zeile ueber die volle
+     Tabletbreite ist zu lang zum Lesen -- dieselbe Regel wie im Buchdruck. */
+  .thread,.composer,.hello,.files,.hint,.chips{max-width:46rem}
+  .thread{padding:8px 24px 200px}
+  .hello{padding:0 24px 26px}
+  .hello h1{font-size:30px}
+  .hello p{font-size:15px}
+  .hello .star{width:34px;height:34px}
+  .composer{border-radius:22px;padding:12px 14px 10px}
+  .msg.user .bubble{max-width:80%;font-size:15.5px}
+  .msg.bot .bubble{font-size:16px}
+  /* Drei Vorschlaege passen hier nebeneinander. */
+  .chip:nth-child(n+3){display:inline-flex}
+  .chip{font-size:13px;padding:8px 14px}
+  /* Die Modellauswahl ist eine Liste, keine Flaeche. */
+  .picker{width:min(30rem, calc(100vw - 48px))}
+  .modelpick{max-width:22rem}
+  /* Im Formular passen zwei Spalten nebeneinander. */
+  .row{grid-template-columns:1fr 1fr}
+  .sheet{padding:22px 22px 24px;max-height:92vh}
+  .sheet-head{margin:-22px -22px 0;padding:18px 22px 12px;top:-22px}
+  .overlay{padding:4vh 24px}
+  .zaehler{grid-template-columns:repeat(3,1fr)}
+  .topbar{padding:12px 18px}
+  .topbar .where{font-size:12.5px}
+}
+
 /* Sehr schmale Geraete: der Ortsfilter weicht ganz, damit der Modellname
    nicht auf zwei Zeichen zusammenschrumpft. */
 @media (max-width:430px){
@@ -832,6 +875,10 @@ input:focus,select:focus{border-color:var(--accent)}
   .modelpick{margin-left:auto;margin-right:auto;max-width:72vw}
   .hello h1{font-size:22px}
   .thread{padding:4px 12px 180px}
+  /* Die Kopfzeile ist hier zweizeilig -- die Modellauswahl muss tiefer
+     ansetzen, sonst schneidet sie den Ortsfilter halb ab und es sieht aus
+     wie ein Fehler beim Zeichnen. */
+  .picker{top:74px}
 }
 
 /* Randlose Bildschirme: unten liegt sonst die Wischleiste auf der Eingabe. */
@@ -1423,28 +1470,49 @@ let sandbox = false;
 // Nur die Anzeige: ob man Cortex beim Denken zusieht.
 let denken = false;
 
-function setMode(wanted){
+// Was hier umgelegt wird, gehoert dem Server. Der Browser meldet es und
+// zeigt es an -- was gilt, entscheidet der Server (siehe cortex/uistate.py).
+// Gesammelt und einmal geschickt: sonst kaeme bei jedem Klick auf drei
+// Schalter hintereinander dreimal dieselbe Anfrage.
+let zustandTimer = null;
+let zustandOffen = {};
+function merkeZustand(teil){
+  Object.assign(zustandOffen, teil);
+  clearTimeout(zustandTimer);
+  zustandTimer = setTimeout(() => {
+    const senden = zustandOffen;
+    zustandOffen = {};
+    // Ein fehlgeschlagenes Merken darf nichts kaputt machen: die Ansicht
+    // stimmt trotzdem, es steht beim naechsten Laden nur wieder das Alte da.
+    api("/api/prefs", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(senden),
+    }).catch(() => {});
+  }, 180);
+}
+
+function setMode(wanted, { merken = true } = {}){
   mode = wanted === "code" ? "code" : "normal";
   document.querySelectorAll("#modes .mode").forEach(button =>
     button.classList.toggle("on", button.dataset.mode === mode));
   document.body.classList.toggle("code-mode", mode === "code");
   $("#input").placeholder = mode === "code"
     ? "Was soll ich bauen?" : "Frag etwas …";
-  try { localStorage.setItem("cortex-mode", mode); } catch {}
+  if (merken) merkeZustand({ mode });
   zeigeWerkstattKnopf();
 }
 
-function setRecheck(on){
+function setRecheck(on, { merken = true } = {}){
   recheck = !!on;
   $("#recheck").checked = recheck;
-  try { localStorage.setItem("cortex-recheck", recheck ? "1" : "0"); } catch {}
+  if (merken) merkeZustand({ recheck });
   refreshHeader();
 }
 
-function setSandbox(on){
+function setSandbox(on, { merken = true } = {}){
   sandbox = !!on;
   $("#werkstatt").checked = sandbox;
-  try { localStorage.setItem("cortex-vm", sandbox ? "1" : "0"); } catch {}
+  if (merken) merkeZustand({ sandbox });
   zeigeWerkstattKnopf();
   refreshHeader();
 }
@@ -1456,36 +1524,35 @@ function zeigeWerkstattKnopf(){
   if (knopf) knopf.hidden = !(mode === "code" && sandbox);
 }
 
-function setOnline(on){
+function setOnline(on, { merken = true } = {}){
   online = !!on;
   $("#online").checked = online;
-  try { localStorage.setItem("cortex-online", online ? "1" : "0"); } catch {}
+  if (merken) merkeZustand({ online });
   refreshHeader();
 }
 
 // Gedacht wird immer -- dieser Schalter entscheidet nur, ob man dabei
-// zusieht. Er geht deshalb auch nicht an den Server: er aendert nichts an
-// der Anfrage, nur an dem, was auf dem Bildschirm davon zu sehen ist.
-function setDenken(on){
+// zusieht. Auf die Anfrage hat er keinen Einfluss, nur auf die Anzeige.
+function setDenken(on, { merken = true } = {}){
   denken = !!on;
   $("#denken").checked = denken;
   document.body.classList.toggle("denken", denken);
-  try { localStorage.setItem("cortex-denken", denken ? "1" : "0"); } catch {}
+  if (merken) merkeZustand({ denken });
 }
 
-function setStructured(on){
+function setStructured(on, { merken = true } = {}){
   structured = !!on;
   $("#structure").checked = structured;
-  try { localStorage.setItem("cortex-structure", structured ? "1" : "0"); } catch {}
+  if (merken) merkeZustand({ structured });
   refreshHeader();
 }
 
 const EFFORTS = ["low", "medium", "high"];
-function setEffort(wanted){
+function setEffort(wanted, { merken = true } = {}){
   effort = EFFORTS.includes(wanted) ? wanted : "medium";
   document.querySelectorAll("#efforts .eff").forEach(button =>
     button.classList.toggle("on", button.dataset.effort === effort));
-  try { localStorage.setItem("cortex-effort", effort); } catch {}
+  if (merken) merkeZustand({ effort });
   refreshHeader();
 }
 
@@ -1508,20 +1575,20 @@ $("#denken").addEventListener("change", (e) => setDenken(e.target.checked));
 $("#structure").addEventListener("change", (e) => setStructured(e.target.checked));
 $("#recheck").addEventListener("change", (e) => setRecheck(e.target.checked));
 
-try {
-  setMode(localStorage.getItem("cortex-mode") || "normal");
-  // Standard ist das Gespraech: Strukturieren ist ein Schalter, den man
-  // umlegt, wenn eine Frage wirklich Recherche braucht.
-  setStructured(localStorage.getItem("cortex-structure") === "1");
-  setRecheck(localStorage.getItem("cortex-recheck") === "1");
-  setEffort(localStorage.getItem("cortex-effort") || "medium");
-  setOnline(localStorage.getItem("cortex-online") !== "0");
-  setSandbox(localStorage.getItem("cortex-vm") === "1");
-  setDenken(localStorage.getItem("cortex-denken") === "1");
-} catch {
-  setMode("normal"); setStructured(false); setRecheck(false);
-  setEffort("medium"); setOnline(true); setSandbox(false); setDenken(false);
-}
+// Der Anfangszustand kommt mit der Seite mit -- der Server hat ihn beim
+// Ausliefern hineingeschrieben. Fehlt er (eine Datei, die jemand von Hand
+// geoeffnet hat), gelten dieselben Standardwerte wie dort. `merken: false`,
+// weil das Anzeigen des Bestehenden kein Aendern ist.
+const START = (typeof window.__CORTEX_STATE__ === "object" && window.__CORTEX_STATE__)
+  ? window.__CORTEX_STATE__ : {};
+setMode(START.mode || "normal", { merken: false });
+setStructured(START.structured === true, { merken: false });
+setRecheck(START.recheck === true, { merken: false });
+setEffort(START.effort || "medium", { merken: false });
+setOnline(START.online !== false, { merken: false });
+setSandbox(START.sandbox === true, { merken: false });
+setDenken(START.denken === true, { merken: false });
+
 // Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
 // soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
 // eines allein reicht nicht.
@@ -2285,14 +2352,14 @@ function applyAppearance(){
   else root.removeAttribute("data-palette");
 }
 // setTheme nimmt auch, was Cortex im Gespraech schickt ("light"/"dark").
-function setTheme(theme){
+function setTheme(theme, { merken = true } = {}){
   themeMode = THEMES.includes(theme) ? theme : "light";
-  try { localStorage.setItem("cortex-theme", themeMode); } catch {}
+  if (merken) merkeZustand({ theme: themeMode });
   applyAppearance(); paintAppearance();
 }
-function setPalette(id){
+function setPalette(id, { merken = true } = {}){
   palette = PALETTES.some(entry => entry.id === id) ? id : "";
-  try { localStorage.setItem("cortex-palette", palette); } catch {}
+  if (merken) merkeZustand({ palette });
   applyAppearance(); paintAppearance();
 }
 function paintAppearance(){
@@ -2337,12 +2404,12 @@ $("#btn-theme").addEventListener("click", () => {
 $("#theme-close").addEventListener("click", closeTheme);
 themeBox.addEventListener("click", (e) => { if (e.target === themeBox) closeTheme(); });
 
-try {
-  const savedTheme = localStorage.getItem("cortex-theme");
-  if (THEMES.includes(savedTheme)) themeMode = savedTheme;
-  palette = localStorage.getItem("cortex-palette") || "";
-  if (!PALETTES.some(entry => entry.id === palette)) palette = "";
-} catch {}
+// Auch das Erscheinungsbild kommt vom Server. Es steht bereits als
+// Attribut am <html> -- das hier holt nur die Skriptvariablen nach, damit
+// das Fenster den richtigen Eintrag hervorhebt.
+if (THEMES.includes(START.theme)) themeMode = START.theme;
+palette = typeof START.palette === "string" ? START.palette : "";
+if (!PALETTES.some(entry => entry.id === palette)) palette = "";
 applyAppearance();
 // Wer dem System folgt, folgt ihm auch, wenn es abends umschaltet.
 try {
@@ -2696,12 +2763,28 @@ function closePicker(){
   }, CLOSE_MS);
 }
 
+// Der Kasten haengt unter der Kopfzeile -- und zwar unter ihrer wirklichen
+// Unterkante, nicht unter einer geratenen Zahl. Die Leiste ist auf dem Handy
+// zweizeilig, auf dem Tablet einzeilig und wird laenger, wenn mehr darin
+// steht; jede feste Angabe waere irgendwo falsch. Vorher lag der Kasten
+// sechs Pixel zu hoch: seine abgerundete Oberkante verschwand hinter der
+// Leiste, und auf dem Handy schnitt er den Ortsfilter an.
+function setzePickerHoehe(){
+  const leiste = document.querySelector(".topbar");
+  const flaeche = document.querySelector(".pane");
+  if (!leiste || !flaeche) return;
+  const unten = leiste.getBoundingClientRect().bottom - flaeche.getBoundingClientRect().top;
+  modelBox.style.top = Math.round(unten + 6) + "px";
+}
+addEventListener("resize", () => { if (pickerOpen()) setzePickerHoehe(); });
+
 async function openPicker(){
   const list = $("#model-list");
   list.innerHTML = '<div class="picker-foot">Sehe nach …</div>';
   clearTimeout(pickerClosing);          // eine laufende Ausblende gilt nicht mehr
   modelBox.classList.remove("closing");
   modelBox.hidden = false;
+  setzePickerHoehe();
   backdrop = document.createElement("div");
   backdrop.className = "backdrop";
   backdrop.addEventListener("click", closePicker);
@@ -2825,8 +2908,7 @@ $("#btn-settings").addEventListener("click", async () => {
   jobFelder();
   loadJobs();
   $("#showtrace").checked = document.body.classList.contains("tracing");
-  let wanted = false;
-  try { wanted = localStorage.getItem("cortex-showload") === "1"; } catch {}
+  const wanted = START.load === true;
   $("#showload").checked = wanted;
   if (wanted) $("#showload").dispatchEvent(new Event("change"));
   $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
@@ -3287,15 +3369,13 @@ $("#save-model").addEventListener("click", async () => {
 // Reine Anzeigesache: die Zeilen stehen ohnehin im Dokument, der Haken
 // blendet sie nur ein. Deshalb kein Serveraufruf und keine .env -- und
 // deshalb wirkt er auch auf die Antwort, die schon dasteht.
-function setTracing(on){
+function setTracing(on, { merken = true } = {}){
   document.body.classList.toggle("tracing", on);
-  try {
-    if (on) localStorage.setItem("cortex-trace", "1");
-    else localStorage.removeItem("cortex-trace");
-  } catch {}
+  if (merken) merkeZustand({ tracing: !!on });
 }
-try { if (localStorage.getItem("cortex-trace") === "1") document.body.classList.add("tracing"); }
-catch {}
+// Der Server hat die Klasse schon beim Ausliefern gesetzt; hier wird nur
+// der Haken im Formular nachgezogen.
+setTracing(START.tracing === true, { merken: false });
 $("#showtrace").addEventListener("change", (e) => setTracing(e.target.checked));
 
 /* ---------- Auslastung ---------- */
@@ -3319,10 +3399,7 @@ function stopLoad(){
 $("#showload").addEventListener("change", (e) => {
   stopLoad();
   const on = e.target.checked;
-  try {
-    if (on) localStorage.setItem("cortex-showload", "1");
-    else localStorage.removeItem("cortex-showload");
-  } catch {}
+  merkeZustand({ load: !!on });
   if (!on){ $("#usage-note").innerHTML = ""; return; }
   showLoad();
   loadTimer = setInterval(showLoad, 4000);

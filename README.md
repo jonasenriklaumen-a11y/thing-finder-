@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.3                                      │
+│ Cortex AI 8.7.4                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -317,6 +317,31 @@ derselbe Agent wie im Terminal: dieselben zwei Werkzeuge, dieselben Subagenten,
 derselbe Verlauf, dieselbe `.env`. Die Zwischenschritte („Suche", „Lese", „Teile")
 laufen live mit, die Antwort wird Wort für Wort gestreamt.
 
+* **Der Zustand liegt beim Server, nicht im Browser.** Erscheinungsbild,
+  Farbschema, Arbeitsweise, Denktiefe und alle Schalter der Modellauswahl merkt
+  sich Cortex selbst — in derselben Datenbank wie den Rest. Das hat drei Gründe.
+  **Jedes Gerät zeigt dasselbe:** am Rechner dunkel heißt am Handy dunkel, im
+  Code-Modus angefangen heißt auf dem Tablet Code-Modus. **Nichts blinkt:** der
+  Zustand steht schon im ausgelieferten HTML, die Seite kommt also von der ersten
+  Zeile an richtig an, statt hell zu erscheinen und dann dunkel zu werden.
+  **Und der Browser entscheidet nichts.** Was er schickt, ist ein Vorschlag; was
+  gilt, prüft der Server gegen eine Liste erlaubter Werte
+  (`cortex/uistate.py`). Ein erfundener Modus, ein unbekanntes Feld, die
+  Zeichenkette `"false"` als Wahrheitswert — nichts davon kommt durch. Im Browser
+  bleibt genau eine Sache gespeichert: das Zugangswort für `--lan`, denn das
+  *ist* der Ausweis und kann nirgendwo anders liegen.
+* **Was du im Formular einträgst, wird geprüft, bevor es gespeichert wird.**
+  Buchstaben in einem Zahlenfeld, eine Zahl außerhalb ihres Bereichs, eine
+  Auswahl, die es nicht gibt: Cortex sagt, welches Feld gemeint ist, und
+  schreibt *nichts*. Vorher nahm er alles an, meldete „gespeichert", und die
+  Einstellung tat trotzdem nichts — das merkt man erst Tage später.
+* **Handy, Tablet und großer Bildschirm** haben jeweils eigene Maße. Das Tablet
+  im Hochformat bekam lange das Handy-Layout, weil es unter 900 px breit ist —
+  mit Maßen, die für 390 px gedacht waren: die Eingabe von Rand zu Rand, die
+  Modellauswahl über die volle Breite, zwei Beispielfragen statt drei. Jetzt
+  behält es die Seitenleiste über dem Chat (im Hochformat wäre sie sonst ein
+  Drittel der Breite) und bekommt sonst die Maße des Rechners zurück. Der
+  Rundgang prüft alle vier Größen einzeln.
 * **Die Schalter** sind Schalter, keine Haken: eine Pille, in der ein weißer Knopf
   hin und her fährt, wie auf dem iPhone. Darunter steckt weiterhin ein ganz normales
   Ankreuzfeld — Label, Tabulator, Leertaste und Vorlesehilfen funktionieren
@@ -597,7 +622,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.3                                                   │
+│ Cortex AI 8.7.4                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1630,8 +1655,8 @@ oder ein eigenes NIM im Heimnetz ist ein völlig legitimer Weg zu einem Cloud-Mo
 wird nicht angefasst.
 
 SQLite (`~/.cortex/cortex.sqlite3`) hält den Response-Cache (TTL 24 h), den Verlauf
-vergangener Recherchen, den Merkzettel, den verschlüsselten Speicher, die Aufträge und
-den Token-Zähler.
+vergangener Recherchen, den Merkzettel, den verschlüsselten Speicher, die Aufträge,
+den Token-Zähler und den Zustand der Oberfläche.
 
 ## Aufbau
 
@@ -1650,6 +1675,7 @@ cortex/
   lan.py         # das eigene Netz erkunden, ohne nmap
   homeassistant.py # Zustaende lesen, Dienste aufrufen
   export.py      # HTML / Markdown / CSV
+  uistate.py     # der Zustand der Oberfläche -- auf dem Server, geprüft
   sandbox.py     # die Werkstatt: abgeschotteter Behälter für den Code-Modus
   jobs.py        # Aufträge: Fragen, die sich von selbst stellen
   usage.py       # der Token-Zähler (drei Zeichen sind ein Token)
