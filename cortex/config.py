@@ -262,6 +262,13 @@ class Settings:
     #: Modell fuer den Code-Modus. Leer heisst: Cortex sucht sich das
     #: staerkste erreichbare selbst aus.
     code_model: str = ""
+    #: Die Werkstatt im Code-Modus: Abbild und Grenzen. Aenderbar nur ueber
+    #: die .env -- wer hier schraubt, weiss, was er tut.
+    vm_image: str = ""
+    vm_idle_minutes: int = 20
+    vm_memory_mb: int = 1024
+    vm_disk_gb: int = 4
+    vm_cpus: int = 1
     #: Werkzeug-Budget je Subagent.
     subagent_budget: int = 6
     #: Wie viele Subagenten gleichzeitig laufen. Bei lokalen Modellen bringt
@@ -464,6 +471,11 @@ def get_settings() -> Settings:
         context_tokens=_env_int("CORTEX_CONTEXT_TOKENS", 16384),
         subagent_model=_env_str("CORTEX_SUBAGENT_MODEL"),
         code_model=_env_str("CORTEX_CODE_MODEL"),
+        vm_image=_env_str("CORTEX_VM_IMAGE"),
+        vm_idle_minutes=_env_int("CORTEX_VM_IDLE_MINUTES", 20),
+        vm_memory_mb=_env_int("CORTEX_VM_MEMORY_MB", 1024),
+        vm_disk_gb=_env_int("CORTEX_VM_DISK_GB", 4),
+        vm_cpus=_env_int("CORTEX_VM_CPUS", 1),
         subagent_budget=_env_int("CORTEX_SUBAGENT_BUDGET", 6),
         subagent_parallel=_env_int("CORTEX_SUBAGENT_PARALLEL", 0),
         ha_url=_env_str("CORTEX_HA_URL"),

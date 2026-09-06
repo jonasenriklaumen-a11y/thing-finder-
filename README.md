@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.4.6                                      │
+│ Cortex AI 8.5.1                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -381,7 +381,41 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   → Modell → Code-Modell* ein. Die Quellenpflicht bleibt: erfundene
   Funktionsnamen sind hier der teuerste Fehler überhaupt — sie sehen richtig aus
   und laufen nicht.
+* **Virtual Environment** — der Schalter, den es **nur im Code-Modus** gibt (dafür
+  verschwinden dort *Im Web suchen* und *Gegenprüfen*: die gehören zur Recherche).
+  Angeschaltet bekommt Cortex eine abgeschottete Maschine, in der er seinen Code
+  **wirklich ausführt**, statt zu behaupten, er laufe: ein Prozessorkern, 1 GB
+  Arbeitsspeicher, 4 GB Platte unter `/work`, Python — und **kein Netz**. Er
+  schreibt die Datei hinein, startet sie, liest die Ausgabe und behebt, was
+  schiefging, bevor er antwortet. Was dabei herauskam, steht in den
+  Zwischenschritten.
+
+  **Wie das abgesichert ist.** Code aus einem Sprachmodell ist fremder Code; er
+  läuft nie auf deinem Rechner — auch nicht „nur kurz". Cortex nimmt die stärkste
+  Abschottung, die er findet, und **fällt niemals auf den Rechner selbst zurück**:
+  1. **gVisor** (`runsc`) — ein Kern im Nutzerraum beantwortet die Systemaufrufe,
+     der echte Kernel wird nicht angefasst.
+  2. **Podman ohne Wurzelrechte** — ein Ausbruch landet in einem unprivilegierten
+     Nutzernamensraum, nicht bei root.
+  3. **Docker mit gehärtetem Profil** — geteilter Kernel, deshalb die letzte Wahl.
+
+  Findet er nichts davon, gibt es die Werkstatt nicht und das Werkzeug sagt, was zu
+  installieren ist. Dazu in jedem Fall: `--network none` (kein Netz, weder hinaus
+  noch ins Heimnetz), `--cap-drop ALL`, `--security-opt no-new-privileges`,
+  `--read-only` (geschrieben wird nur in `/work` und ein 64-MB-`/tmp` im
+  Arbeitsspeicher), ein unprivilegierter Benutzer, `--pids-limit` gegen die
+  Gabelbombe, Speicher- und CPU-Deckel, **keine** Umgebungsvariablen von außen (deine
+  Schlüssel sehen die Werkstatt nie) und **kein** Verzeichnis deines Rechners.
+  Dateien gehen nur durch das Werkzeug hinein und heraus.
+
+  **Danach bleibt nichts.** 20 Minuten nach der letzten Nachricht werden Behälter und
+  Datenträger gelöscht — die nächste Frage baut eine neue, leere Werkstatt. Beim
+  Beenden von Cortex ebenso, und beim Start räumt er weg, was ein Absturz
+  hinterlassen hat. Feineinstellung über `CORTEX_VM_IMAGE`,
+  `CORTEX_VM_IDLE_MINUTES`, `CORTEX_VM_MEMORY_MB`, `CORTEX_VM_DISK_GB`,
+  `CORTEX_VM_CPUS`.
 * **Im Web suchen an oder aus**, oben in der Modellauswahl — an ist der Normalfall.
+  Im Code-Modus gibt es diesen Schalter nicht: dort zählt die Werkstatt.
   Ausgeschaltet geht Cortex nicht mehr hinaus: Suche, Seitenabruf und Agenten werden
   ihm gar nicht erst angeboten (ein Werkzeug anzubieten und den Aufruf dann abzulehnen
   kostet nur Runden). Er antwortet dann aus seinem eigenen Wissen, aus dem Gespräch,
@@ -405,7 +439,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   selben Thema auf dieselben zwei Seiten zu und die Zerlegung bringt keine
   Breite. Das kostet zwei Runden zum Modell, bevor die erste Suche losgeht;
   ausgeschaltet entfallen beide. Steht es an, sagt es die Kopfzeile.
-* **Gegenprüfen**, der Schalter unter *Denken*. Ist er an, wird nach der Antwort
+* **Gegenprüfen**, der Schalter unter *Strukturieren* (nur im Standardmodus). Ist er an, wird nach der Antwort
   garantiert noch einmal gesucht — Cortex holt die frischen Treffer selbst, bevor
   das Modell wieder zu Wort kommt, und lässt dabei jede Seite aus, die beim ersten
   Mal dran war. (Vorher konnte das Modell die Aufforderung überlesen und seine
@@ -487,7 +521,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.4.6                                                   │
+│ Cortex AI 8.5.1                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

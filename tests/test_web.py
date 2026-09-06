@@ -27,6 +27,7 @@ class FakeToolbox:
         self.structured: bool | None = None
         self.effort = ""
         self.online: bool | None = None
+        self.sandbox: bool | None = None
         self.recheck: bool | None = None
 
 
@@ -56,6 +57,7 @@ class FakeAgent:
         structured: bool | None = None,
         effort: str = "",
         online: bool | None = None,
+        sandbox: bool | None = None,
         recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
@@ -63,6 +65,7 @@ class FakeAgent:
         self.structured = structured
         self.effort = effort
         self.online = online
+        self.sandbox = sandbox
         self.recheck = recheck
         if self.raise_error is not None:
             raise self.raise_error
@@ -602,7 +605,7 @@ def test_a_waiting_device_is_told_so(session: web.ChatSession) -> None:
 
     class Slow(FakeAgent):
         def ask(self, question, *, stream=True, mode="", structured=None,
-                recheck=None, effort="", online=None):
+                recheck=None, effort="", online=None, sandbox=None):
             started.set()
             release.wait(timeout=5)
             return AgentResult(answer="fertig")
@@ -716,6 +719,7 @@ class AskingAgent(FakeAgent):
         structured: bool | None = None,
         effort: str = "",
         online: bool | None = None,
+        sandbox: bool | None = None,
         recheck: bool | None = None,
     ) -> AgentResult:
         self.asked.append(question)
@@ -1829,7 +1833,7 @@ def test_a_silent_model_does_not_kill_the_connection(
             pass
 
         def ask(self, message, stream=True, mode='', structured=None,
-                recheck=None, effort='', online=None):
+                recheck=None, effort='', online=None, sandbox=None):
             time.sleep(0.4)
             self.on_event("answer_chunk", {"text": "Da bin ich."})
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -1908,7 +1912,7 @@ def test_stopping_cancels_the_running_agent(
             cancelled.set()
 
         def ask(self, message, stream=True, mode='', structured=None,
-                recheck=None, effort='', online=None):
+                recheck=None, effort='', online=None, sandbox=None):
             started.set()
             for _ in range(100):
                 if cancelled.is_set():
@@ -2043,7 +2047,7 @@ def test_a_closed_tab_ends_the_run(
             cancelled.set()
 
         def ask(self, message, stream=True, mode='', structured=None,
-                recheck=None, effort='', online=None):
+                recheck=None, effort='', online=None, sandbox=None):
             started.set()
             for _ in range(200):
                 if cancelled.is_set():
@@ -2098,7 +2102,7 @@ def test_the_waiting_notice_does_not_invent_another_device(
             release.set()
 
         def ask(self, message, stream=True, mode='', structured=None,
-                recheck=None, effort='', online=None):
+                recheck=None, effort='', online=None, sandbox=None):
             running.set()
             release.wait(timeout=10)
             self.on_event("done", {"tool_calls": 0, "hit_limit": False})
@@ -2302,7 +2306,9 @@ def test_every_choice_is_sent_with_every_question() -> None:
     body = html[html.index("async function ask(text){") :]
     body = body[: body.index("/* ---------- Eingabe ---------- */")]
     korb = body[body.index("JSON.stringify({") : body.index("signal: running.signal")]
-    for feld in ("message", "attachments", "mode", "structured", "recheck", "effort", "online"):
+    for feld in (
+        "message", "attachments", "mode", "structured", "recheck", "effort", "online", "sandbox",
+    ):
         assert feld in korb, f"{feld} geht nicht mit"
 
 
@@ -2408,6 +2414,36 @@ def test_the_web_switch_reaches_the_agent(
 ) -> None:
     client("POST", "/api/chat", {"message": "Frage", "online": False})
     assert agent.online is False
+
+
+def test_the_workshop_switch_belongs_to_the_code_mode() -> None:
+    """Web und Gegenpruefen gehoeren zur Recherche, die Werkstatt zum Code."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    picker = html[html.index('id="picker-models"') :]
+    picker = picker[: picker.index("picker-foot")]
+    assert 'id="werkstatt"' in picker
+    assert "Virtual Environment" in picker
+    # Der Werkstatt-Schalter steht im Code-Modus, die beiden anderen daneben.
+    werkstatt = picker[picker.index('id="werkstatt"') - 200 : picker.index('id="werkstatt"')]
+    assert "only-code" in werkstatt
+    for schalter in ('id="online"', 'id="recheck"'):
+        davor = picker[picker.index(schalter) - 200 : picker.index(schalter)]
+        assert "only-normal" in davor, f"{schalter} muss im Code-Modus verschwinden"
+    assert "body:not(.code-mode) .only-code{display:none}" in html
+    assert "body.code-mode .only-normal{display:none}" in html
+
+
+def test_the_workshop_reaches_the_agent(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    client("POST", "/api/chat", {"message": "Bau mir was", "mode": "code", "sandbox": True})
+    assert agent.sandbox is True
+
+
+def test_the_workshop_reports_what_it_does() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for event in ("vm_start", "vm_run", "vm_write", "vm_done", "vm_stop"):
+        assert f'case "{event}"' in html, f"{event} wird nicht angezeigt"
 
 
 def test_the_recheck_leaves_a_mark_on_the_answer() -> None:

@@ -394,6 +394,11 @@ textarea::placeholder{color:var(--text-3)}
 .mode:hover{color:var(--text)}
 .mode.on{background:var(--bg);color:var(--accent-text);font-weight:600;
   box-shadow:0 1px 2px rgba(0,0,0,.06)}
+/* Was nur im einen oder anderen Modus Sinn ergibt, steht auch nur dort:
+   im Web suchen und Gegenpruefen gehoeren zur Recherche, die Werkstatt zum
+   Programmieren. */
+body:not(.code-mode) .only-code{display:none}
+body.code-mode .only-normal{display:none}
 .picker-effort{padding:11px 16px;border-top:1px solid var(--line)}
 .eff-head{font-size:13px}
 .eff-head .why{display:block;color:var(--text-3);font-size:11.5px;line-height:1.5;
@@ -751,7 +756,16 @@ input:focus,select:focus{border-color:var(--accent)}
         <button type="button" class="eff" data-effort="high">High</button>
       </div>
     </div>
-    <label class="picker-think" for="online">
+    <label class="picker-think only-code" for="werkstatt">
+      <input type="checkbox" id="werkstatt">
+      <span><b>Virtual Environment</b>
+        <span class="why">Gibt Cortex eine abgeschottete Maschine, in der er
+          Code wirklich ausführt, statt zu behaupten, er laufe: ein Prozessorkern,
+          1 GB Arbeitsspeicher, 4 GB Platte, <b>kein Netz</b>. Dort darf er alles —
+          nur nicht heraus. 20 Minuten nach der letzten Nachricht wird sie samt
+          Inhalt gelöscht; die nächste Frage baut eine neue.</span></span>
+    </label>
+    <label class="picker-think only-normal" for="online">
       <input type="checkbox" id="online" checked>
       <span><b>Im Web suchen</b>
         <span class="why">Ausgeschaltet geht Cortex nicht mehr hinaus: keine Suche,
@@ -769,7 +783,7 @@ input:focus,select:focus{border-color:var(--accent)}
           selbst und sucht nur, wenn die Frage es braucht oder du ihn darum
           bittest. Das ist schneller.</span></span>
     </label>
-    <label class="picker-think" for="recheck">
+    <label class="picker-think only-normal" for="recheck">
       <input type="checkbox" id="recheck">
       <span><b>Gegenprüfen</b>
         <span class="why">Sucht nach der Antwort garantiert noch einmal — und
@@ -1146,6 +1160,7 @@ let structured = false;
 let recheck = false;
 let effort = "medium";
 let online = true;
+let sandbox = false;
 
 function setMode(wanted){
   mode = wanted === "code" ? "code" : "normal";
@@ -1161,6 +1176,13 @@ function setRecheck(on){
   recheck = !!on;
   $("#recheck").checked = recheck;
   try { localStorage.setItem("cortex-recheck", recheck ? "1" : "0"); } catch {}
+  refreshHeader();
+}
+
+function setSandbox(on){
+  sandbox = !!on;
+  $("#werkstatt").checked = sandbox;
+  try { localStorage.setItem("cortex-vm", sandbox ? "1" : "0"); } catch {}
   refreshHeader();
 }
 
@@ -1192,6 +1214,7 @@ document.querySelectorAll("#modes .mode").forEach(button =>
 document.querySelectorAll("#efforts .eff").forEach(button =>
   button.addEventListener("click", () => setEffort(button.dataset.effort)));
 $("#online").addEventListener("change", (e) => setOnline(e.target.checked));
+$("#werkstatt").addEventListener("change", (e) => setSandbox(e.target.checked));
 $("#structure").addEventListener("change", (e) => setStructured(e.target.checked));
 $("#recheck").addEventListener("change", (e) => setRecheck(e.target.checked));
 
@@ -1203,9 +1226,10 @@ try {
   setRecheck(localStorage.getItem("cortex-recheck") === "1");
   setEffort(localStorage.getItem("cortex-effort") || "medium");
   setOnline(localStorage.getItem("cortex-online") !== "0");
+  setSandbox(localStorage.getItem("cortex-vm") === "1");
 } catch {
   setMode("normal"); setStructured(false); setRecheck(false);
-  setEffort("medium"); setOnline(true);
+  setEffort("medium"); setOnline(true); setSandbox(false);
 }
 // Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
 // soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
@@ -1613,7 +1637,7 @@ async function ask(text){
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
-        message: text, attachments, mode, structured, recheck, effort, online,
+        message: text, attachments, mode, structured, recheck, effort, online, sandbox,
       }),
       signal: running.signal,
     });
@@ -1702,6 +1726,19 @@ async function ask(text){
           s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
           s.querySelector(".sub").textContent = t; steps.appendChild(s);
         }); break;
+      case "vm_start":
+        step(steps, "[Werkstatt]", `wird gestartet (${ev.runtime})`); break;
+      case "vm_run":
+        step(steps, "[Werkstatt]", ev.command); break;
+      case "vm_write":
+        step(steps, "[Werkstatt]", `schreibt ${ev.path}`); break;
+      case "vm_done":
+        step(steps, "[Werkstatt]", ev.exit_code === 0
+          ? `lief durch (${ev.seconds}s)`
+          : `Rückgabewert ${ev.exit_code} (${ev.seconds}s)`,
+          ev.exit_code === 0 ? "" : "warn"); break;
+      case "vm_stop":
+        step(steps, "[Werkstatt]", `abgeräumt — ${ev.reason}`); break;
       case "code_model":
         // Im Code-Modus zaehlt das staerkste Modell, nicht das eingestellte.
         step(steps, "[Code]", `stärkstes Modell: ${ev.model}`); break;
@@ -2770,7 +2807,8 @@ async function refreshHeader(){
     const bits = [cfg.values.CORTEX_LOCATION || "kein Ortsfilter"];
     // Was vom Normalfall abweicht, gehoert in die Kopfzeile -- es aendert
     // das Ergebnis spuerbar, und man sieht es sonst nirgends.
-    if (!online) bits.push("ohne Web");
+    if (mode === "code" && sandbox) bits.push("Werkstatt");
+    else if (!online) bits.push("ohne Web");
     if (structured) bits.push("strukturiert");
     if (recheck) bits.push("gegenprüfen");
     if (effort !== "medium") bits.push("Denktiefe " + effort);

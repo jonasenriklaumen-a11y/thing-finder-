@@ -81,6 +81,7 @@ class FakeAgent:
         recheck: bool | None = None,
         effort: str = "",
         online: bool | None = None,
+        sandbox: bool | None = None,
     ) -> Any:
         self.gesehen.append(
             {
@@ -90,12 +91,18 @@ class FakeAgent:
                 "gegenprobe": recheck,
                 "tiefe": effort,
                 "web": online,
+                "werkstatt": sandbox,
             }
         )
         text = message.lower()
 
         if mode == "code":
             self.on_event("code_model", {"model": "anthropic/claude-opus-5"})
+        if sandbox and mode == "code":
+            self.on_event("vm_start", {"runtime": "Docker (gehaertet)"})
+            self.on_event("vm_write", {"path": "/work/loesung.py"})
+            self.on_event("vm_run", {"command": "python loesung.py"})
+            self.on_event("vm_done", {"exit_code": 0, "seconds": 0.4})
         if structured:
             self.on_event("subagents", {"tasks": ["Teil eins", "Teil zwei"]})
             self.on_event("subagent_done", {"task": "Teil eins"})
@@ -293,6 +300,39 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.uncheck("#recheck")
         pg.keyboard.press("Escape")
         foto("04-modi")
+
+    if dran("werkstatt"):
+        log.abschnitt("4a. Werkstatt im Code-Modus")
+        pg.click('#modes .mode[data-mode="code"]')
+        pg.wait_for_timeout(300)
+        pg.click("#btn-model")
+        pg.wait_for_timeout(500)
+        log.pruefe(pg.is_visible("#werkstatt"), "der Schalter steht im Code-Modus bereit")
+        log.pruefe(not pg.is_visible("#online"), "Im Web suchen ist hier verschwunden")
+        log.pruefe(not pg.is_visible("#recheck"), "Gegenprüfen ebenso")
+        log.pruefe(pg.is_visible("#efforts"), "die Denktiefe bleibt")
+        pg.check("#werkstatt")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+        log.pruefe("Werkstatt" in pg.inner_text("#status"), "die Kopfzeile sagt es")
+        pg.fill("#input", "Schreib ein Skript und führ es aus")
+        pg.click("#send")
+        pg.wait_for_timeout(1200)
+        letzte = agent.gesehen[-1]
+        log.pruefe(letzte["werkstatt"] is True, f"der Schalter kommt an ({letzte['werkstatt']})")
+        schritte = pg.inner_text(".steps >> nth=-1")
+        log.pruefe("[Werkstatt]" in schritte, "die Werkstatt meldet sich")
+        log.pruefe("lief durch" in schritte, "und sagt, was herauskam")
+        foto("04a-werkstatt")
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(300)
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        log.pruefe(not pg.is_visible("#werkstatt"), "im Standardmodus ist sie wieder weg")
+        log.pruefe(pg.is_visible("#online") and pg.is_visible("#recheck"),
+                   "dafür sind Web und Gegenprüfen zurück")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
 
     if dran("web"):
         log.abschnitt("4b. Ohne Web")

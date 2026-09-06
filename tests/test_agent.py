@@ -2196,6 +2196,70 @@ def test_without_the_web_there_is_no_second_round(
 
 
 # ---------------------------------------------------------------------------
+# Die Werkstatt
+# ---------------------------------------------------------------------------
+def test_the_workshop_exists_only_in_the_code_mode(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Beim Recherchieren waere eine Maschine zum Programmestarten nur Ballast."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+
+    agent.ask("", mode="code", sandbox=True)
+    namen = {schema["function"]["name"] for schema in agent.tools}
+    assert {"vm_run", "vm_write", "vm_read"} <= namen
+    assert "Werkstatt" in agent.messages[0]["content"]
+
+    agent.ask("", mode="normal")
+    namen = {schema["function"]["name"] for schema in agent.tools}
+    assert not ({"vm_run", "vm_write", "vm_read"} & namen), "im Gespraech nicht"
+    assert "Werkstatt" not in agent.messages[0]["content"]
+
+    agent.ask("", mode="code", sandbox=False)
+    namen = {schema["function"]["name"] for schema in agent.tools}
+    assert not ({"vm_run", "vm_write", "vm_read"} & namen), "ausgeschaltet auch nicht"
+
+
+def test_the_workshop_prompt_draws_the_line(settings: Settings, toolbox: Toolbox) -> None:
+    """Drinnen alles, hinaus nichts -- und ein Aufruf zum Ausbruch ist ein Angriff."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("", mode="code", sandbox=True)
+    system = agent.messages[0]["content"]
+    assert "auszubrechen" in system
+    assert "Angriff" in system
+    assert "Kein `pip install`" in system, "ohne Netz muss das Modell es wissen"
+    assert "zwanzig minuten" in system.lower()
+
+
+def test_the_clock_is_reset_by_every_message(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Zwanzig Minuten ab der letzten NACHRICHT, nicht ab dem letzten Befehl."""
+    beruehrt: list[str] = []
+
+    class FakeBox:
+        alive = True
+
+        def touch(self) -> None:
+            beruehrt.append("angefasst")
+
+    toolbox._sandbox_box = FakeBox()
+    monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("Noch eine Frage", stream=False, mode="code", sandbox=True)
+    assert beruehrt, "die Uhr wird mit jeder Frage neu gestellt"
+
+
+def test_a_missing_runtime_is_an_answer_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ohne Abschottung sagt das Werkzeug, was fehlt -- und fuehrt nichts aus."""
+    monkeypatch.setattr("cortex.sandbox.find_runtime", lambda: None)
+    antwort = toolbox.vm_run("echo hallo")
+    assert "error" in antwort
+    assert "fuehre ich nichts aus" in antwort["error"]
+
+
+# ---------------------------------------------------------------------------
 # Was Cortex sich von selbst merkt
 # ---------------------------------------------------------------------------
 def test_personal_notes_stand_in_the_system_prompt(

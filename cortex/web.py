@@ -237,7 +237,11 @@ class ChatSession:
         }
 
     def reload(self) -> None:
-        """Nach dem Speichern neuer Einstellungen alles neu aufbauen."""
+        """Nach dem Speichern neuer Einstellungen alles neu aufbauen.
+
+        Die Werkstatt gehoert dazu: haette jemand ihre Grenzen geaendert,
+        arbeitete die laufende sonst noch mit den alten weiter.
+        """
         with self._lock:
             if self._agent is not None:
                 with contextlib.suppress(Exception):
@@ -245,6 +249,10 @@ class ChatSession:
             self._agent = None
             self._settings = None
             reset_settings_cache()
+            with contextlib.suppress(Exception):
+                from cortex.sandbox import forget_shared
+
+                forget_shared()
 
     def _settings_dirty(self) -> None:
         """Merkt vor, dass der Agent neu gebaut werden muss.
@@ -288,6 +296,7 @@ class ChatSession:
         recheck: bool | None = None,
         effort: str = "",
         online: bool | None = None,
+        sandbox: bool | None = None,
     ) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
@@ -330,6 +339,7 @@ class ChatSession:
                     recheck=recheck,
                     effort=effort,
                     online=online,
+                    sandbox=sandbox,
                 )
             finally:
                 agent.on_event = None
@@ -1370,6 +1380,8 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         effort = str(payload.get("effort", "")).strip()
         online = payload.get("online")
         online = None if online is None else bool(online)
+        sandbox = payload.get("sandbox")
+        sandbox = None if sandbox is None else bool(sandbox)
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return
@@ -1409,6 +1421,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                     recheck=recheck,
                     effort=effort,
                     online=online,
+                    sandbox=sandbox,
                 )
             except Exception as exc:
                 events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
@@ -1586,6 +1599,14 @@ def serve(
     global TOKEN
 
     TOKEN = token
+    # Ein harter Abbruch kann eine Werkstatt zurueckgelassen haben. Sie belegt
+    # Speicher und hat nichts mehr zu tun -- also weg damit, bevor es losgeht.
+    try:
+        from cortex.sandbox import sweep
+
+        threading.Thread(target=sweep, daemon=True).start()
+    except Exception:  # pragma: no cover - Aufraeumen darf nie den Start kosten
+        pass
     server = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=_warm_up, daemon=True).start()
     if open_browser:

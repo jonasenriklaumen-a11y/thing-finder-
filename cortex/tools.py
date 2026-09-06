@@ -596,6 +596,73 @@ STORAGE_EDIT_SCHEMA: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
+# Die Werkstatt -- nur im Code-Modus, nur wenn sie eingeschaltet ist
+# ---------------------------------------------------------------------------
+VM_RUN_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "vm_run",
+        "description": (
+            "Fuehrt einen Shell-Befehl in der abgeschotteten Werkstatt aus und gibt "
+            "Ausgabe und Rueckgabewert zurueck. Dort darfst du alles: Dateien anlegen, "
+            "Programme starten, Tests laufen lassen. Es gibt KEIN Netz (kein pip "
+            "install, kein curl), ein Gigabyte Arbeitsspeicher, einen Prozessorkern "
+            "und vier Gigabyte Platte unter /work. Nutze es, um deinen Code wirklich "
+            "auszuprobieren, statt zu behaupten, er laufe."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Der Befehl, z.B. 'python loesung.py' oder 'pytest -q'.",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Sekunden, hoechstens 120. Standard 30.",
+                },
+            },
+            "required": ["command"],
+        },
+    },
+}
+
+VM_WRITE_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "vm_write",
+        "description": (
+            "Legt eine Datei in der Werkstatt an oder ueberschreibt sie. Pfade liegen "
+            "unter /work. So bringst du deinen Code hinein, bevor du ihn ausfuehrst."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "z.B. 'loesung.py'."},
+                "text": {"type": "string", "description": "Der vollstaendige Inhalt."},
+            },
+            "required": ["path", "text"],
+        },
+    },
+}
+
+VM_READ_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "vm_read",
+        "description": "Liest eine Datei aus der Werkstatt (unter /work).",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+}
+
+VM_SCHEMAS: tuple[dict[str, Any], ...] = (VM_RUN_SCHEMA, VM_WRITE_SCHEMA, VM_READ_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
 # Einstellungen aus dem Gespraech heraus
 # ---------------------------------------------------------------------------
 SETTING_SCHEMA: dict[str, Any] = {
@@ -654,6 +721,8 @@ class ToolStats:
     storage_reads: int = 0
     storage_writes: int = 0
     settings_changed: int = 0
+    #: Aufrufe in der Werkstatt -- ausfuehren, schreiben, lesen.
+    vm_calls: int = 0
 
     @property
     def tool_calls(self) -> int:
@@ -672,6 +741,7 @@ class ToolStats:
             + self.storage_reads
             + self.storage_writes
             + self.settings_changed
+            + self.vm_calls
         )
 
     def reset(self) -> None:
@@ -692,6 +762,7 @@ class ToolStats:
         self.storage_reads = 0
         self.storage_writes = 0
         self.settings_changed = 0
+        self.vm_calls = 0
 
 
 class Toolbox:
@@ -741,6 +812,8 @@ class Toolbox:
         self._google_client: Any = None
         #: Ebenso das Lager -- ohne eingetragene Adresse wird nichts gebaut.
         self._storage_client: Any = None
+        #: Und die Werkstatt: sie entsteht erst, wenn wirklich Code laufen soll.
+        self._sandbox_box: Any = None
         #: Wird gerufen, wenn sich eine Einstellung geaendert hat. Die
         #: Oberflaeche baut daraufhin den Agenten fuer die naechste Frage neu.
         self.on_settings_changed: Any = None
@@ -1258,6 +1331,68 @@ class Toolbox:
         }
 
     # -- Dispatch ---------------------------------------------------------
+    # -- Werkzeug: die Werkstatt ------------------------------------------
+    def _sandbox(self) -> Any:
+        """Die gemeinsame Werkstatt -- gebaut beim ersten Zugriff."""
+        from cortex import sandbox as werkstatt
+
+        if self._sandbox_box is None:
+            self._sandbox_box = werkstatt.shared(self.settings, on_event=self._emit_pair)
+        else:
+            self._sandbox_box.on_event = self._emit_pair
+        return self._sandbox_box
+
+    def _emit_pair(self, event: str, payload: dict[str, Any]) -> None:
+        """Die Werkstatt meldet als (Name, Nutzlast) -- der Rest als Schlagworte."""
+        if self.on_event:
+            self.on_event(event, payload)
+
+    def vm_run(self, command: str, timeout: int = 0) -> dict[str, Any]:
+        """Fuehrt einen Befehl in der Werkstatt aus."""
+        from cortex.sandbox import COMMAND_TIMEOUT, SandboxUnavailable
+
+        try:
+            box = self._sandbox()
+            result = box.run(command, timeout=int(timeout or COMMAND_TIMEOUT))
+        except SandboxUnavailable as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:  # pragma: no cover - Laufzeit meldet Unerwartetes
+            return {"error": f"Die Werkstatt antwortet nicht: {exc}"}
+        self.stats.vm_calls += 1
+        return result.as_dict()
+
+    def vm_write(self, path: str, text: str) -> dict[str, Any]:
+        """Legt eine Datei in der Werkstatt an."""
+        from cortex.sandbox import SandboxUnavailable
+
+        try:
+            answer = self._sandbox().write(path, text)
+        except SandboxUnavailable as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:  # pragma: no cover
+            return {"error": f"Die Werkstatt antwortet nicht: {exc}"}
+        self.stats.vm_calls += 1
+        return answer
+
+    def vm_read(self, path: str) -> dict[str, Any]:
+        """Liest eine Datei aus der Werkstatt."""
+        from cortex.sandbox import SandboxUnavailable
+
+        try:
+            answer = self._sandbox().read(path)
+        except SandboxUnavailable as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:  # pragma: no cover
+            return {"error": f"Die Werkstatt antwortet nicht: {exc}"}
+        self.stats.vm_calls += 1
+        return answer
+
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt den Tool-Call *name* mit *arguments* aus."""
         if name == "web_search":
@@ -1276,6 +1411,17 @@ class Toolbox:
             return self.search_news(
                 query=str(arguments.get("query", "")), count=int(arguments.get("count") or 0)
             )
+        if name == "vm_run":
+            return self.vm_run(
+                command=str(arguments.get("command", "")),
+                timeout=int(arguments.get("timeout") or 0),
+            )
+        if name == "vm_write":
+            return self.vm_write(
+                path=str(arguments.get("path", "")), text=str(arguments.get("text", ""))
+            )
+        if name == "vm_read":
+            return self.vm_read(path=str(arguments.get("path", "")))
         if name == "calculate":
             return self.calculate(expression=str(arguments.get("expression", "")))
         if name == "remember":
