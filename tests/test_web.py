@@ -1099,7 +1099,11 @@ def test_every_palette_sets_the_same_variables() -> None:
             r"--([a-z0-9-]+):",
             re.search(r":root\{(.*?)\}", html, re.S).group(1),
         )
-    ) - {"radius", "radius-lg", "serif", "sans", "mono", "shadow"}
+    # Was jedes Schema selbst setzen muss, sind die Farben. Radien, Schriften,
+    # der Schatten und der weisse Knopf im Schalter sind ueberall dieselben --
+    # sie in sechzehn Bloecken zu wiederholen wuerde nur die Gelegenheit
+    # schaffen, sie an einer Stelle zu vergessen.
+    ) - {"radius", "radius-lg", "serif", "sans", "mono", "shadow", "knob"}
     blocks = re.findall(
         r':root\[data-palette="([a-z]+)"\](\[data-theme="dark"\])?\{(.*?)\}', html, re.S
     )
