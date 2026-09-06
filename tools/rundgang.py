@@ -501,8 +501,114 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
             "der Merkzettel antwortet",
         )
 
+    if dran("suche"):
+        log.abschnitt("11. Chats durchsuchen")
+        vorher = pg.locator(".recent").count()
+        pg.fill("#chatsuche", "Lastenrad")
+        pg.wait_for_timeout(600)
+        gefunden = pg.locator(".recent").count()
+        log.pruefe(gefunden <= vorher, f"die Liste wird enger ({vorher} -> {gefunden})")
+        if gefunden:
+            log.pruefe(pg.locator(".recent mark").count() > 0, "der Treffer ist hervorgehoben")
+        pg.fill("#chatsuche", "gibtesnichtxyz")
+        pg.wait_for_timeout(600)
+        log.pruefe(pg.locator(".recents-leer").count() == 1, "nichts gefunden wird gesagt")
+        pg.click("#suche-weg")
+        pg.wait_for_timeout(600)
+        log.pruefe(pg.locator(".recent").count() == vorher, "und die Liste kommt zurück")
+        foto("11-suche")
+
+    if dran("export"):
+        log.abschnitt("12. Mitnehmen")
+        pg.fill("#input", "Kurz und knapp bitte")
+        pg.click("#send")
+        pg.wait_for_selector(".msg.bot .bubble", state="visible")
+        pg.wait_for_timeout(700)
+        log.pruefe(pg.locator(".answer-tools").count() > 0, "unter der Antwort steht ein Knopf")
+        pg.hover(".msg.bot >> nth=-1")
+        pg.click('.answer-tools >> nth=-1 >> [data-do="copy"]')
+        pg.wait_for_timeout(400)
+        beschriftung = pg.inner_text('.answer-tools >> nth=-1 >> [data-do="copy"]')
+        log.pruefe(beschriftung in ("Kopiert", "Ging nicht"),
+                   f"das Kopieren meldet sich: {beschriftung!r}")
+
+    if dran("speicher"):
+        log.abschnitt("13. Was Cortex über mich weiß")
+        pg.click("#btn-settings")
+        pg.wait_for_selector("#overlay.open", state="visible")
+        pg.click("#btn-memory")
+        pg.wait_for_selector("#membox.open", state="visible")
+        # Das Fenster ist offen, bevor die Antwort des Servers da ist --
+        # ohne dieses Warten prueft man eine noch leere Liste.
+        pg.wait_for_timeout(800)
+        log.pruefe(
+            pg.locator("#merkliste .merk").count() > 0
+            or pg.locator("#merkliste .merk-leer").count() == 1,
+            "das Fenster sagt, was drinsteht -- oder dass nichts drinsteht",
+        )
+        foto("13-speicher")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+        log.pruefe(not pg.is_visible("#membox.open"), "Escape schließt es")
+        log.pruefe(pg.is_visible("#overlay.open"), "die Einstellungen bleiben offen")
+
+        log.abschnitt("14. Nutzung")
+        log.pruefe(pg.locator("#zaehler .kachel").count() == 3, "drei Kacheln beim Zähler")
+        log.pruefe("Token" in pg.inner_text("#zaehler"), "sie sprechen von Token")
+
+        log.abschnitt("15. Aufträge")
+        pg.fill("#job-frage", "Was gibt es Neues bei Lastenrädern?")
+        pg.select_option("#job-rhythm", "weekly")
+        pg.wait_for_timeout(200)
+        log.pruefe(pg.is_visible("#job-tag-feld"), "wöchentlich fragt nach dem Wochentag")
+        pg.click("#job-add")
+        pg.wait_for_timeout(700)
+        log.pruefe(pg.locator(".auftrag").count() == 1, "der Auftrag steht in der Liste")
+        log.pruefe("wöchentlich" in pg.inner_text(".auftrag"), "mit seinem Rhythmus")
+        pg.select_option("#job-rhythm", "hourly")
+        pg.wait_for_timeout(200)
+        log.pruefe(not pg.is_visible("#job-tag-feld"), "stündlich braucht keinen Wochentag")
+        foto("15-auftraege")
+
+        log.abschnitt("16. Google")
+        log.pruefe(pg.locator("#google-write").count() == 1, "der Schalter zum Ändern ist da")
+        log.pruefe(
+            "Verschickt wird nie eine Mail" in pg.inner_text("#google-write + label"),
+            "und sagt, dass nichts verschickt wird",
+        )
+        pg.click("#cancel")
+        pg.wait_for_timeout(500)
+
+    if dran("werkstatt2"):
+        log.abschnitt("17. Werkstatt: Dateien")
+        # Die Modusknoepfe liegen in der Kopfzeile, der Werkstatt-Schalter in
+        # der Modellauswahl. Waehrend die offen ist, liegt eine Sperrflaeche
+        # ueber der Kopfzeile -- also erst umschalten, dann aufklappen.
+        pg.click('#modes .mode[data-mode="code"]')
+        pg.wait_for_timeout(300)
+        pg.click("#btn-model")
+        pg.wait_for_timeout(500)
+        if not pg.is_checked("#werkstatt"):
+            pg.check("#werkstatt")
+        pg.wait_for_timeout(300)
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+        log.pruefe(pg.is_visible("#btn-vmfiles"), "im Code-Modus gibt es den Dateiknopf")
+        pg.click("#btn-vmfiles")
+        pg.wait_for_selector("#vmbox.open", state="visible")
+        pg.wait_for_timeout(800)
+        log.pruefe(
+            pg.locator("#vmliste .merk-leer").count() == 1,
+            "ohne laufende Werkstatt wird das gesagt, statt eine leere Liste zu zeigen",
+        )
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(500)
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(400)
+        log.pruefe(not pg.is_visible("#btn-vmfiles"), "im Standardmodus verschwindet er wieder")
+
     if dran("bewegung"):
-        log.abschnitt("11. Bewegung")
+        log.abschnitt("18. Bewegung")
         pg.click("#btn-settings")
         pg.wait_for_selector("#overlay.open", state="visible")
         log.pruefe("sheet-in" in pg.evaluate(laeuft, "#overlay .sheet"),
@@ -524,7 +630,7 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
 
 def handy(pg: Any, log: Protokoll, bilder: Path | None) -> None:
     """Dasselbe noch einmal, aber auf einem schmalen Schirm."""
-    log.abschnitt("12. Auf dem Handy")
+    log.abschnitt("19. Auf dem Handy")
     log.pruefe(
         pg.eval_on_selector("body", "e => e.classList.contains('collapsed')")
         or pg.eval_on_selector("aside", "e => e.getBoundingClientRect().right <= 1"),
@@ -560,7 +666,7 @@ def handy(pg: Any, log: Protokoll, bilder: Path | None) -> None:
 
 def ohne_bewegung(pg: Any, log: Protokoll) -> None:
     """Wer im System weniger Bewegung eingestellt hat, bekommt keine."""
-    log.abschnitt("13. Weniger Bewegung")
+    log.abschnitt("20. Weniger Bewegung")
     pg.click("#btn-settings")
     pg.wait_for_selector("#overlay.open", state="visible")
     laeuft = """(sel) => {
@@ -627,7 +733,7 @@ def main() -> int:
             ohne_bewegung(ruhig, log)
             ruhig.close()
 
-        log.abschnitt("14. Die Konsole")
+        log.abschnitt("21. Die Konsole")
         log.pruefe(not fehler, f"keine Fehler im Browser ({fehler[:3]})")
         browser.close()
 

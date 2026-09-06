@@ -24,6 +24,7 @@ from cortex.storage import normalize_access as storage_access
 from cortex.tools import (
     ASK_SCHEMA,
     CALENDAR_SCHEMA,
+    GOOGLE_WRITE_SCHEMAS,
     HA_CALL_SCHEMA,
     HA_STATES_SCHEMA,
     LAN_HOST_SCHEMA,
@@ -485,6 +486,28 @@ NIEMALS Namen, Adressen, Nummern, Betreffs oder ganze Saetze daraus in eine \
 Suchanfrage -- die ginge an eine fremde Suchmaschine. Suche mit allgemeinen \
 Begriffen; das Persoenliche bleibt im Gespraech."""
 
+#: Kommt zusaetzlich, wenn der Nutzer das Aendern ausdruecklich erlaubt hat.
+#: Der Satz "du kannst nur lesen" aus GOOGLE_PROMPT wird hier ausdruecklich
+#: zurueckgenommen -- zwei widerspruechliche Saetze im selben Prompt waeren
+#: schlimmer als gar keiner.
+GOOGLE_WRITE_PROMPT = """\
+
+Der Nutzer hat dir zusaetzlich das AENDERN erlaubt. Damit gilt der Satz "du kannst \
+nur lesen" von oben nicht mehr -- fuer diese drei Dinge und nur fuer sie:
+- `calendar_add(summary, start, end, ...)` -- einen Termin eintragen.
+- `calendar_edit(event_id, ...)` -- einen bestehenden Termin aendern. Die Kennung \
+holst du dir vorher mit `calendar_events`; rate sie nie.
+- `mail_draft(subject, body, to, cc)` -- einen Mail-ENTWURF anlegen.
+So gehst du damit um:
+- Vor jeder dieser Aktionen fragt Cortex den Nutzer. Sagt er nein, ist es erledigt: \
+du versuchst es nicht anders herum noch einmal.
+- Fehlt dir eine Angabe -- welcher Tag, welche Uhrzeit, wie lange, an wen --, frag \
+mit `ask_user` nach. Ein erfundener Termin ist schlimmer als eine Rueckfrage.
+- Verschicken kannst du nichts. Ein Entwurf bleibt ein Entwurf, bis der Nutzer selbst \
+auf Senden drueckt; sag ihm das dazu, damit er nicht glaubt, die Mail sei weg.
+- Loeschen kannst du auch nichts -- weder Mails noch Termine. Wer das will, macht es \
+selbst."""
+
 #: Wird an den Systemprompt gehaengt, sobald eine Oberflaeche Rueckfragen
 #: annehmen kann. Ohne jemanden am anderen Ende waere die Erwaehnung schaedlich:
 #: das Modell wuerde ein Werkzeug aufrufen, das es gar nicht gibt.
@@ -706,6 +729,9 @@ class Agent:
         self.online = True
         #: Die Werkstatt im Code-Modus. Nur dort sichtbar, nur dort nutzbar.
         self.sandbox = False
+        #: Der Zaehler. Er haengt an derselben Datenbank wie der Cache; ohne
+        #: Datenverzeichnis (Tests) wird schlicht nichts mitgeschrieben.
+        self._usage: Any = None
         #: Im Code-Modus das staerkste erreichbare Modell. Einmal ermittelt,
         #: dann gemerkt -- die Suche danach fragt bei Ollama nach und soll
         #: nicht vor jeder Frage neu laufen. "" heisst "nichts gefunden".
@@ -751,6 +777,11 @@ class Agent:
         # verbunden hat -- sonst sieht es sie gar nicht erst.
         if self.settings.google_enabled and self.settings.google_client_id:
             extra.extend((CALENDAR_SCHEMA, MAIL_SEARCH_SCHEMA, MAIL_READ_SCHEMA))
+            # Aendern ist ein eigener Schalter. Ohne ihn sieht das Modell die
+            # schreibenden Werkzeuge gar nicht -- verlaesslicher als jede
+            # Bitte im Prompt.
+            if getattr(self.settings, "google_write", False):
+                extra.extend(GOOGLE_WRITE_SCHEMAS)
         # Die Rechtestufe entscheidet, was das Modell ueberhaupt sieht. Ein
         # Werkzeug, das nicht angeboten wird, kann auch nicht falsch benutzt
         # werden -- das ist verlaesslicher als eine Bitte im Prompt.
@@ -1030,11 +1061,30 @@ class Agent:
                 parts.append(STORAGE_WRITE_PROMPT)
         if self.settings.google_enabled and self.settings.google_client_id:
             parts.append(GOOGLE_PROMPT)
+            if getattr(self.settings, "google_write", False):
+                parts.append(GOOGLE_WRITE_PROMPT)
         if self.settings.ha_url and self.settings.ha_token:
             parts.append(HA_PROMPT)
             if self.settings.ha_control:
                 parts.append(HA_CONTROL_PROMPT)
         return "".join(parts)
+
+    def _note_usage(self, messages: list[dict[str, Any]], answer: Any) -> None:
+        """Schreibt mit, was dieser Aufruf gekostet hat.
+
+        Gezaehlt wird, was hinausgeht und was zurueckkommt. Ein Fehler beim
+        Zaehlen darf nie eine Antwort kosten -- deshalb faengt das hier alles.
+        """
+        try:
+            from cortex.usage import UsageLog, message_tokens
+
+            if self._usage is None:
+                self._usage = UsageLog(self.settings.db_path)
+            hinein = message_tokens(messages)
+            heraus = message_tokens([answer]) if isinstance(answer, dict) else 0
+            self._usage.record(self.active_model, hinein, heraus)
+        except Exception:  # pragma: no cover - Zaehlen ist nie kritisch
+            pass
 
     def _llm_kwargs(self) -> dict[str, Any]:
         """Aufrufargumente fuer das Modell dieses Turns.
@@ -1285,8 +1335,12 @@ class Agent:
             # kleben bleiben.
             if content and not tool_calls:
                 self._emit("answer_chunk", text=content)
-            return {"role": "assistant", "content": content, "tool_calls": tool_calls}
-        return self._consume_stream(response)
+            fertig = {"role": "assistant", "content": content, "tool_calls": tool_calls}
+            self._note_usage(messages, fertig)
+            return fertig
+        gestreamt = self._consume_stream(response)
+        self._note_usage(messages, gestreamt)
+        return gestreamt
 
     def _consume_stream(self, response: Any) -> dict[str, Any]:
         """Sammelt Text- und Tool-Call-Deltas eines Streams ein."""
@@ -1796,6 +1850,7 @@ class Agent:
                     parts.append(piece)
                     self._emit("answer_chunk", text=piece)
             text = "".join(parts)
+        self._note_usage(self.messages, {"role": "assistant", "content": text})
         self.messages.append({"role": "assistant", "content": text})
         return text
 

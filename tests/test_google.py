@@ -81,12 +81,28 @@ def test_disconnecting_removes_the_file(store: TokenStore) -> None:
 # Anmeldung
 # ---------------------------------------------------------------------------
 def test_only_read_scopes_are_requested() -> None:
-    """Verschicken oder loeschen soll technisch unmoeglich sein."""
+    """Ohne ausdrueckliche Erlaubnis soll Schreiben technisch unmoeglich sein."""
     url = google.consent_url("id-1", "http://localhost:8765/google")
     assert "gmail.readonly" in url
     assert "calendar.readonly" in url
     for forbidden in ("gmail.send", "gmail.modify", "gmail.compose", "calendar.events"):
         assert forbidden not in url
+
+
+def test_write_asks_for_exactly_two_more_rights() -> None:
+    """Aendern heisst: Termine und Entwuerfe. Verschicken nie."""
+    url = google.consent_url("id-1", "http://localhost:8765/google", write=True)
+    assert "calendar.events" in url
+    assert "gmail.compose" in url
+    # Und weiterhin nichts, womit sich eine Mail verschicken oder etwas
+    # loeschen liesse.
+    for forbidden in ("gmail.send", "gmail.modify", "auth/calendar+", "drive"):
+        assert forbidden not in url
+
+
+def test_write_scopes_are_a_superset_of_the_read_scopes() -> None:
+    assert set(google.SCOPES) <= set(google.WRITE_SCOPES)
+    assert len(google.WRITE_SCOPES) == len(google.SCOPES) + 2
 
 
 def test_the_consent_url_asks_for_a_refresh_token() -> None:
@@ -359,3 +375,102 @@ def test_the_stored_file_is_json_shaped(store: TokenStore) -> None:
 
     raw = Cipher(store._key_path).decrypt(store.path.read_text(encoding="utf-8"))
     assert json.loads(raw)["email"] == "a@b.de"
+
+
+# ---------------------------------------------------------------------------
+# Schreiben -- nur mit Erlaubnis, nie verschicken
+# ---------------------------------------------------------------------------
+def test_an_event_is_created_with_the_given_times(linked: TokenStore) -> None:
+    gesehen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesehen["url"] = str(request.url)
+        gesehen["body"] = json.loads(request.content)
+        gesehen["method"] = request.method
+        return httpx.Response(200, json={"id": "ev-1", "htmlLink": "https://cal/ev-1",
+                                         "summary": "Zahnarzt",
+                                         "start": {"dateTime": "2026-09-08T14:00:00"},
+                                         "end": {"dateTime": "2026-09-08T15:00:00"}})
+
+    api = Google("id", "secret", linked, client=_client(handler))
+    antwort = api.create_event("Zahnarzt", "2026-09-08T14:00:00")
+    assert antwort["created"] is True
+    assert antwort["id"] == "ev-1"
+    assert gesehen["method"] == "POST"
+    assert "calendars/primary/events" in gesehen["url"]
+    # Ohne Ende: eine Stunde, nicht ein Fehler.
+    assert gesehen["body"]["end"] == {"dateTime": "2026-09-08T15:00:00"}
+
+
+def test_a_whole_day_event_uses_dates_not_times(linked: TokenStore) -> None:
+    gesehen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesehen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "ev-2"})
+
+    api = Google("id", "secret", linked, client=_client(handler))
+    api.create_event("Urlaub", "2026-09-08", whole_day=True)
+    assert gesehen["body"]["start"] == {"date": "2026-09-08"}
+    assert gesehen["body"]["end"] == {"date": "2026-09-09"}
+
+
+def test_editing_only_sends_what_changes(linked: TokenStore) -> None:
+    """PATCH, nicht PUT: eine Titelkorrektur darf die Uhrzeit nicht loeschen."""
+    gesehen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesehen["method"] = request.method
+        gesehen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "ev-1"})
+
+    api = Google("id", "secret", linked, client=_client(handler))
+    api.update_event("ev-1", summary="Zahnarzt (verschoben)")
+    assert gesehen["method"] == "PATCH"
+    assert set(gesehen["body"]) == {"summary"}
+
+
+def test_editing_nothing_is_refused(linked: TokenStore) -> None:
+    api = Google("id", "secret", linked, client=_client(lambda r: httpx.Response(200, json={})))
+    with pytest.raises(GoogleError, match="nichts genannt"):
+        api.update_event("ev-1")
+
+
+def test_a_draft_is_a_draft_and_not_a_sent_mail(linked: TokenStore) -> None:
+    gesehen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesehen["url"] = str(request.url)
+        gesehen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "dr-1"})
+
+    api = Google("id", "secret", linked, client=_client(handler))
+    antwort = api.create_draft("wer@example.com", "Betreff", "Text der Mail")
+    assert antwort["drafted"] is True
+    assert gesehen["url"].endswith("/drafts"), "niemals /messages/send"
+    roh = base64.urlsafe_b64decode(gesehen["body"]["message"]["raw"] + "==").decode("utf-8")
+    assert "To: wer@example.com" in roh
+    assert "Subject: Betreff" in roh
+    assert "Text der Mail" in roh
+
+
+def test_a_denied_write_explains_the_missing_right(linked: TokenStore) -> None:
+    """403 heisst hier fast immer: beim Verbinden nur Lesen erlaubt."""
+    api = Google(
+        "id", "secret", linked,
+        client=_client(lambda r: httpx.Response(403, json={"error": {"message": "no"}})),
+    )
+    with pytest.raises(GoogleError, match="Ändern erlaubt"):
+        api.create_event("X", "2026-09-08T14:00:00")
+
+
+def test_an_event_carries_its_id_so_it_can_be_changed(linked: TokenStore) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"items": [
+            {"id": "ev-9", "summary": "Termin",
+             "start": {"dateTime": "2026-09-08T14:00:00"},
+             "end": {"dateTime": "2026-09-08T15:00:00"}},
+        ]})
+
+    api = Google("id", "secret", linked, client=_client(handler))
+    assert api.events()[0]["id"] == "ev-9"

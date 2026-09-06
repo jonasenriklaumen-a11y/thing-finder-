@@ -253,3 +253,94 @@ def test_forgotten_workshops_are_swept(monkeypatch: pytest.MonkeyPatch) -> None:
     geloescht = [zeile for zeile in fake.aufrufe if "volume" in zeile and "rm" in zeile]
     assert any("cortex-werkstatt-x" in zeile for zeile in geloescht)
     assert not any("andere" in zeile for zeile in geloescht), "fremde Datentraeger bleiben"
+
+
+# ---------------------------------------------------------------------------
+# Dateien hinein und heraus
+# ---------------------------------------------------------------------------
+def _laufende(monkeypatch: pytest.MonkeyPatch) -> werkstatt.Sandbox:
+    """Eine Werkstatt, die sich fuer laufend haelt -- ohne echten Behaelter."""
+    sandkasten = werkstatt.Sandbox(image="python:3.12-slim")
+    sandkasten.runtime = werkstatt.Runtime("docker", "docker", "Docker (gehaertet)")
+    sandkasten._name = "cortex-werkstatt-test"
+    monkeypatch.setattr(sandkasten, "ensure", lambda: sandkasten._name)
+    return sandkasten
+
+
+def test_hineinlegen_geht_durch_die_werkstatt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auch ein Bild -- write() nimmt nur Text und wuerde daran scheitern."""
+    box = _laufende(monkeypatch)
+    aufrufe: list[list[str]] = []
+
+    def fake(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        aufrufe.append(list(args))
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr(werkstatt.subprocess, "run", fake)
+    antwort = box.put_bytes("eingang/bild.png", b"\x89PNG\r\n")
+    assert antwort["written"] == "/work/eingang/bild.png"
+    assert antwort["bytes"] == 6
+    zeile = " ".join(aufrufe[-1])
+    assert "exec" in zeile
+    assert "--user 1000:1000" in zeile
+    assert "/work/eingang/bild.png" in zeile
+
+
+def test_zu_grosse_dateien_gehen_nicht_hinein(monkeypatch: pytest.MonkeyPatch) -> None:
+    box = _laufende(monkeypatch)
+    with pytest.raises(ValueError, match="zu gross"):
+        box.put_bytes("gross.bin", b"x" * (werkstatt.MAX_FILE_BYTES + 1))
+
+
+def test_hinauslegen_kennt_nur_pfade_unter_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    box = _laufende(monkeypatch)
+    with pytest.raises(ValueError):
+        box.get_bytes("../../etc/passwd")
+    with pytest.raises(ValueError):
+        box.put_bytes("/etc/passwd", b"x")
+
+
+def test_eine_fehlende_datei_ist_kein_leerer_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    box = _laufende(monkeypatch)
+    monkeypatch.setattr(
+        werkstatt.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 1, b"", b""),
+    )
+    with pytest.raises(FileNotFoundError):
+        box.get_bytes("gibtsnicht.txt")
+
+
+def test_zu_grosse_datei_kommt_nicht_heraus(monkeypatch: pytest.MonkeyPatch) -> None:
+    """head -c limit+1: ist mehr da als erlaubt, wird nichts geliefert."""
+    box = _laufende(monkeypatch)
+    zuviel = b"x" * (werkstatt.MAX_FILE_BYTES + 1)
+    monkeypatch.setattr(
+        werkstatt.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, zuviel, b""),
+    )
+    with pytest.raises(ValueError, match="groesser"):
+        box.get_bytes("gross.bin")
+
+
+def test_dateiliste_nennt_pfad_und_groesse(monkeypatch: pytest.MonkeyPatch) -> None:
+    box = _laufende(monkeypatch)
+    ausgabe = "1234 /work/loesung.py\n99 /work/eingang/daten.csv\n"
+    monkeypatch.setattr(
+        werkstatt,
+        "_runs",
+        lambda *args, **kwargs: subprocess.CompletedProcess(list(args), 0, ausgabe, ""),
+    )
+    dateien = box.list_files()
+    assert dateien == [
+        {"path": "/work/eingang/daten.csv", "bytes": 99},
+        {"path": "/work/loesung.py", "bytes": 1234},
+    ]
+
+
+def test_ohne_laufende_werkstatt_ist_die_liste_leer(monkeypatch: pytest.MonkeyPatch) -> None:
+    box = werkstatt.Sandbox()
+    assert box.list_files() == []

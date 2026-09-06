@@ -45,11 +45,25 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 
-#: Nur Leserechte. Mehr braucht es nicht, und mehr soll es nicht koennen.
+#: Nur Leserechte. Das ist der Normalfall -- mehr soll Cortex nicht koennen,
+#: solange es niemand ausdruecklich erlaubt.
 SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/userinfo.email",
+)
+
+#: Mit "Aendern erlaubt" kommen zwei Rechte dazu -- und nur diese zwei:
+#:
+#: * `calendar.events` legt Termine an und aendert sie. Der Kalender selbst
+#:   (Freigaben, Loeschen des Kalenders) bleibt aussen vor.
+#: * `gmail.compose` schreibt Entwuerfe. Es ist bewusst nicht `gmail.send`:
+#:   ein Entwurf kann man noch lesen, bevor er hinausgeht, eine verschickte
+#:   Mail nicht mehr zurueckholen. Cortex verschickt nichts.
+WRITE_SCOPES = (
+    *SCOPES,
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/gmail.compose",
 )
 
 #: Datei mit den verschluesselten Token.
@@ -145,7 +159,9 @@ class TokenStore:
 # ---------------------------------------------------------------------------
 # Anmeldung
 # ---------------------------------------------------------------------------
-def consent_url(client_id: str, redirect_uri: str, state: str = "") -> str:
+def consent_url(
+    client_id: str, redirect_uri: str, state: str = "", *, write: bool = False
+) -> str:
     """Die Adresse, auf der der Nutzer bei Google zustimmt.
 
     `access_type=offline` sorgt fuer ein Refresh-Token, `prompt=consent`
@@ -159,7 +175,7 @@ def consent_url(client_id: str, redirect_uri: str, state: str = "") -> str:
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": " ".join(SCOPES),
+        "scope": " ".join(WRITE_SCOPES if write else SCOPES),
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
@@ -416,6 +432,144 @@ class Google:
             "shortened": len(body) > MAX_BODY_CHARS,
         }
 
+    # -- Schreiben -------------------------------------------------------
+    # Alles hier setzt voraus, dass der Nutzer beim Verbinden ausdruecklich
+    # "Aendern erlaubt" gewaehlt hat: ohne die erweiterten Rechte antwortet
+    # Google mit einem 403, und das ist die richtige Antwort.
+    def _write(
+        self,
+        method: str,
+        url: str,
+        payload: dict[str, Any],
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        headers = {"Authorization": f"Bearer {self._access()}"}
+        try:
+            response = self._http.request(
+                method, url, json=payload, params=params or {}, headers=headers
+            )
+        except httpx.HTTPError as exc:
+            raise GoogleError(f"Google nicht erreichbar: {exc}") from exc
+        if response.status_code == 403:
+            raise GoogleError(
+                "Google verweigert das Schreiben. Wahrscheinlich wurde beim "
+                "Verbinden nur Lesen erlaubt -- in den Einstellungen "
+                "'Ändern erlaubt' setzen und neu verbinden."
+            )
+        if response.status_code >= 400:
+            raise GoogleError(_explain(response))
+        try:
+            return dict(response.json())
+        except ValueError as exc:
+            raise GoogleError("Google hat keine verwertbare Antwort geschickt.") from exc
+
+    def create_event(
+        self,
+        summary: str,
+        start: str,
+        end: str = "",
+        *,
+        description: str = "",
+        location: str = "",
+        whole_day: bool = False,
+    ) -> dict[str, Any]:
+        """Legt einen Termin im Hauptkalender an.
+
+        Zeiten kommen als ISO-8601 (`2026-09-08T14:00:00`). Ohne Ende dauert
+        der Termin eine Stunde -- das ist die uebliche Annahme und besser als
+        eine Fehlermeldung ueber ein fehlendes Feld.
+        """
+        summary = " ".join(str(summary).split())[:300]
+        if not summary:
+            raise GoogleError("Ein Termin braucht einen Titel.")
+        if not start:
+            raise GoogleError("Ein Termin braucht einen Anfang.")
+        payload: dict[str, Any] = {"summary": summary}
+        if description:
+            payload["description"] = str(description)[:4000]
+        if location:
+            payload["location"] = str(location)[:300]
+        payload["start"], payload["end"] = _times(start, end, whole_day)
+        data = self._write("POST", f"{CALENDAR_API}/calendars/primary/events", payload)
+        return {
+            "created": True,
+            "id": str(data.get("id", "")),
+            "link": str(data.get("htmlLink", "")),
+            "event": _event(data),
+        }
+
+    def update_event(
+        self,
+        event_id: str,
+        *,
+        summary: str = "",
+        start: str = "",
+        end: str = "",
+        description: str = "",
+        location: str = "",
+        whole_day: bool = False,
+    ) -> dict[str, Any]:
+        """Aendert einen bestehenden Termin.
+
+        Geaendert wird nur, was mitgegeben wird (PATCH): wer den Titel
+        korrigiert, soll nicht versehentlich die Uhrzeit loeschen.
+        """
+        event_id = str(event_id).strip()
+        if not event_id:
+            raise GoogleError("Ohne Kennung des Termins geht es nicht.")
+        payload: dict[str, Any] = {}
+        if summary:
+            payload["summary"] = " ".join(str(summary).split())[:300]
+        if description:
+            payload["description"] = str(description)[:4000]
+        if location:
+            payload["location"] = str(location)[:300]
+        if start:
+            payload["start"], payload["end"] = _times(start, end, whole_day)
+        if not payload:
+            raise GoogleError("Es wurde nichts genannt, was sich aendern soll.")
+        data = self._write(
+            "PATCH", f"{CALENDAR_API}/calendars/primary/events/{event_id}", payload
+        )
+        return {
+            "updated": True,
+            "id": str(data.get("id", "")),
+            "link": str(data.get("htmlLink", "")),
+            "event": _event(data),
+        }
+
+    def create_draft(
+        self, to: str, subject: str, body: str, *, cc: str = ""
+    ) -> dict[str, Any]:
+        """Legt einen Mail-Entwurf an -- verschickt wird nichts.
+
+        Der Entwurf steht danach in Gmail unter "Entwürfe". Ob er hinausgeht,
+        entscheidet ein Mensch; Cortex hat dafuer gar nicht die Rechte.
+        """
+        subject = " ".join(str(subject).split())[:300]
+        if not subject and not body:
+            raise GoogleError("Ein Entwurf ohne Betreff und ohne Text waere leer.")
+        kopf = [f"To: {str(to).strip()}"] if to else []
+        if cc:
+            kopf.append(f"Cc: {str(cc).strip()}")
+        kopf += [
+            f"Subject: {subject}",
+            "Content-Type: text/plain; charset=utf-8",
+            "MIME-Version: 1.0",
+        ]
+        roh = "\r\n".join(kopf) + "\r\n\r\n" + str(body or "")
+        codiert = base64.urlsafe_b64encode(roh.encode("utf-8")).decode("ascii")
+        data = self._write(
+            "POST", f"{GMAIL_API}/drafts", {"message": {"raw": codiert}}
+        )
+        return {
+            "drafted": True,
+            "id": str(data.get("id", "")),
+            "to": to,
+            "subject": subject,
+            "note": "Liegt in Gmail unter 'Entwürfe'. Verschickt wurde nichts.",
+        }
+
     def close(self) -> None:
         with contextlib.suppress(Exception):
             self._http.close()
@@ -424,11 +578,38 @@ class Google:
 # ---------------------------------------------------------------------------
 # Aufbereiten
 # ---------------------------------------------------------------------------
+def _times(start: str, end: str, whole_day: bool) -> tuple[dict[str, str], dict[str, str]]:
+    """Macht aus zwei Zeitangaben das, was der Kalender erwartet.
+
+    Ohne Ende wird eine Stunde angenommen -- bei einem ganzen Tag ein Tag.
+    Die Zeitzone bleibt weg: Google nimmt dann die des Kalenders, und das ist
+    genau die, in der der Nutzer denkt.
+    """
+    roh_start = str(start).strip()
+    roh_ende = str(end).strip()
+    if whole_day or (len(roh_start) == 10 and "T" not in roh_start):
+        tag = roh_start[:10]
+        if not roh_ende:
+            with contextlib.suppress(ValueError):
+                naechster = datetime.fromisoformat(tag) + timedelta(days=1)
+                roh_ende = naechster.date().isoformat()
+        return ({"date": tag}, {"date": roh_ende[:10] or tag})
+    if not roh_ende:
+        with contextlib.suppress(ValueError):
+            spaeter = datetime.fromisoformat(roh_start) + timedelta(hours=1)
+            roh_ende = spaeter.isoformat()
+    if not roh_ende:
+        raise GoogleError(f"Mit '{start}' kann der Kalender nichts anfangen.")
+    return ({"dateTime": roh_start}, {"dateTime": roh_ende})
+
+
 def _event(item: dict[str, Any]) -> dict[str, Any]:
     start = item.get("start") or {}
     end = item.get("end") or {}
     whole_day = "date" in start
     return {
+        # Die Kennung braucht, wer einen Termin spaeter aendern will.
+        "id": str(item.get("id", "")),
         "summary": str(item.get("summary", "(ohne Titel)")),
         "start": str(start.get("dateTime") or start.get("date") or ""),
         "end": str(end.get("dateTime") or end.get("date") or ""),

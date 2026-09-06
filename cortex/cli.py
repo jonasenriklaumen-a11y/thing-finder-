@@ -567,13 +567,23 @@ def google_command(
     client_id: str = typer.Option("", "--client-id", help="OAuth-Client-ID der Anwendung."),
     client_secret: str = typer.Option("", "--client-secret", help="Zugehoeriges Secret."),
     disconnect: bool = typer.Option(False, "--trennen", help="Konto wieder entfernen."),
+    write: bool = typer.Option(
+        False,
+        "--aendern",
+        help="Auch Termine anlegen/aendern und Mail-Entwuerfe schreiben duerfen.",
+    ),
     env_file: Path | None = typer.Option(None, "--env-file", help="Zieldatei fuer die .env."),
 ) -> None:
-    """Verbindet Gmail und den Google Kalender -- nur lesend.
+    """Verbindet Gmail und den Google Kalender.
 
     Danach beantwortet Cortex AI Fragen nach Terminen und Mails aus dem eigenen
-    Konto und kann die Angaben fuer eine Recherche nutzen. Verschickt oder
-    geaendert wird nie etwas: angefragt werden ausschliesslich Leserechte.
+    Konto und kann die Angaben fuer eine Recherche nutzen. Standardmaessig
+    ausschliesslich lesend.
+
+    Mit `--aendern` kommen zwei Rechte dazu: Termine anlegen und aendern, und
+    Mail-ENTWUERFE schreiben. Verschickt wird auch dann nie etwas -- dafuer
+    holt Cortex sich das Recht gar nicht erst --, und vor jeder Aenderung
+    fragt er nach.
     """
     load_env()
     settings = get_settings()
@@ -617,7 +627,7 @@ def google_command(
 
     redirect = f"http://localhost:{DEFAULT_PORT}/google"
     try:
-        url = consent_url(client_id, redirect)
+        url = consent_url(client_id, redirect, write=write)
     except GoogleError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1) from exc
@@ -659,6 +669,7 @@ def google_command(
     written = write_env_file(
         {
             "CORTEX_GOOGLE": "true",
+            "CORTEX_GOOGLE_WRITE": "true" if write else "false",
             "GOOGLE_CLIENT_ID": client_id,
             "GOOGLE_CLIENT_SECRET": client_secret,
         },
@@ -667,6 +678,16 @@ def google_command(
     console.print(
         f"\n[green]Verbunden{f' als {account}' if account else ''}.[/green] "
         f"Eingetragen in {written}."
+    )
+    console.print(
+        "[dim]Cortex darf hier "
+        + (
+            "auch Termine anlegen/aendern und Entwuerfe schreiben -- "
+            "verschickt wird nie etwas, und vor jeder Aenderung wird gefragt."
+            if write
+            else "nur lesen. Aendern erlaubst du mit: cortex google --aendern"
+        )
+        + "[/dim]"
     )
     console.print(
         "[dim]Probier es aus:[/dim]\n"

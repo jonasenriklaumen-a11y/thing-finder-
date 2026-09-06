@@ -1149,3 +1149,94 @@ def test_a_read_page_claims_its_domain_when_asked_to(settings: Settings) -> None
     box.claim_sources = True
     box.fetch_page("https://beispiel.de/b")
     assert "beispiel.de" in box.avoid_domains
+
+
+# ---------------------------------------------------------------------------
+# Bei Google etwas aendern -- nur mit Erlaubnis und nur nach Rueckfrage
+# ---------------------------------------------------------------------------
+class SchreibenderGoogle(FakeGoogle):
+    """Merkt sich, was geschrieben werden sollte."""
+
+    def create_event(self, summary, start, end="", **kwargs):
+        self.calls.append(("create_event", {"summary": summary, "start": start}))
+        return {"created": True, "id": "ev-1"}
+
+    def update_event(self, event_id, **kwargs):
+        self.calls.append(("update_event", {"event_id": event_id}))
+        return {"updated": True, "id": event_id}
+
+    def create_draft(self, to, subject, body, cc=""):
+        self.calls.append(("create_draft", {"to": to, "subject": subject}))
+        return {"drafted": True, "id": "dr-1"}
+
+
+def test_writing_needs_its_own_permission(settings: Settings) -> None:
+    """Lesen erlaubt heisst nicht aendern erlaubt."""
+    fake = SchreibenderGoogle()
+    box = _google_box(settings, fake)
+    settings.google_write = False
+    box.ask_handler = lambda frage, optionen=None: "ja"
+
+    for ergebnis in (
+        box.calendar_add("X", "2026-09-08T14:00:00"),
+        box.calendar_edit("ev-1", summary="Y"),
+        box.mail_draft("Betreff", "Text"),
+    ):
+        assert "nur lesen" in ergebnis["error"]
+    assert fake.calls == [], "es darf nichts hinausgegangen sein"
+
+
+def test_nothing_is_written_without_a_confirmation(settings: Settings) -> None:
+    fake = SchreibenderGoogle()
+    box = _google_box(settings, fake)
+    settings.google_write = True
+    box.ask_handler = lambda frage, optionen=None: "nein"
+
+    antwort = box.calendar_add("Zahnarzt", "2026-09-08T14:00:00")
+    assert antwort["created"] is False
+    assert "nicht bestaetigt" in antwort["note"]
+    assert fake.calls == []
+
+
+def test_without_anyone_to_ask_nothing_is_written(settings: Settings) -> None:
+    """Ein Auftrag laeuft ohne Menschen davor -- dann wird eben nichts geaendert."""
+    fake = SchreibenderGoogle()
+    box = _google_box(settings, fake)
+    settings.google_write = True
+    box.ask_handler = None
+
+    antwort = box.mail_draft("Betreff", "Text", to="wer@example.com")
+    assert antwort["drafted"] is False
+    assert "niemand bestaetigen" in antwort["note"]
+    assert fake.calls == []
+
+
+def test_a_confirmed_write_goes_through(settings: Settings) -> None:
+    fake = SchreibenderGoogle()
+    box = _google_box(settings, fake)
+    settings.google_write = True
+    gefragt: list[str] = []
+
+    def antworten(frage: str, optionen: Any = None) -> str:
+        gefragt.append(frage)
+        return "ja"
+
+    box.ask_handler = antworten
+    assert box.calendar_add("Zahnarzt", "2026-09-08T14:00:00")["created"] is True
+    assert box.calendar_edit("ev-1", summary="verschoben")["updated"] is True
+    assert box.mail_draft("Betreff", "Text", to="wer@example.com")["drafted"] is True
+    assert [name for name, _ in fake.calls] == ["create_event", "update_event", "create_draft"]
+    assert box.stats.google_writes == 3
+    assert len(gefragt) == 3, "vor jeder Aenderung wird einzeln gefragt"
+
+
+def test_the_dispatch_knows_the_writing_tools(settings: Settings) -> None:
+    fake = SchreibenderGoogle()
+    box = _google_box(settings, fake)
+    settings.google_write = True
+    box.ask_handler = lambda frage, optionen=None: "ja"
+
+    box.call("calendar_add", {"summary": "X", "start": "2026-09-08T14:00:00"})
+    box.call("calendar_edit", {"event_id": "ev-1", "summary": "Y"})
+    box.call("mail_draft", {"subject": "B", "body": "T", "to": "wer@example.com"})
+    assert [name for name, _ in fake.calls] == ["create_event", "update_event", "create_draft"]

@@ -80,6 +80,7 @@ SETTING_KEYS: tuple[str, ...] = (
     "CORTEX_HA_URL",
     "CORTEX_HA_CONTROL",
     "CORTEX_GOOGLE",
+    "CORTEX_GOOGLE_WRITE",
     "CORTEX_STORAGE_URL",
     "CORTEX_STORAGE_ACCESS",
     "CORTEX_LAN_ENABLED",
@@ -329,7 +330,11 @@ class ChatSession:
                 if message.startswith("/image"):
                     message = self._image_question(agent, message)
                 elif attachments:
-                    context = self.attachments_text(agent, attachments, emit)
+                    context = self.attachments_text(
+                        agent, attachments, emit, workshop=self._workshop_wanted(
+                            agent, mode, sandbox
+                        )
+                    )
                     message = f"{context}\n\n{message}" if context else message
                 return agent.ask(
                     message,
@@ -350,6 +355,21 @@ class ChatSession:
                     self.reload()
                 # Der Handler bleibt bestehen -- das Werkzeug soll auch in der
                 # naechsten Runde angeboten werden.
+
+    @staticmethod
+    def _workshop_wanted(agent: Any, mode: str, sandbox: bool | None) -> bool:
+        """Ob dieser Turn in der Werkstatt landet -- vor `agent.ask`.
+
+        Die Anhaenge werden verarbeitet, bevor der Agent den Modus dieses
+        Turns kennt. Wer stattdessen `agent.workshop_on` fragt, bekommt den
+        Stand der VORIGEN Frage -- und legt die Datei in die falsche Welt
+        oder gar nicht ab.
+        """
+        from cortex.agent import clean_mode
+
+        an = getattr(agent, "sandbox", False) if sandbox is None else bool(sandbox)
+        welcher = clean_mode(mode) if mode else getattr(agent, "mode", "normal")
+        return bool(an) and welcher == "code"
 
     def _ask_browser(self, question: str, options: list[str]) -> str:
         """Wartet auf die Antwort aus dem Browser.
@@ -380,7 +400,14 @@ class ChatSession:
         self._answers.put(text)
         return True
 
-    def attachments_text(self, agent: Any, attachments: list[dict[str, Any]], emit: Any) -> str:
+    def attachments_text(
+        self,
+        agent: Any,
+        attachments: list[dict[str, Any]],
+        emit: Any,
+        *,
+        workshop: bool = False,
+    ) -> str:
         """Macht aus hochgeladenen Dateien Text, den das Modell lesen kann.
 
         Bilder gehen ans Vision-Modell, PDFs durch pypdf, Textdateien direkt.
@@ -406,8 +433,40 @@ class ChatSession:
                 )
                 continue
             emit("upload", {"name": name, "bytes": len(data)})
-            blocks.append(self._one_attachment(agent, name, data))
+            block = self._one_attachment(agent, name, data)
+            # Ist die Werkstatt an, landet die Datei zusaetzlich unveraendert
+            # darin. Sonst koennte das Modell ueber ein Bild reden, es aber
+            # nicht oeffnen -- und ein Zip oder eine CSV waere gar nicht erst
+            # angekommen.
+            gelegt = self._into_workshop(name, data) if workshop else ""
+            if gelegt:
+                block += f"\n[Liegt in der Werkstatt unter {gelegt}]"
+            blocks.append(block)
         return "\n\n".join(blocks)
+
+    def _into_workshop(self, name: str, data: bytes) -> str:
+        """Legt einen Anhang in die Werkstatt.
+
+        Returns: der Pfad drinnen, oder "" wenn das Hineinlegen nicht
+        geklappt hat. Ein Fehlschlag hier darf die Anfrage nicht abbrechen:
+        der Text der Datei steht ja trotzdem da.
+        """
+        from cortex.sandbox import MAX_FILE_BYTES
+
+        if len(data) > MAX_FILE_BYTES:
+            return ""
+        # Die Werkstatt nimmt nur ASCII-Pfade; "Übung.txt" waere sonst raus.
+        schlicht = "".join(
+            zeichen if zeichen.isascii() and (zeichen.isalnum() or zeichen in "-_.") else "_"
+            for zeichen in name
+        ).strip("._") or "datei"
+        with contextlib.suppress(Exception):
+            from cortex import sandbox as werkstatt
+
+            antwort = werkstatt.shared(self.settings()).put_bytes(f"eingang/{schlicht}", data)
+            if isinstance(antwort, dict) and antwort.get("written"):
+                return str(antwort["written"])
+        return ""
 
     def _one_attachment(self, agent: Any, name: str, data: bytes) -> str:
         """Liest eine einzelne Datei aus -- je nach Art auf ihrem eigenen Weg."""
@@ -662,6 +721,10 @@ def resolve_image(target: Path) -> Path:
 
 SESSION = ChatSession()
 
+#: Der Taktgeber fuer die Auftraege. Wird beim Start gesetzt; im Test laeuft
+#: kein Server und damit auch keiner.
+SCHEDULER: Any = None
+
 
 def current_values() -> dict[str, str]:
     """Aktuelle Einstellungen als Formularwerte."""
@@ -690,6 +753,7 @@ def current_values() -> dict[str, str]:
         "CORTEX_HA_URL": settings.ha_url,
         "CORTEX_HA_CONTROL": "true" if settings.ha_control else "false",
         "CORTEX_GOOGLE": "true" if settings.google_enabled else "false",
+        "CORTEX_GOOGLE_WRITE": "true" if settings.google_write else "false",
         "CORTEX_STORAGE_URL": settings.storage_url,
         "CORTEX_STORAGE_ACCESS": settings.storage_access,
         "CORTEX_LAN_ENABLED": "true" if settings.lan_enabled else "false",
@@ -737,6 +801,7 @@ def google_state(settings: Settings) -> dict[str, Any]:
         client.close()
     return {
         "enabled": settings.google_enabled,
+        "write": settings.google_write,
         "has_id": bool(settings.google_client_id),
         "has_secret": bool(settings.google_client_secret),
         "connected": connected,
@@ -821,6 +886,28 @@ def _prune_uploads(folder: Path) -> None:
 
 class TooLarge(ValueError):
     """Der Anfragekoerper sprengt die Grenze -- 413 statt 500."""
+
+
+def chat_markdown(title: str, entries: list[Any]) -> str:
+    """Ein ganzer Chat als Markdown -- Frage als Ueberschrift, Antwort darunter.
+
+    Markdown, weil die Antworten schon in Markdown geschrieben sind: jedes
+    andere Format muesste sie umbauen und dabei etwas verlieren.
+    """
+    from datetime import datetime
+
+    zeilen = [f"# {title or 'Chat'}", ""]
+    for entry in entries:
+        when = ""
+        with contextlib.suppress(Exception):
+            when = datetime.fromtimestamp(entry.created_at).strftime("%d.%m.%Y %H:%M")
+        frage = " ".join(str(entry.question or "").split())
+        zeilen += [f"## {frage or '(ohne Frage)'}", ""]
+        if when:
+            zeilen += [f"*{when}*", ""]
+        zeilen += [str(entry.answer or "").strip(), ""]
+    zeilen += ["---", "", "Aufgezeichnet von Cortex AI."]
+    return "\n".join(zeilen)
 
 
 def safe_name(name: str) -> str:
@@ -961,6 +1048,131 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         self._guarded(self._post)
 
+    def do_DELETE(self) -> None:
+        self._guarded(self._delete)
+
+    def _delete(self) -> None:
+        """Loeschen ist ein eigenes Verb -- ein POST "loeschAlles" waere gelogen."""
+        if not self._authorized():
+            self._deny()
+            return
+        route = self._route()
+        settings = SESSION.settings()
+        if route == "/api/usage":
+            from cortex.usage import UsageLog
+
+            self._json({"cleared": UsageLog(settings.db_path).clear()})
+        elif route == "/api/jobs":
+            from cortex.jobs import JobStore
+
+            gemeint = (parse_qs(urlsplit(self.path).query).get("id") or [""])[0].strip()
+            try:
+                nummer = int(gemeint)
+            except ValueError:
+                self._json({"ok": False, "error": "Keine gueltige Kennung."}, 400)
+                return
+            self._json({"ok": JobStore(settings.db_path).delete(nummer)})
+        elif route == "/api/memory":
+            frage = parse_qs(urlsplit(self.path).query)
+            if not settings.memory_enabled:
+                self._json({"error": "Der Speicher ist abgeschaltet."}, 400)
+                return
+            store = SESSION.memory()
+            eintrag = (frage.get("id") or [""])[0].strip()
+            if not eintrag:
+                self._json({"forgotten": store.clear()})
+                return
+            # Eine Kennung, die keine Zahl ist, ist ein Tippfehler und
+            # kein Serverfehler -- also 400 statt 500.
+            try:
+                nummer = int(eintrag)
+            except ValueError:
+                self._json({"error": "Keine gueltige Kennung."}, 400)
+                return
+            self._json({"forgotten": bool(store.forget(nummer))})
+        else:
+            self._json({"error": "unbekannt"}, 404)
+
+    def _job_edit(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Auftrag anlegen, anhalten, weiterlaufen lassen oder sofort ausfuehren."""
+        from cortex.jobs import JobStore, run_job
+
+        settings = SESSION.settings()
+        store = JobStore(settings.db_path)
+        action = str(payload.get("action", "add")).strip().lower()
+
+        if action == "add":
+            try:
+                job = store.add(
+                    str(payload.get("question", "")),
+                    rhythm=str(payload.get("rhythm", "daily")),
+                    hour=int(payload.get("hour", 8) or 0),
+                    minute=int(payload.get("minute", 0) or 0),
+                    weekday=int(payload.get("weekday", 0) or 0),
+                    structured=bool(payload.get("structured", True)),
+                )
+            except (ValueError, TypeError) as exc:
+                return {"ok": False, "error": str(exc)}
+            return {"ok": True, "job": job.as_dict()}
+
+        try:
+            nummer = int(payload.get("id", 0))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Keine gueltige Kennung."}
+
+        if action in ("pause", "resume"):
+            if not store.set_enabled(nummer, action == "resume"):
+                return {"ok": False, "error": "Diesen Auftrag gibt es nicht."}
+            return {"ok": True}
+        if action == "delete":
+            return {"ok": store.delete(nummer)}
+        if action == "run":
+            # Sofort ausfuehren laeuft im Hintergrund: eine Recherche dauert
+            # Minuten, so lange darf keine Anfrage offen stehen.
+            job = store.get(nummer)
+            if job is None:
+                return {"ok": False, "error": "Diesen Auftrag gibt es nicht."}
+
+            def sofort() -> None:
+                state, chat = run_job(job, settings)
+                store.note_run(job.id, state, chat)
+
+            threading.Thread(target=sofort, daemon=True).start()
+            return {"ok": True, "started": True}
+        return {"ok": False, "error": f"Unbekannt: {action}"}
+
+    def _workshop_file(self) -> None:
+        """Reicht eine Datei aus der Werkstatt heraus -- zum Herunterladen."""
+        from cortex import sandbox as werkstatt
+
+        wanted = (parse_qs(urlsplit(self.path).query).get("path") or [""])[0]
+        box = werkstatt.shared(SESSION.settings())
+        if not box.alive:
+            self._json({"error": "Die Werkstatt laeuft gerade nicht."}, 404)
+            return
+        try:
+            data = box.get_bytes(wanted)
+        except FileNotFoundError as exc:
+            self._json({"error": str(exc)}, 404)
+            return
+        except ValueError as exc:
+            self._json({"error": str(exc)}, 400)
+            return
+        except Exception as exc:  # pragma: no cover - Laufzeit meldet Unerwartetes
+            self._json({"error": f"Die Werkstatt antwortet nicht: {exc}"}, 502)
+            return
+        name = safe_name(wanted.rsplit("/", 1)[-1] or "datei")
+        self.send_response(200)
+        # Immer als Anhang: sonst koennte eine HTML-Datei aus der Werkstatt
+        # im Browser laufen -- und zwar unter der Adresse von Cortex.
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(data)
+
     def _get(self) -> None:
         if not self._authorized():
             self._deny()
@@ -989,16 +1201,85 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/chats":
             settings = SESSION.settings()
             cache = Cache(settings.db_path, settings.cache_ttl_hours)
+            # Mit ?q= wird gesucht, ohne kommt die gewohnte Liste. Ein
+            # eigener Pfad waere dasselbe in zwei Routen.
+            suche = (parse_qs(urlsplit(self.path).query).get("q") or [""])[0].strip()
             self._json(
                 {
-                    "chats": cache.recent_chats(limit=40),
+                    "chats": (
+                        cache.search_chats(suche, limit=40)
+                        if suche
+                        else cache.recent_chats(limit=40)
+                    ),
+                    "query": suche,
                     "current": SESSION.chat_id(),
+                }
+            )
+        elif route == "/api/chatexport":
+            # Einen ganzen Chat als Markdown mitnehmen. Bewusst als eigener
+            # Weg und nicht ueber /api/open: den Chat exportieren heisst
+            # nicht, ihn zu oeffnen.
+            settings = SESSION.settings()
+            cache = Cache(settings.db_path, settings.cache_ttl_hours)
+            wanted = (parse_qs(urlsplit(self.path).query).get("session_id") or [""])[0].strip()
+            entries = cache.chat_history(wanted) if wanted else []
+            if not entries:
+                self._json({"error": "Diesen Chat gibt es nicht."}, 404)
+                return
+            chats = {chat["session_id"]: chat for chat in cache.recent_chats(limit=200)}
+            title = str(chats.get(wanted, {}).get("title") or entries[0].question).strip()
+            self._json({"title": title, "markdown": chat_markdown(title, entries)})
+        elif route == "/api/werkstatt":
+            # Was in der Werkstatt liegt. Ist keine da, ist das keine
+            # Stoerung -- dann liegt eben nichts da.
+            from cortex import sandbox as werkstatt
+
+            box = werkstatt.shared(SESSION.settings())
+            self._json(
+                {
+                    "running": bool(box.alive),
+                    "status": box.status(),
+                    "usage_gb": box.usage_gb() if box.alive else 0.0,
+                    "disk_gb": box.disk_gb,
+                    "files": box.list_files() if box.alive else [],
+                }
+            )
+        elif route == "/api/werkstatt/datei":
+            self._workshop_file()
+        elif route == "/api/jobs":
+            from cortex.jobs import RHYTHM_NAMES, JobStore
+
+            store = JobStore(SESSION.settings().db_path)
+            self._json(
+                {
+                    "jobs": [job.as_dict() for job in store.all_jobs()],
+                    "rhythms": [
+                        {"id": key, "name": name} for key, name in RHYTHM_NAMES.items()
+                    ],
                 }
             )
         elif route == "/api/models":
             from cortex.system import available_models
 
             self._json({"models": available_models(SESSION.settings())})
+        elif route == "/api/memory":
+            # Abgeschaltet heisst abgeschaltet: dann wird auch nichts gezeigt.
+            if not SESSION.settings().memory_enabled:
+                self._json({"enabled": False, "entries": []})
+            else:
+                store = SESSION.memory()
+                self._json(
+                    {
+                        "enabled": True,
+                        "usage": store.usage(),
+                        "entries": [entry.as_dict() for entry in store.all_entries(limit=300)],
+                    }
+                )
+        elif route == "/api/usage":
+            from cortex.usage import UsageLog
+
+            settings = SESSION.settings()
+            self._json(UsageLog(settings.db_path).summary())
         elif route == "/api/system":
             from cortex.system import snapshot
 
@@ -1053,6 +1334,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._storage_probe(self._read_json()))
         elif route == "/api/chat-edit":
             self._json(self._chat_edit(self._read_json()))
+        elif route == "/api/jobs":
+            self._json(self._job_edit(self._read_json()))
         elif route == "/api/stop":
             self._json({"ok": SESSION.stop()})
         elif route == "/api/answer":
@@ -1211,8 +1494,19 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
 
         if action == "start":
             client_id = str(payload.get("client_id", "")).strip() or settings.google_client_id
+            # Wie viel Recht gefragt wird, entscheidet der Schalter im
+            # Formular -- nicht der gespeicherte Stand. Wer gerade "Aendern
+            # erlaubt" angehakt hat, soll nicht erst speichern muessen.
+            darf_aendern = payload.get("write")
+            if darf_aendern is None:
+                darf_aendern = settings.google_write
             try:
-                return {"ok": True, "url": consent_url(client_id, redirect), "redirect": redirect}
+                return {
+                    "ok": True,
+                    "url": consent_url(client_id, redirect, write=bool(darf_aendern)),
+                    "redirect": redirect,
+                    "write": bool(darf_aendern),
+                }
             except GoogleError as exc:
                 return {"ok": False, "error": str(exc)}
 
@@ -1606,6 +1900,16 @@ def serve(
 
         threading.Thread(target=sweep, daemon=True).start()
     except Exception:  # pragma: no cover - Aufraeumen darf nie den Start kosten
+        pass
+    # Auftraege: was faellig ist, laeuft von selbst. Ein eigener Thread, der
+    # jede Minute nachsieht -- kostet nichts, solange nichts ansteht.
+    try:
+        from cortex.jobs import Scheduler
+
+        global SCHEDULER
+        SCHEDULER = Scheduler(SESSION.settings)
+        SCHEDULER.start()
+    except Exception:  # pragma: no cover - Auftraege duerfen den Start nie kosten
         pass
     server = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=_warm_up, daemon=True).start()

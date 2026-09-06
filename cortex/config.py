@@ -292,6 +292,11 @@ class Settings:
     #: Darf Cortex AI Gmail und den Google Kalender lesen? Aus, bis es jemand
     #: einschaltet -- und selbst dann nur lesend (siehe cortex/google.py).
     google_enabled: bool = False
+    #: Darf Cortex AI bei Google auch etwas aendern? Aus, bis es jemand
+    #: einschaltet -- und selbst dann nur Termine anlegen/aendern und
+    #: Mail-ENTWUERFE schreiben. Verschickt wird nie etwas, geloescht auch
+    #: nicht: dafuer fehlen die Rechte, nicht nur der Wille.
+    google_write: bool = False
     #: Zugangsdaten der eigenen Google-Cloud-Anwendung (Typ "Desktop").
     google_client_id: str = ""
     google_client_secret: str = ""
@@ -491,6 +496,7 @@ def get_settings() -> Settings:
         storage_url=_env_str("CORTEX_STORAGE_URL"),
         storage_access=_env_str("CORTEX_STORAGE_ACCESS", "read"),
         google_enabled=_env_bool("CORTEX_GOOGLE", False),
+        google_write=_env_bool("CORTEX_GOOGLE_WRITE", False),
         google_client_id=_env_str("GOOGLE_CLIENT_ID"),
         google_client_secret=_env_str("GOOGLE_CLIENT_SECRET"),
         enable_playwright=_env_bool("CORTEX_ENABLE_PLAYWRIGHT", True),

@@ -497,6 +497,93 @@ MAIL_READ_SCHEMA: dict[str, Any] = {
 }
 
 
+
+CALENDAR_ADD_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "calendar_add",
+        "description": (
+            "Traegt einen Termin in den Hauptkalender des Nutzers ein. Vor dem "
+            "Eintragen wird der Nutzer gefragt -- ein missverstandener Satz soll "
+            "keinen Termin erfinden. Zeiten als ISO-8601 in Ortszeit: "
+            "'2026-09-08T14:00:00'. Fuer einen ganzen Tag nur das Datum "
+            "('2026-09-08') und whole_day=true. Fehlt dir eine Angabe (welcher "
+            "Tag? wie lange?), frag mit ask_user nach, statt sie zu erfinden."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "Der Titel des Termins."},
+                "start": {"type": "string", "description": "Anfang, ISO-8601."},
+                "end": {
+                    "type": "string",
+                    "description": "Ende, ISO-8601. Leer = eine Stunde.",
+                },
+                "description": {"type": "string", "description": "Notiz zum Termin."},
+                "location": {"type": "string", "description": "Ort."},
+                "whole_day": {"type": "boolean", "description": "Ganztaegig?"},
+            },
+            "required": ["summary", "start"],
+        },
+    },
+}
+
+CALENDAR_EDIT_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "calendar_edit",
+        "description": (
+            "Aendert einen bestehenden Termin. Die Kennung kommt aus "
+            "calendar_events -- such den Termin also erst, statt zu raten. "
+            "Angegeben wird nur, was sich aendern soll; alles andere bleibt. "
+            "Auch hier wird der Nutzer vorher gefragt."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string", "description": "Kennung aus calendar_events."},
+                "summary": {"type": "string"},
+                "start": {"type": "string", "description": "Neuer Anfang, ISO-8601."},
+                "end": {"type": "string", "description": "Neues Ende, ISO-8601."},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+                "whole_day": {"type": "boolean"},
+            },
+            "required": ["event_id"],
+        },
+    },
+}
+
+MAIL_DRAFT_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "mail_draft",
+        "description": (
+            "Legt einen Mail-ENTWURF in Gmail an. Verschickt wird nichts -- dafuer "
+            "fehlen Cortex die Rechte, nicht nur der Wille; der Entwurf steht "
+            "danach in Gmail unter 'Entwuerfe' und geht erst hinaus, wenn ein "
+            "Mensch auf Senden drueckt. Sag das dem Nutzer auch so. Vor dem "
+            "Anlegen wird gefragt."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Empfaenger, kann leer bleiben."},
+                "subject": {"type": "string", "description": "Betreff."},
+                "body": {"type": "string", "description": "Der Text der Mail."},
+                "cc": {"type": "string", "description": "Kopie an."},
+            },
+            "required": ["subject", "body"],
+        },
+    },
+}
+
+GOOGLE_WRITE_SCHEMAS: tuple[dict[str, Any], ...] = (
+    CALENDAR_ADD_SCHEMA,
+    CALENDAR_EDIT_SCHEMA,
+    MAIL_DRAFT_SCHEMA,
+)
+
 # ---------------------------------------------------------------------------
 # Lagerverwaltung -- Raum > Moebel > Artikel
 # ---------------------------------------------------------------------------
@@ -659,7 +746,33 @@ VM_READ_SCHEMA: dict[str, Any] = {
     },
 }
 
-VM_SCHEMAS: tuple[dict[str, Any], ...] = (VM_RUN_SCHEMA, VM_WRITE_SCHEMA, VM_READ_SCHEMA)
+VM_FILES_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "vm_files",
+        "description": (
+            "Listet auf, was in der Werkstatt liegt -- Pfad und Groesse. Anhaenge des "
+            "Nutzers landen unter /work/eingang. Was du unter /work ablegst, kann der "
+            "Nutzer sich herunterladen; sag ihm also, wie die Datei heisst."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Ordner, Standard /work.",
+                }
+            },
+        },
+    },
+}
+
+VM_SCHEMAS: tuple[dict[str, Any], ...] = (
+    VM_RUN_SCHEMA,
+    VM_WRITE_SCHEMA,
+    VM_READ_SCHEMA,
+    VM_FILES_SCHEMA,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -718,6 +831,7 @@ class ToolStats:
     ha_reads: int = 0
     ha_calls: int = 0
     google_reads: int = 0
+    google_writes: int = 0
     storage_reads: int = 0
     storage_writes: int = 0
     settings_changed: int = 0
@@ -738,6 +852,7 @@ class ToolStats:
             + self.ha_reads
             + self.ha_calls
             + self.google_reads
+            + self.google_writes
             + self.storage_reads
             + self.storage_writes
             + self.settings_changed
@@ -759,6 +874,7 @@ class ToolStats:
         self.ha_reads = 0
         self.ha_calls = 0
         self.google_reads = 0
+        self.google_writes = 0
         self.storage_reads = 0
         self.storage_writes = 0
         self.settings_changed = 0
@@ -1139,6 +1255,149 @@ class Toolbox:
         self._emit("mail_done", found=1)
         return mail
 
+    # -- Werkzeug: bei Google etwas aendern -------------------------------
+    # Drei Dinge sind hier festgeschrieben und stehen nicht im Prompt, wo ein
+    # geschickter Satz sie wegreden koennte:
+    #
+    # 1. Ohne "Aendern erlaubt" gibt es diese Werkzeuge gar nicht (agent.py).
+    # 2. Vor jedem Schreiben wird gefragt. Kann niemand antworten, wird nicht
+    #    geschrieben -- lieber gar nichts als etwas Ungefragtes im Kalender.
+    # 3. Verschickt wird nie eine Mail. Es gibt nur Entwuerfe, und dafuer
+    #    fehlt Cortex sogar das Recht bei Google selbst.
+    def _google_write_ready(self) -> str:
+        problem = self._google_ready()
+        if problem:
+            return problem
+        if not getattr(self.settings, "google_write", False):
+            return (
+                "Cortex AI darf bei Google nur lesen. Der Nutzer schaltet das "
+                "Aendern in den Einstellungen unter 'Gmail & Kalender' frei und "
+                "verbindet danach neu. Sag ihm das, statt es zu umgehen."
+            )
+        return ""
+
+    def _confirm(self, question: str) -> str:
+        """Fragt nach. Returns: "" wenn zugestimmt, sonst der Grund dagegen."""
+        if self.ask_handler is None:
+            return (
+                "Hier kann gerade niemand bestaetigen -- und ohne Bestaetigung "
+                "wird bei Google nichts geaendert. Bitte den Nutzer, es selbst "
+                "zu tun."
+            )
+        self._emit("ask", question=question, options=["ja", "nein"])
+        answer = (self.ask_handler(question, ["ja", "nein"]) or "").strip().lower()
+        self._emit("ask_done", question=question, answer=answer)
+        if answer in ("ja", "j", "yes", "ok", "mach", "los", "klar"):
+            return ""
+        return f"Vom Nutzer nicht bestaetigt (Antwort: {answer!r})."
+
+    def calendar_add(
+        self,
+        summary: str,
+        start: str,
+        end: str = "",
+        description: str = "",
+        location: str = "",
+        whole_day: bool = False,
+    ) -> dict[str, Any]:
+        """Traegt einen Termin ein -- nach Rueckfrage."""
+        from cortex.google import GoogleError
+
+        problem = self._google_write_ready()
+        if problem:
+            return {"error": problem}
+        wann = start + (f" bis {end}" if end else "")
+        nein = self._confirm(f"Soll ich \u201e{summary}\u201c am {wann} eintragen?")
+        if nein:
+            return {"created": False, "note": nein}
+        self._emit("calendar_write", what="anlegen", summary=summary, start=start)
+        try:
+            answer = self._google().create_event(
+                summary,
+                start,
+                end,
+                description=description,
+                location=location,
+                whole_day=bool(whole_day),
+            )
+        except GoogleError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.google_writes += 1
+        self._emit("calendar_written", summary=summary)
+        return answer
+
+    def calendar_edit(
+        self,
+        event_id: str,
+        summary: str = "",
+        start: str = "",
+        end: str = "",
+        description: str = "",
+        location: str = "",
+        whole_day: bool = False,
+    ) -> dict[str, Any]:
+        """Aendert einen Termin -- nach Rueckfrage."""
+        from cortex.google import GoogleError
+
+        problem = self._google_write_ready()
+        if problem:
+            return {"error": problem}
+        was = ", ".join(
+            teil
+            for teil in (
+                f"Titel \u201e{summary}\u201c" if summary else "",
+                f"Zeit {start}" + (f" bis {end}" if end else "") if start else "",
+                f"Ort {location}" if location else "",
+                "Notiz" if description else "",
+            )
+            if teil
+        )
+        nein = self._confirm(f"Soll ich den Termin wirklich aendern ({was})?")
+        if nein:
+            return {"updated": False, "note": nein}
+        self._emit("calendar_write", what="aendern", summary=summary or event_id)
+        try:
+            answer = self._google().update_event(
+                event_id,
+                summary=summary,
+                start=start,
+                end=end,
+                description=description,
+                location=location,
+                whole_day=bool(whole_day),
+            )
+        except GoogleError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.google_writes += 1
+        self._emit("calendar_written", summary=summary or event_id)
+        return answer
+
+    def mail_draft(self, subject: str, body: str, to: str = "", cc: str = "") -> dict[str, Any]:
+        """Legt einen Mail-Entwurf an -- nach Rueckfrage. Verschickt wird nie."""
+        from cortex.google import GoogleError
+
+        problem = self._google_write_ready()
+        if problem:
+            return {"error": problem}
+        an = to or "ohne Empfaenger"
+        nein = self._confirm(
+            f"Soll ich einen Entwurf an {an} mit dem Betreff "
+            f"\u201e{subject}\u201c anlegen? (Verschickt wird nichts.)"
+        )
+        if nein:
+            return {"drafted": False, "note": nein}
+        self._emit("mail_write", subject=subject, to=to)
+        try:
+            answer = self._google().create_draft(to, subject, body, cc=cc)
+        except GoogleError as exc:
+            self._emit("error", message=str(exc))
+            return {"error": str(exc)}
+        self.stats.google_writes += 1
+        self._emit("mail_written", subject=subject)
+        return answer
+
     # -- Werkzeug: Lagerverwaltung ----------------------------------------
     def _storage(self) -> Any:
         """Der Zugriff aufs Lager, einmal je Toolbox aufgebaut."""
@@ -1393,6 +1652,21 @@ class Toolbox:
         self.stats.vm_calls += 1
         return answer
 
+    def vm_files(self, path: str = "") -> dict[str, Any]:
+        """Listet auf, was in der Werkstatt liegt."""
+        from cortex.sandbox import WORKDIR, SandboxUnavailable
+
+        try:
+            dateien = self._sandbox().list_files(path or WORKDIR)
+        except SandboxUnavailable as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:  # pragma: no cover
+            return {"error": f"Die Werkstatt antwortet nicht: {exc}"}
+        self.stats.vm_calls += 1
+        return {"files": dateien, "count": len(dateien)}
+
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt den Tool-Call *name* mit *arguments* aus."""
         if name == "web_search":
@@ -1422,6 +1696,8 @@ class Toolbox:
             )
         if name == "vm_read":
             return self.vm_read(path=str(arguments.get("path", "")))
+        if name == "vm_files":
+            return self.vm_files(path=str(arguments.get("path", "") or ""))
         if name == "calculate":
             return self.calculate(expression=str(arguments.get("expression", "")))
         if name == "remember":
@@ -1477,6 +1753,32 @@ class Toolbox:
             return self.mail_search(
                 query=str(arguments.get("query") or ""),
                 count=int(arguments.get("count") or 0),
+            )
+        if name == "calendar_add":
+            return self.calendar_add(
+                summary=str(arguments.get("summary", "")),
+                start=str(arguments.get("start", "")),
+                end=str(arguments.get("end", "") or ""),
+                description=str(arguments.get("description", "") or ""),
+                location=str(arguments.get("location", "") or ""),
+                whole_day=bool(arguments.get("whole_day", False)),
+            )
+        if name == "calendar_edit":
+            return self.calendar_edit(
+                event_id=str(arguments.get("event_id", "")),
+                summary=str(arguments.get("summary", "") or ""),
+                start=str(arguments.get("start", "") or ""),
+                end=str(arguments.get("end", "") or ""),
+                description=str(arguments.get("description", "") or ""),
+                location=str(arguments.get("location", "") or ""),
+                whole_day=bool(arguments.get("whole_day", False)),
+            )
+        if name == "mail_draft":
+            return self.mail_draft(
+                subject=str(arguments.get("subject", "")),
+                body=str(arguments.get("body", "")),
+                to=str(arguments.get("to", "") or ""),
+                cc=str(arguments.get("cc", "") or ""),
             )
         if name == "mail_read":
             return self.mail_read(message_id=str(arguments.get("message_id", "")))

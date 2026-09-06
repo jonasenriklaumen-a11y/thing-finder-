@@ -86,6 +86,15 @@ MAX_OUTPUT = 8000
 #: Wie viel eine einzelne Datei beim Lesen liefern darf.
 MAX_READ_BYTES = 200_000
 
+#: Wie gross eine Datei sein darf, die hinein- oder herausgereicht wird.
+#: Der Weg fuehrt durch den Arbeitsspeicher des Servers -- 20 MB sind
+#: genug fuer alles, was man von Hand hin- und hertraegt, und wenig genug,
+#: dass zehn davon nebeneinander niemandem den Rechner fuellen.
+MAX_FILE_BYTES = 20 * 1024 * 1024
+
+#: Wie viele Dateien die Liste hoechstens zeigt.
+MAX_LIST = 500
+
 #: Das Abbild. Klein, mit Python und den ueblichen Werkzeugen.
 DEFAULT_IMAGE = "python:3.12-slim"
 
@@ -573,6 +582,102 @@ class Sandbox:
             text = text[:limit]
         return {"path": full, "text": text, "truncated": cut}
 
+    def put_bytes(self, path: str, data: bytes) -> dict[str, Any]:
+        """Legt eine Datei unveraendert in die Werkstatt -- auch ein Bild.
+
+        `write` nimmt Text und wuerde an einem PNG scheitern. Hierueber geht
+        alles, was der Nutzer anhaengt, unangetastet hinein.
+        """
+        full = safe_path(path)
+        if len(data) > MAX_FILE_BYTES:
+            raise ValueError(
+                f"Die Datei ist zu gross fuer die Werkstatt "
+                f"({MAX_FILE_BYTES // (1024 * 1024)} MB sind das Hoechste)."
+            )
+        name = self.ensure()
+        runtime = self.runtime
+        assert runtime is not None
+        parent = full.rsplit("/", 1)[0] or WORKDIR
+        done = subprocess.run(
+            [
+                runtime.binary, "exec", "--interactive",
+                "--user", RUN_AS, "--workdir", WORKDIR, name,
+                "sh", "-c", f'mkdir -p "{parent}" && cat > "{full}"',
+            ],
+            input=data,
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+        self.touch()
+        if done.returncode != 0:
+            grund = done.stderr.decode("utf-8", "replace")[:300]
+            return {"error": grund or "Hineinlegen ging nicht."}
+        self._emit("vm_write", path=full, bytes=len(data))
+        return {"written": full, "bytes": len(data)}
+
+    def get_bytes(self, path: str, max_bytes: int = MAX_FILE_BYTES) -> bytes:
+        """Holt eine Datei unveraendert heraus.
+
+        Raises:
+            ValueError: Wenn der Pfad hinausfuehrt oder die Datei zu gross ist.
+            FileNotFoundError: Wenn es sie nicht gibt.
+        """
+        full = safe_path(path)
+        limit = max(1, min(int(max_bytes or MAX_FILE_BYTES), MAX_FILE_BYTES))
+        name = self.ensure()
+        runtime = self.runtime
+        assert runtime is not None
+        done = subprocess.run(
+            [
+                runtime.binary, "exec", "--user", RUN_AS, "--workdir", WORKDIR, name,
+                "sh", "-c", f'test -f "{full}" && head -c {limit + 1} "{full}"',
+            ],
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+        self.touch()
+        if done.returncode != 0:
+            raise FileNotFoundError(f"In der Werkstatt liegt keine Datei '{full}'.")
+        if len(done.stdout) > limit:
+            raise ValueError(
+                f"Die Datei ist groesser als {limit // (1024 * 1024)} MB -- "
+                "so viel geht nicht durch."
+            )
+        return done.stdout
+
+    def list_files(self, path: str = WORKDIR) -> list[dict[str, Any]]:
+        """Was in der Werkstatt liegt -- Pfad und Groesse, flach aufgelistet.
+
+        Ohne diese Liste muesste man raten, wie eine erzeugte Datei heisst,
+        um sie herauszuholen.
+        """
+        full = safe_path(path)
+        if not self.alive or self.runtime is None:
+            return []
+        # `find -printf` gibt es in busybox nicht; `stat -c` ueberall.
+        done = _runs(
+            self.runtime.binary,
+            "exec", "--user", RUN_AS, "--workdir", WORKDIR, self._name,
+            "sh", "-c",
+            f'find "{full}" -type f -not -path "*/.git/*" 2>/dev/null '
+            f"| head -n {MAX_LIST} | xargs -r stat -c '%s %n' 2>/dev/null",
+            timeout=30,
+        )
+        self.touch()
+        dateien: list[dict[str, Any]] = []
+        for zeile in done.stdout.splitlines():
+            groesse, _, pfad = zeile.strip().partition(" ")
+            if not pfad:
+                continue
+            try:
+                dateien.append({"path": pfad, "bytes": int(groesse)})
+            except ValueError:
+                continue
+        dateien.sort(key=lambda eintrag: eintrag["path"])
+        return dateien
+
     def usage_gb(self) -> float:
         """Wie voll die Werkstatt ist -- in Gigabyte."""
         if not self.alive or self.runtime is None:
@@ -686,8 +791,17 @@ _shared: Sandbox | None = None
 _shared_lock = threading.Lock()
 
 
-def shared(settings: Any = None, on_event: Any = None) -> Sandbox:
-    """Die gemeinsame Werkstatt dieses Programms."""
+#: Kein Empfaenger uebergeben ist etwas anderes als "ab jetzt niemand".
+_KEEP = object()
+
+
+def shared(settings: Any = None, on_event: Any = _KEEP) -> Sandbox:
+    """Die gemeinsame Werkstatt dieses Programms.
+
+    Wer keinen Empfaenger uebergibt, laesst den bestehenden stehen: sonst
+    haette ein Blick auf die Dateiliste mitten in einer Anfrage die
+    Live-Anzeige stumm geschaltet.
+    """
     global _shared
     with _shared_lock:
         if _shared is None:
@@ -702,7 +816,8 @@ def shared(settings: Any = None, on_event: Any = None) -> Sandbox:
                 disk_gb=int(getattr(settings, "vm_disk_gb", DISK_GB) or DISK_GB),
                 cpus=int(getattr(settings, "vm_cpus", CPUS) or CPUS),
             )
-        _shared.on_event = on_event
+        if on_event is not _KEEP:
+            _shared.on_event = on_event
         return _shared
 
 

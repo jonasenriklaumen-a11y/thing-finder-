@@ -113,3 +113,70 @@ def test_deleting_something_that_is_not_there_is_no_error(tmp_path: Path) -> Non
     cache = Cache(tmp_path / "c.sqlite3")
     assert cache.delete_chat("gibtesnicht") == 0
     assert cache.delete_chat("") == 0
+
+
+# ---------------------------------------------------------------------------
+# Chats durchsuchen
+# ---------------------------------------------------------------------------
+def _gespraeche(cache: Cache) -> None:
+    cache.add_history("s1", "Wie kündige ich meinen Mietvertrag?", "Schriftlich, drei Monate.")
+    cache.add_history("s1", "Und die Kaution?", "Die kommt nach der Abnahme zurück.")
+    cache.add_history("s2", "Hallo", "Hallo! Was kann ich für dich tun?")
+    cache.add_history("s3", "Rezept für Brot", "Mehl, Wasser, Salz, Hefe.")
+    cache.rename_chat("s2", "Kurzer Gruß")
+
+
+def test_suche_findet_ueber_die_frage(tmp_path):
+    cache = Cache(tmp_path / "c.db")
+    _gespraeche(cache)
+    treffer = cache.search_chats("mietvertrag")
+    assert [chat["session_id"] for chat in treffer] == ["s1"]
+    assert "Mietvertrag" in treffer[0]["snippet"]
+
+
+def test_suche_findet_auch_im_wortlaut_der_antwort(tmp_path):
+    cache = Cache(tmp_path / "c.db")
+    _gespraeche(cache)
+    treffer = cache.search_chats("Hefe")
+    assert [chat["session_id"] for chat in treffer] == ["s3"]
+    assert "Hefe" in treffer[0]["snippet"]
+
+
+def test_suche_findet_ueber_den_eigenen_namen(tmp_path):
+    """Wer den Chat umbenannt hat, soll ihn ueber den neuen Namen finden."""
+    cache = Cache(tmp_path / "c.db")
+    _gespraeche(cache)
+    treffer = cache.search_chats("Gruß")
+    assert [chat["session_id"] for chat in treffer] == ["s2"]
+    assert treffer[0]["title"] == "Kurzer Gruß"
+
+
+def test_suche_ist_gross_klein_egal(tmp_path):
+    cache = Cache(tmp_path / "c.db")
+    _gespraeche(cache)
+    assert cache.search_chats("MIETVERTRAG")
+    assert cache.search_chats("mietVERTRAG")
+
+
+def test_jokerzeichen_sind_keine_joker(tmp_path):
+    """Ein % in der Suche darf nicht alles finden -- sonst waere jede Suche sinnlos."""
+    cache = Cache(tmp_path / "c.db")
+    _gespraeche(cache)
+    assert cache.search_chats("%") == []
+    assert cache.search_chats("_") == []
+
+
+def test_leere_suche_liefert_nichts(tmp_path):
+    cache = Cache(tmp_path / "c.db")
+    _gespraeche(cache)
+    assert cache.search_chats("   ") == []
+
+
+def test_ein_chat_erscheint_nur_einmal(tmp_path):
+    """Zwei Treffer im selben Chat sind ein Treffer, kein Doppel."""
+    cache = Cache(tmp_path / "c.db")
+    cache.add_history("s1", "Brot backen", "Brot braucht Mehl.")
+    cache.add_history("s1", "Noch mehr Brot", "Brot braucht Zeit.")
+    treffer = cache.search_chats("Brot")
+    assert len(treffer) == 1
+    assert treffer[0]["turns"] == 2

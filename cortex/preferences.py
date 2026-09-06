@@ -158,6 +158,7 @@ CATALOGUE: tuple[Preference, ...] = (
 PROTECTED: dict[str, str] = {
     "CORTEX_HA_CONTROL": "ob ich im Haus schalten darf",
     "CORTEX_GOOGLE": "ob ich Mail und Kalender lesen darf",
+    "CORTEX_GOOGLE_WRITE": "ob ich bei Google etwas aendern darf",
     "CORTEX_STORAGE_ACCESS": "was ich im Lager darf",
     "CORTEX_STORAGE_URL": "welches Lager angebunden ist",
     "CORTEX_LAN_ENABLED": "ob ich ins Heimnetz sehen darf",

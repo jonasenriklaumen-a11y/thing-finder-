@@ -57,6 +57,24 @@ def cache_key(kind: str, *parts: Any) -> str:
     return f"{kind}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
 
 
+def _snippet(row: Any, needle: str, width: int = 110) -> str:
+    """Die Stelle um den Treffer herum -- Frage bevorzugt, sonst Antwort.
+
+    Die Frage steht vorn, weil sie kuerzer ist und man den eigenen Wortlaut
+    schneller wiedererkennt als den der Antwort.
+    """
+    klein = needle.lower()
+    for feld in ("question", "answer"):
+        text = " ".join(str(row[feld] or "").split())
+        stelle = text.lower().find(klein)
+        if stelle < 0:
+            continue
+        von = max(0, stelle - width // 3)
+        bis = min(len(text), stelle + len(needle) + width)
+        return ("… " if von else "") + text[von:bis] + (" …" if bis < len(text) else "")
+    return ""
+
+
 @dataclass(slots=True)
 class Note:
     """Ein Eintrag auf dem Merkzettel des Nutzers."""
@@ -248,6 +266,67 @@ class Cache:
                     }
                 )
         return chats
+
+    def search_chats(self, needle: str, limit: int = 30) -> list[dict[str, Any]]:
+        """Chats, in denen *needle* vorkommt -- im Namen oder im Gespraech.
+
+        Gesucht wird ueber beides: den Titel und den Wortlaut der Fragen und
+        Antworten. Wer nach "Mietvertrag" sucht, will den Chat auch dann
+        finden, wenn er "Frage zur Wohnung" heisst.
+
+        Zurueck kommt dieselbe Form wie bei `recent_chats`, ergaenzt um
+        `snippet` -- die Stelle, an der es passt. Ohne die Stelle muesste man
+        jeden Treffer oeffnen, um zu sehen, warum er einer ist.
+        """
+        needle = " ".join(str(needle).split())
+        if not needle:
+            return []
+        # LIKE mit ESCAPE: sonst wuerde ein % in der Suche alles finden.
+        muster = "%" + needle.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+        query = """
+            SELECT h.session_id AS session_id,
+                   MAX(h.id)    AS last_id,
+                   COUNT(*)     AS turns,
+                   MAX(h.created_at) AS touched
+            FROM history h
+            LEFT JOIN chat_titles t ON t.session_id = h.session_id
+            WHERE h.question LIKE ? ESCAPE '!'
+               OR h.answer   LIKE ? ESCAPE '!'
+               OR t.title    LIKE ? ESCAPE '!'
+            GROUP BY h.session_id
+            ORDER BY last_id DESC
+            LIMIT ?
+        """
+        treffer: list[dict[str, Any]] = []
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            rows = cur.execute(query, (muster, muster, muster, limit)).fetchall()
+            for row in rows:
+                erste = cur.execute(
+                    "SELECT question FROM history WHERE session_id = ? ORDER BY id LIMIT 1",
+                    (row["session_id"],),
+                ).fetchone()
+                eigen = cur.execute(
+                    "SELECT title FROM chat_titles WHERE session_id = ?",
+                    (row["session_id"],),
+                ).fetchone()
+                stelle = cur.execute(
+                    "SELECT question, answer FROM history "
+                    "WHERE session_id = ? AND (question LIKE ? ESCAPE '!' "
+                    "OR answer LIKE ? ESCAPE '!') ORDER BY id LIMIT 1",
+                    (row["session_id"], muster, muster),
+                ).fetchone()
+                title = str(eigen["title"] if eigen else "").strip()
+                treffer.append(
+                    {
+                        "session_id": row["session_id"],
+                        "title": title or str(erste["question"] if erste else "").strip(),
+                        "renamed": bool(title),
+                        "turns": int(row["turns"]),
+                        "touched": float(row["touched"] or 0.0),
+                        "snippet": _snippet(stelle, needle) if stelle else "",
+                    }
+                )
+        return treffer
 
     def rename_chat(self, session_id: str, title: str) -> str:
         """Gibt einem Chat einen eigenen Namen. Leer = zurueck zur ersten Frage."""

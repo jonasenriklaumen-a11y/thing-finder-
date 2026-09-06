@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.5.2                                      │
+│ Cortex AI 8.7.1                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -352,8 +352,19 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   auf einen Eintrag holt ihn zurück, samt Verlauf, an den der Agent wieder anknüpft.
   Neueste oben, ab dem zweiten Tag nach *Heute*, *Gestern*, *Letzte 7 Tage* gruppiert.
   Über **⋯** lässt sich ein Chat **umbenennen** (der eigene Name überschreibt die
-  erste Frage; leer lassen setzt zurück) oder **löschen** — mit Rückfrage, denn das
-  lässt sich nicht rückgängig machen.
+  erste Frage; leer lassen setzt zurück), **exportieren** (der ganze Chat als
+  Markdown-Datei) oder **löschen** — Letzteres mit Rückfrage, denn das lässt sich
+  nicht rückgängig machen.
+* **Chats durchsuchen** über das Feld unter *Letzte Chats*. Gesucht wird in beidem:
+  im Namen **und** im Wortlaut der Fragen und Antworten — wer nach „Mietvertrag"
+  sucht, findet den Chat auch, wenn er „Frage zur Wohnung" heißt. Unter jedem Treffer
+  steht die Fundstelle, der gesuchte Teil hervorgehoben; sonst müsste man jeden
+  Treffer öffnen, um zu sehen, warum er einer ist. <kbd>Esc</kbd> oder das × beendet
+  die Suche.
+* **Antworten mitnehmen.** Unter jeder fertigen Antwort erscheinen beim Darauffahren
+  zwei kleine Knöpfe: *Kopieren* legt den Wortlaut in die Zwischenablage,
+  *Als Datei* speichert ihn als Markdown. Kopiert wird der Markdown-Text, nicht das
+  gerenderte HTML — damit lässt sich weiterarbeiten.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
 * **Abbrechen:** Sobald eine Anfrage läuft, wird aus *Anhängen* ein
   *Abbrechen*. Ein Klick beendet den Lauf wirklich — nicht nur die Anzeige:
@@ -413,6 +424,13 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Werkstatt ausprobieren. Der Schalter *Im Web suchen* gehört zum Standardmodus; im
   Code-Modus ist Nachschlagen immer erlaubt, damit ein „aus" von nebenan es nicht
   stillschweigend mitnimmt.
+
+  **Dateien hinein und heraus.** Was du anhängst, landet zusätzlich unverändert in
+  `/work/eingang` — auch ein Bild oder ein Zip, also alles, was der Textweg nicht
+  hergibt. Umgekehrt zeigt der Knopf 🗀 in der Kopfzeile (nur im Code-Modus mit
+  eingeschalteter Werkstatt), was gerade unter `/work` liegt, mit Größe und einem
+  Knopf zum Herunterladen. Cortex selbst sieht dieselbe Liste über `vm_files` und
+  kann dir deshalb sagen, wie die Datei heißt, die er gebaut hat.
 
   **Danach bleibt nichts.** 20 Minuten nach der letzten Nachricht werden Behälter und
   Datenträger gelöscht — die nächste Frage baut eine neue, leere Werkstatt. Beim
@@ -503,6 +521,28 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   den belegten Speicher als Kacheln ein — alle vier Sekunden aufgefrischt, solange das
   Einstellungsfenster offen ist. Standardmäßig aus; der Haken bleibt im Browser
   gemerkt, gefragt wird nur, während du hinschaust.
+* **Nutzung** unter *Einstellungen → Nutzung*: drei Kacheln zeigen, wie viele Token
+  heute, in den letzten sieben Tagen und insgesamt durch die Leitung gegangen sind —
+  hinein und heraus getrennt, darunter die Aufschlüsselung je Modell. **Ein Token
+  sind hier drei Zeichen.** Das ist eine Vereinbarung, keine Messung: jeder Anbieter
+  zerlegt Text anders, und die genauen Zahlen bekäme man nur mit dessen eigenem
+  Zerleger. Für Größenordnungen reicht es — ob eine Frage hundert oder hunderttausend
+  Token gekostet hat, sieht man so. Gezählt wird, was wirklich hinausgeht: der
+  Systemtext und das ganze Gespräch bei *jedem* Aufruf (die Schnittstelle ist
+  zustandslos, genau so rechnen die Anbieter auch ab) plus die Antwort und die
+  Argumente der Werkzeugaufrufe. **Ein Limit gibt es bewusst nicht:** der Zähler soll
+  zeigen, nicht bremsen. *Zähler zurücksetzen* leert ihn.
+* **Aufträge** unter *Einstellungen → Aufträge*: Fragen, die Cortex AI von selbst
+  stellt — stündlich, täglich oder wöchentlich zu einer festen Uhrzeit. Die Antwort
+  landet als Chat in der Seitenleiste, als hättest du sie selbst gestellt. Jeder
+  Auftrag lässt sich anhalten, sofort ausführen (*Jetzt*) und löschen; die Zeile
+  darunter sagt, wann er das nächste Mal dran ist und wie der letzte Lauf ausging.
+  Zwei Entscheidungen dahinter: Ein Auftrag baut sich seinen **eigenen Agenten**,
+  fasst also dein laufendes Gespräch nicht an. Und **verpasste Termine werden nicht
+  nachgeholt** — wer den Rechner eine Woche aus hat, will beim Einschalten nicht
+  sieben Recherchen auf einmal. Rückfragen kann ein Auftrag nicht stellen, es sitzt
+  ja niemand davor; er muss mit dem auskommen, was in der Frage steht. Höchstens
+  20 Aufträge — mehr wären eine zweite To-do-Liste, die man auch noch pflegen muss.
 * **Alle Slash-Befehle** aus dem Terminal funktionieren auch hier: `/location`,
   `/model`, `/image`, `/export`, `/history`, `/notes`, `/clear`, `/help`. `/image`
   nimmt einen Dateipfad oder einen Ordner vom selben Rechner — bei mehreren Bildern
@@ -527,7 +567,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.5.2                                                   │
+│ Cortex AI 8.7.1                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -617,6 +657,8 @@ cortex web                               # Oberflaeche im Browser starten
 cortex web --lan                         # auch vom Handy im heimischen Netz
 cortex lan                               # Geraete im eigenen Netz anzeigen
 cortex connect-ha                        # Home Assistant verbinden
+cortex google                            # Gmail und Kalender verbinden (lesend)
+cortex google --aendern                  # dazu Termine ändern und Entwürfe schreiben
 ```
 
 ## Der Speicher: was Cortex AI behält
@@ -669,6 +711,15 @@ Vier Regeln bestimmen den Aufbau:
 /uploads           # was du hochgeladen hast
 /uploads clear     # alle hochgeladenen Dateien löschen
 ```
+
+### „Was weißt du über mich?"
+
+Ein Gedächtnis, in das man nicht hineinsehen kann, ist keins — es ist ein Gerücht.
+In der Weboberfläche steht unter *Einstellungen → Speicher* deshalb der Knopf **Was
+weißt du über mich?**. Er öffnet eine Liste: jeder Eintrag mit Thema, Wortlaut und
+Datum, daneben ein Knopf, der genau diesen einen Eintrag entfernt. Darunter *Alles
+vergessen*, falls es das sein soll. Ist der Speicher abgeschaltet, sagt das Fenster
+das — statt eine leere Liste zu zeigen, die man für „er weiß nichts" halten könnte.
 
 ### Was die Verschlüsselung leistet — und was nicht
 
@@ -757,10 +808,20 @@ deinem Kalender und deinem Postfach nachsehen, wenn du es erlaubst.
 Die Angaben helfen auch bei einer Recherche: Steht der Termin in Hamburg, sucht er für
 Hamburg. Nennt die Bestellbestätigung eine Modellnummer, sucht er danach.
 
-**Nur lesen.** Angefragt werden ausschließlich die Leserechte `gmail.readonly` und
-`calendar.readonly`. Damit ist technisch ausgeschlossen, dass Cortex AI je eine Mail
-verschickt, beantwortet, löscht oder einen Termin ändert — Google lässt es schlicht
-nicht zu. Bittest du ihn trotzdem darum, sagt er, dass er das nicht kann.
+**Standardmäßig nur lesen.** Angefragt werden ausschließlich die Leserechte
+`gmail.readonly` und `calendar.readonly`. Damit ist technisch ausgeschlossen, dass
+Cortex AI eine Mail verschickt, beantwortet, löscht oder einen Termin ändert — Google
+lässt es schlicht nicht zu. Bittest du ihn trotzdem darum, sagt er, dass er das nicht
+kann.
+
+**Ändern ist ein eigener Schalter.** Setzt du in den Einstellungen zusätzlich den Haken
+*Ändern erlaubt* und verbindest danach neu, kommen genau zwei Rechte dazu:
+`calendar.events` (Termine anlegen und ändern) und `gmail.compose` (**Entwürfe**
+schreiben). Bewusst **nicht** `gmail.send`: ein Entwurf lässt sich noch lesen, bevor er
+hinausgeht, eine verschickte Mail nicht zurückholen. Cortex verschickt nichts und
+löscht nichts — dafür holt er sich die Rechte gar nicht erst. Und vor jeder einzelnen
+Änderung fragt er in einem Fenster nach; sagst du nein, passiert nichts. Läuft gerade
+niemand davor (etwa bei einem Auftrag, siehe unten), wird ebenfalls nichts geändert.
 
 **Aus, bis du es einschaltest.** Ohne den Haken in den Einstellungen und ohne
 verbundenes Konto existieren die Werkzeuge für das Modell gar nicht.
@@ -788,12 +849,15 @@ umständlicher, als es ist, und es ist kostenlos.
 5. **Verbinden.** Zwei Wege, beide gleichwertig:
 
 ```bash
-cortex google          # fragt nach ID und Secret, führt durch die Anmeldung
+cortex google            # fragt nach ID und Secret, führt durch die Anmeldung
+cortex google --aendern  # dasselbe, aber mit Schreibrechten (siehe oben)
 ```
 
    Oder in der Weboberfläche: *Einstellungen → Gmail & Kalender*, Haken setzen,
    Client-ID und Secret einfügen, **speichern**, dann **Verbinden**. Du landest bei
-   Google, stimmst zu, und bist zurück.
+   Google, stimmst zu, und bist zurück. Soll Cortex auch ändern dürfen, setz vorher
+   den Haken *Ändern erlaubt* — er entscheidet, welche Rechte angefragt werden.
+   Schaltest du ihn später um, musst du einmal neu verbinden.
 
 > **Vom Handy aus?** Google erlaubt für Desktop-Anwendungen nur `localhost` als
 > Rückweg. Sitzt dein Browser auf einem anderen Gerät als Cortex, zeigt er nach der
@@ -819,6 +883,26 @@ cortex google          # fragt nach ID und Secret, führt durch die Anmeldung
 Der Agent bekommt drei Werkzeuge: `calendar_events` (Termine des Hauptkalenders),
 `mail_search` (Absender, Betreff, Datum, erste Zeilen — Gmail-Syntax wie `from:dhl`,
 `is:unread`, `newer_than:7d`) und `mail_read` (Text einer einzelnen Mail).
+
+Mit *Ändern erlaubt* kommen drei weitere dazu — und nur diese drei:
+
+```
+> trag mir Donnerstag 14 Uhr Zahnarzt ein
+
+  Soll ich „Zahnarzt" am 2026-09-10T14:00:00 eintragen?   [ja] [nein]
+  Eingetragen: Donnerstag, 10. September, 14:00–15:00.
+
+> schreib der Werkstatt eine Mail, dass ich den Termin verschieben muss
+
+  Soll ich einen Entwurf an werkstatt@example.com mit dem Betreff
+  „Terminverschiebung" anlegen? (Verschickt wird nichts.)   [ja] [nein]
+  Liegt in Gmail unter „Entwürfe". Du kannst ihn dort lesen und selbst abschicken.
+```
+
+`calendar_add` legt einen Termin an, `calendar_edit` ändert einen bestehenden (die
+Kennung holt er sich vorher über `calendar_events` — geraten wird sie nie), `mail_draft`
+schreibt einen Entwurf. Fehlt eine Angabe — welcher Tag, wie lange, an wen —, fragt er
+nach, statt sie zu erfinden.
 
 ### Was mit deinen Daten passiert
 
@@ -1332,6 +1416,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `CORTEX_STORAGE_URL` | Adresse der Lagerverwaltung im Netz | — |
 | `CORTEX_STORAGE_ACCESS` | `off`, `read` oder `write` | `read` |
 | `CORTEX_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |
+| `CORTEX_GOOGLE_WRITE` | Termine anlegen/ändern und Entwürfe schreiben dürfen (nie verschicken) | `false` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | eigene Google-Anwendung | — |
 
 ### Ganz ohne API-Key: lokales Modell
@@ -1514,8 +1599,9 @@ zu einem anderen Anbieter gehört. Jede andere Adresse bleibt stehen — ein Lit
 oder ein eigenes NIM im Heimnetz ist ein völlig legitimer Weg zu einem Cloud-Modell und
 wird nicht angefasst.
 
-SQLite (`~/.cortex/cortex.sqlite3`) wird für genau zwei Dinge benutzt: Response-Cache
-(TTL 24 h) und Verlauf vergangener Recherchen.
+SQLite (`~/.cortex/cortex.sqlite3`) hält den Response-Cache (TTL 24 h), den Verlauf
+vergangener Recherchen, den Merkzettel, den verschlüsselten Speicher, die Aufträge und
+den Token-Zähler.
 
 ## Aufbau
 
@@ -1534,6 +1620,11 @@ cortex/
   lan.py         # das eigene Netz erkunden, ohne nmap
   homeassistant.py # Zustaende lesen, Dienste aufrufen
   export.py      # HTML / Markdown / CSV
+  sandbox.py     # die Werkstatt: abgeschotteter Behälter für den Code-Modus
+  jobs.py        # Aufträge: Fragen, die sich von selbst stellen
+  usage.py       # der Token-Zähler (drei Zeichen sind ein Token)
+  memory.py      # der verschlüsselte Speicher
+  google.py      # Gmail und Kalender, lesend und (auf Wunsch) ändernd
   subagents.py   # parallele Rechercheaufträge
   local_model.py # lokale Modelle per Ollama einrichten
   cache.py       # SQLite-Cache und Verlauf

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import time
@@ -2519,3 +2520,217 @@ def test_a_running_recheck_is_visible() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "[Gegenprobe]" in html
     assert '"gegenprüfen"' in html, "und steht in der Kopfzeile"
+
+
+# ---------------------------------------------------------------------------
+# Nutzung, Speicher, Chats durchsuchen, Export, Auftraege
+# ---------------------------------------------------------------------------
+def test_the_counter_can_be_read_and_reset(client, web_settings: Settings) -> None:
+    from cortex.usage import UsageLog
+
+    log = UsageLog(web_settings.db_path)
+    log.record("openai/gpt-4o", 300, 30)
+
+    status, data = client("GET", "/api/usage")
+    assert status == 200
+    zahlen = json.loads(data)
+    assert zahlen["chars_per_token"] == 3
+    assert zahlen["total"]["tokens_in"] == 300
+
+    status, data = client("DELETE", "/api/usage")
+    assert status == 200 and json.loads(data)["cleared"] == 1
+    assert json.loads(client("GET", "/api/usage")[1])["total"]["calls"] == 0
+
+
+def test_the_memory_window_shows_nothing_when_memory_is_off(
+    client, web_settings: Settings
+) -> None:
+    """Abgeschaltet heisst abgeschaltet -- auch fuer die Anzeige."""
+    web_settings.memory_enabled = False
+    status, data = client("GET", "/api/memory")
+    assert status == 200
+    payload = json.loads(data)
+    assert payload["enabled"] is False
+    assert payload["entries"] == []
+
+
+def test_forgetting_a_single_entry_needs_a_real_id(client, web_settings: Settings) -> None:
+    web_settings.memory_enabled = True
+    status, data = client("DELETE", "/api/memory?id=keinezahl")
+    assert status == 400
+    assert "Kennung" in json.loads(data)["error"]
+
+
+def test_chats_can_be_searched(client, web_settings: Settings) -> None:
+    cache = Cache(web_settings.db_path, web_settings.cache_ttl_hours)
+    cache.add_history("s1", "Wie kündige ich den Mietvertrag?", "Schriftlich.")
+    cache.add_history("s2", "Rezept für Brot", "Mehl und Wasser.")
+
+    status, data = client("GET", "/api/chats?q=mietvertrag")
+    assert status == 200
+    payload = json.loads(data)
+    assert payload["query"] == "mietvertrag"
+    assert [chat["session_id"] for chat in payload["chats"]] == ["s1"]
+
+    # Ohne q bleibt es die gewohnte Liste.
+    payload = json.loads(client("GET", "/api/chats")[1])
+    assert len(payload["chats"]) == 2
+
+
+def test_a_whole_chat_comes_out_as_markdown(client, web_settings: Settings) -> None:
+    cache = Cache(web_settings.db_path, web_settings.cache_ttl_hours)
+    cache.add_history("s1", "Erste Frage", "Erste Antwort")
+    cache.add_history("s1", "Zweite Frage", "Zweite Antwort")
+
+    status, data = client("GET", "/api/chatexport?session_id=s1")
+    assert status == 200
+    payload = json.loads(data)
+    assert payload["title"] == "Erste Frage"
+    text = payload["markdown"]
+    assert text.startswith("# Erste Frage")
+    assert "## Zweite Frage" in text
+    assert "Zweite Antwort" in text
+
+
+def test_exporting_an_unknown_chat_is_a_404(client) -> None:
+    assert client("GET", "/api/chatexport?session_id=gibtsnicht")[0] == 404
+
+
+def test_jobs_can_be_created_paused_and_deleted(client) -> None:
+    status, data = client(
+        "POST", "/api/jobs",
+        {"action": "add", "question": "Was gibt es Neues?", "rhythm": "daily",
+         "hour": 7, "minute": 30},
+    )
+    assert status == 200
+    job = json.loads(data)["job"]
+    assert job["question"] == "Was gibt es Neues?"
+    assert job["rhythm_name"] == "täglich"
+
+    payload = json.loads(client("GET", "/api/jobs")[1])
+    assert len(payload["jobs"]) == 1
+
+    assert json.loads(client("POST", "/api/jobs", {"action": "pause", "id": job["id"]})[1])["ok"]
+    assert json.loads(client("GET", "/api/jobs")[1])["jobs"][0]["enabled"] is False
+
+    assert json.loads(client("DELETE", f"/api/jobs?id={job['id']}")[1])["ok"] is True
+    assert json.loads(client("GET", "/api/jobs")[1])["jobs"] == []
+
+
+def test_a_job_without_a_question_is_refused(client) -> None:
+    status, data = client("POST", "/api/jobs", {"action": "add", "question": "  "})
+    assert status == 200
+    assert json.loads(data)["ok"] is False
+
+
+def test_the_workshop_answers_even_when_it_is_not_running(client) -> None:
+    """Keine Werkstatt ist keine Stoerung -- dann liegt eben nichts darin."""
+    status, data = client("GET", "/api/werkstatt")
+    assert status == 200
+    payload = json.loads(data)
+    assert payload["running"] is False
+    assert payload["files"] == []
+
+
+def test_a_workshop_file_is_never_served_as_html(client) -> None:
+    """Sonst liefe eine Datei aus der Werkstatt unter der Adresse von Cortex."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "/api/werkstatt/datei" in html
+    quelle = Path("cortex/web.py").read_text(encoding="utf-8")
+    stelle = quelle[quelle.index("def _workshop_file") :]
+    stelle = stelle[: stelle.index("\n    def ", 10)]
+    assert 'attachment; filename=' in stelle
+    assert "application/octet-stream" in stelle
+    assert "nosniff" in stelle
+
+
+# ---------------------------------------------------------------------------
+# Was die Oberflaeche zeigen muss
+# ---------------------------------------------------------------------------
+def test_the_settings_show_the_token_counter() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "<legend>Nutzung</legend>" in html
+    assert 'id="zaehler"' in html
+    assert "drei\n          Zeichen" in html or "drei Zeichen" in html
+
+
+def test_the_memory_window_exists_with_a_delete_per_entry() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="membox"' in html
+    assert "Was Cortex über dich weiß" in html
+    assert 'id="btn-memory"' in html
+    assert "/api/memory?id=" in html
+
+
+def test_the_sidebar_has_a_search_field() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="chatsuche"' in html
+    assert "Chats durchsuchen" in html
+    assert "/api/chats?q=" in html
+
+
+def test_every_answer_can_be_copied_and_saved() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "function answerTools(" in html
+    assert 'data-do="copy"' in html and 'data-do="save"' in html
+    assert 'data-do="export"' in html, "und der ganze Chat aus dem Menü"
+
+
+def test_the_workshop_button_only_shows_in_code_mode() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'id="btn-vmfiles"' in html
+    assert 'mode === "code" && sandbox' in html
+
+
+def test_the_settings_offer_scheduled_jobs() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "<legend>Aufträge</legend>" in html
+    assert 'id="job-rhythm"' in html
+    assert "stündlich" in html and "wöchentlich" in html
+
+
+def test_the_google_section_has_its_own_write_switch() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'name="CORTEX_GOOGLE_WRITE"' in html
+    assert "Ändern erlaubt" in html
+    assert "Verschickt wird nie eine Mail" in html
+
+
+def test_an_attachment_lands_in_the_workshop_of_this_turn(
+    session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Modus dieses Turns zählt -- nicht der des letzten.
+
+    Die Anhänge werden verarbeitet, bevor der Agent den neuen Modus kennt.
+    Wer `agent.workshop_on` fragt, bekommt den Stand von gestern.
+    """
+    agent = SimpleNamespace(mode="normal", sandbox=False, workshop_on=False)
+
+    # Erste Frage: Code-Modus mit Werkstatt kommt neu herein.
+    assert web.ChatSession._workshop_wanted(agent, "code", True) is True
+    # Ohne Werkstatt nicht.
+    assert web.ChatSession._workshop_wanted(agent, "code", False) is False
+    # Und im Standardmodus auch dann nicht, wenn die Werkstatt anstünde.
+    assert web.ChatSession._workshop_wanted(agent, "normal", True) is False
+
+    # Nichts mitgeschickt heißt: der Stand des Agenten gilt weiter.
+    agent.mode, agent.sandbox = "code", True
+    assert web.ChatSession._workshop_wanted(agent, "", None) is True
+
+
+def test_without_the_workshop_an_attachment_is_not_copied_anywhere(
+    session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    versuche: list[str] = []
+    monkeypatch.setattr(
+        session, "_into_workshop", lambda name, data: versuche.append(name) or ""
+    )
+    agent = FakeAgent()
+    text = session.attachments_text(
+        agent,
+        [{"name": "notiz.txt", "data": base64.b64encode(b"Hallo").decode()}],
+        lambda *a: None,
+        workshop=False,
+    )
+    assert "Hallo" in text
+    assert versuche == [], "ohne Werkstatt wird nichts hineingelegt"

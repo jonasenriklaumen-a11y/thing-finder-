@@ -153,6 +153,58 @@ body.collapsed aside{margin-left:-260px}
    scrollen. Genau das war der gemeldete Fehler. */
 .recents{flex:1;min-height:0;overflow-y:auto;padding:0 8px 8px;
   display:flex;flex-direction:column;gap:1px}
+/* Suchfeld ueber der Liste. Es sucht in Namen UND Wortlaut -- wer den Chat
+   nach der ersten Frage benannt hat, findet ihn auch ueber ein Wort aus der
+   Antwort wieder. */
+.side-search{position:relative;margin:0 8px 6px;flex:0 0 auto}
+.side-search .lupe{position:absolute;left:9px;top:50%;transform:translateY(-50%);
+  color:var(--text-3);font-size:14px;pointer-events:none}
+.side-search input{width:100%;background:var(--surface);border:1px solid var(--line-2);
+  border-radius:9px;padding:7px 26px 7px 26px;font:inherit;font-size:13px;
+  color:var(--text);outline:none}
+.side-search input:focus{border-color:var(--accent)}
+.side-search input::-webkit-search-cancel-button{display:none}
+.side-search .leeren{position:absolute;right:5px;top:50%;transform:translateY(-50%);
+  border:0;background:transparent;color:var(--text-3);cursor:pointer;font-size:16px;
+  line-height:1;padding:2px 5px;border-radius:6px}
+.side-search .leeren:hover{background:var(--surface-2);color:var(--text)}
+/* Die Fundstelle unter dem Namen: ohne sie muesste man jeden Treffer
+   oeffnen, um zu sehen, warum er einer ist. */
+.recent.fund{align-items:flex-start;padding:2px 0}
+.recent .fund-text{display:block;font-size:11.5px;color:var(--text-3);
+  white-space:normal;line-height:1.45;margin-top:2px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.recent mark{background:var(--accent-soft);color:var(--accent-text);border-radius:3px;
+  padding:0 1px}
+.recents-leer{color:var(--text-3);font-size:12.5px;padding:14px 10px;line-height:1.5}
+
+/* Auftraege: eine Zeile je Auftrag, mit dem naechsten Termin daneben. */
+.auftraege{display:flex;flex-direction:column;gap:8px;margin:12px 0 14px}
+.auftrag{background:var(--surface);border:1px solid var(--line-2);border-radius:12px;
+  padding:10px 12px;display:flex;gap:10px;align-items:flex-start}
+.auftrag.pausiert{opacity:.6}
+.auftrag .inhalt{flex:1;min-width:0}
+.auftrag .frage{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.auftrag .wann{font-size:11.5px;color:var(--text-3);margin-top:4px}
+.auftrag .knoepfe{display:flex;gap:5px;flex:none}
+.auftrag .knoepfe button{background:none;border:1px solid var(--line-2);border-radius:8px;
+  color:var(--text-3);cursor:pointer;font:inherit;font-size:11.5px;padding:5px 8px}
+.auftrag .knoepfe button:hover{border-color:var(--accent);color:var(--accent-text)}
+.auftrag .knoepfe button.weg:hover{border-color:var(--err);color:var(--err)}
+.auftrag{animation:rise var(--t-mid) var(--ease-out) both}
+.auftraege-leer{color:var(--text-3);font-size:13px;padding:6px 2px}
+
+/* Unter jeder fertigen Antwort: mitnehmen, was dasteht. Erst beim
+   Darauffahren sichtbar -- eine Knopfreihe unter jeder Antwort waere
+   im Verlauf lauter als die Antworten selbst. */
+.answer-tools{display:flex;gap:6px;margin-top:8px;opacity:0;
+  transition:opacity var(--t-fast) var(--ease-out)}
+.msg.bot:hover .answer-tools,.answer-tools:focus-within{opacity:1}
+.answer-tools button{background:transparent;border:1px solid var(--line-2);
+  border-radius:8px;color:var(--text-3);cursor:pointer;font:inherit;font-size:11.5px;
+  padding:4px 9px}
+.answer-tools button:hover{border-color:var(--accent);color:var(--accent-text);
+  background:var(--accent-soft)}
 /* Eine Zeile besteht aus dem Chat und einem Menue, das erst beim Darauffahren
    erscheint -- sonst stuende neben jedem Chat ein Knopf im Weg. */
 .recent{display:flex;align-items:center;flex:0 0 auto;width:100%;background:transparent;
@@ -534,6 +586,43 @@ body.dragging::after{animation:fade-in var(--t-fast) var(--ease-out)}
 :root.theming *{transition:background-color var(--t-slow) ease,
   color var(--t-slow) ease,border-color var(--t-slow) ease!important}
 
+/* Der Zaehler: drei Kacheln und darunter die Aufschluesselung. */
+.zaehler{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.kachel{background:var(--surface);border:1px solid var(--line-2);border-radius:12px;
+  padding:11px 13px}
+.kachel .wert{font:600 20px/1.2 var(--sans);font-variant-numeric:tabular-nums}
+.kachel .was{font-size:11.5px;color:var(--text-3);margin-top:3px}
+.kachel .dazu{font-size:11.5px;color:var(--text-2);margin-top:5px}
+@media (max-width:520px){.zaehler{grid-template-columns:1fr}}
+
+/* ===================== Was weiss Cortex ueber mich ===================== */
+/* Ein Gedaechtnis, in das man nicht hineinsehen kann, ist keins -- es ist
+   ein Geruecht. Darum eine Liste: ein Eintrag je Zeile, mit Thema, Datum
+   und einem Knopf, der genau diesen einen Eintrag entfernt. */
+#membox,#vmbox{z-index:90}
+.merk-sheet{max-width:38rem}
+.merkliste{display:flex;flex-direction:column;gap:8px;margin-top:14px;
+  max-height:52vh;overflow-y:auto;padding-right:2px}
+.merk{background:var(--surface);border:1px solid var(--line-2);border-radius:12px;
+  padding:11px 13px;display:flex;gap:12px;align-items:flex-start}
+.merk .inhalt{flex:1;min-width:0}
+.merk .kopf{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
+  font-size:11.5px;color:var(--text-3)}
+.merk .thema{font:600 11px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;
+  color:var(--accent-text);background:var(--accent-soft);border-radius:6px;
+  padding:4px 7px}
+.merk .text{margin-top:6px;font-size:14.5px;line-height:1.5;
+  overflow-wrap:anywhere}
+.merk .weg{background:none;border:1px solid var(--line-2);border-radius:9px;
+  color:var(--text-3);cursor:pointer;font:inherit;font-size:12.5px;padding:6px 10px;
+  flex:none}
+.merk .weg:hover{border-color:var(--err);color:var(--err)}
+/* Gestaffelt einlaufen -- dieselbe Bewegung wie bei den Chats in der Leiste.
+   Ohne sie waere das `stagger()` im Skript ohne Wirkung. */
+.merk{animation:rise var(--t-mid) var(--ease-out) both}
+.merk.geht{animation:fade-out var(--t-fast) var(--ease-in) forwards}
+.merk-leer{color:var(--text-3);font-size:14px;padding:18px 2px}
+
 /* ========================= Erscheinungsbild ============================= */
 /* Helligkeit und Farbschema in einem Fenster. Die Vorschau zeigt denselben
    Aufbau wie die Seite -- Leiste, Flaeche, Akzent -- damit man vor dem
@@ -723,6 +812,13 @@ input:focus,select:focus{border-color:var(--accent)}
   </div>
   <button class="newchat" id="btn-new"><span class="plus">+</span> Neuer Chat</button>
   <div class="side-title">Letzte Chats</div>
+  <div class="side-search">
+    <span class="lupe" aria-hidden="true">⌕</span>
+    <input type="search" id="chatsuche" placeholder="Chats durchsuchen"
+           autocomplete="off" aria-label="Chats durchsuchen">
+    <button type="button" class="leeren" id="suche-weg" title="Suche beenden"
+            aria-label="Suche beenden" hidden>×</button>
+  </div>
   <div class="recents" id="recents"></div>
   <div class="side-foot">
     <button class="side-btn" id="btn-notes">☰ Merkzettel</button>
@@ -740,6 +836,8 @@ input:focus,select:focus{border-color:var(--accent)}
       <span id="model-name">Modell</span><span class="caret">▾</span>
     </button>
     <span class="spacer"></span>
+    <button class="iconbtn" id="btn-vmfiles" title="Dateien in der Werkstatt"
+            aria-label="Dateien in der Werkstatt" hidden>🗀</button>
   </div>
 
   <div class="picker" id="picker-models" hidden>
@@ -853,6 +951,37 @@ input:focus,select:focus{border-color:var(--accent)}
   </div>
 </div>
 
+<div class="overlay" id="vmbox">
+  <div class="sheet merk-sheet" role="dialog" aria-modal="true" aria-labelledby="vm-title">
+    <h2 id="vm-title">Werkstatt</h2>
+    <p class="lead">Was gerade unter <code>/work</code> liegt. Angehängte Dateien
+      landen in <code>/work/eingang</code>; alles, was Cortex AI dort erzeugt,
+      kannst du herunterladen. Zwanzig Minuten nach der letzten Nachricht wird
+      die Werkstatt samt Inhalt gelöscht.</p>
+    <div class="merkliste" id="vmliste"></div>
+    <div class="actions">
+      <span class="note" id="vm-note"></span>
+      <button type="button" class="btn" id="vm-refresh">Neu ansehen</button>
+      <button type="button" class="btn primary" id="vm-close">Fertig</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="membox">
+  <div class="sheet merk-sheet" role="dialog" aria-modal="true" aria-labelledby="merk-title">
+    <h2 id="merk-title">Was Cortex über dich weiß</h2>
+    <p class="lead">Alles, was Cortex AI von selbst abgelegt oder auf deinen Wunsch
+      gemerkt hat. Nur Text, verschlüsselt, auf diesem Rechner. Jede Zeile lässt
+      sich einzeln entfernen.</p>
+    <div class="merkliste" id="merkliste"></div>
+    <div class="actions">
+      <span class="note" id="merk-note"></span>
+      <button type="button" class="btn" id="merk-clear">Alles vergessen</button>
+      <button type="button" class="btn primary" id="merk-close">Fertig</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="themebox">
   <div class="sheet theme-sheet" role="dialog" aria-modal="true" aria-labelledby="theme-title">
     <h2 id="theme-title">Erscheinungsbild</h2>
@@ -931,6 +1060,10 @@ input:focus,select:focus{border-color:var(--accent)}
           <div class="meter" id="storage-meter"><span></span></div>
         </div>
         <div class="note" id="storage-note"></div>
+        <div class="actions section">
+          <span class="note">Einsehen, was drinsteht — und Einzelnes löschen.</span>
+          <button type="button" class="btn" id="btn-memory">Was weißt du über mich?</button>
+        </div>
       </fieldset>
 
       <fieldset><legend>Mitlesen</legend>
@@ -955,13 +1088,80 @@ input:focus,select:focus{border-color:var(--accent)}
         <div class="note" id="usage-note"></div>
       </fieldset>
 
+      <fieldset><legend>Nutzung</legend>
+        <p class="lead">Wie viel durch die Leitung geht. Ein Token sind hier drei
+          Zeichen — eine Vereinbarung, keine Messung: jeder Anbieter zerlegt Text
+          anders. Für Größenordnungen reicht es. Ein Limit gibt es nicht.</p>
+        <div class="zaehler" id="zaehler"></div>
+        <div class="note" id="usage-detail"></div>
+        <div class="actions section">
+          <span class="note" id="usage-cleared"></span>
+          <button type="button" class="btn" id="usage-reset">Zähler zurücksetzen</button>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Aufträge</legend>
+        <p class="lead">Fragen, die Cortex AI von selbst stellt — stündlich,
+          täglich oder wöchentlich. Die Antwort landet als Chat in der
+          Seitenleiste. Verpasste Termine werden nicht nachgeholt: war der
+          Rechner aus, geht es beim nächsten Mal weiter.</p>
+        <div class="auftraege" id="auftraege"></div>
+        <div class="row">
+          <label style="flex:2"><span class="lbl">Frage</span>
+            <input type="text" id="job-frage"
+                   placeholder="Was gibt es Neues zu …?"></label>
+          <label><span class="lbl">Rhythmus</span>
+            <select id="job-rhythm">
+              <option value="daily">täglich</option>
+              <option value="hourly">stündlich</option>
+              <option value="weekly">wöchentlich</option>
+            </select></label>
+        </div>
+        <div class="row">
+          <label id="job-tag-feld"><span class="lbl">Wochentag</span>
+            <select id="job-weekday">
+              <option value="0">Montag</option>
+              <option value="1">Dienstag</option>
+              <option value="2">Mittwoch</option>
+              <option value="3">Donnerstag</option>
+              <option value="4">Freitag</option>
+              <option value="5">Samstag</option>
+              <option value="6">Sonntag</option>
+            </select></label>
+          <label><span class="lbl">Uhrzeit <span class="why">Bei „stündlich"
+            zählt nur die Minute</span></span>
+            <input type="time" id="job-zeit" value="08:00"></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" id="job-struktur" checked>
+          <label for="job-struktur" style="margin:0">Richtig recherchieren
+            <span class="why">Teilfragen, Agenten, Quellen — wie der Schalter
+              „Strukturieren". Ausgeschaltet antwortet Cortex AI kurz aus
+              eigenem Wissen.</span></label>
+        </div>
+        <div class="actions section">
+          <span class="note" id="job-note"></span>
+          <button type="button" class="btn primary" id="job-add">Auftrag anlegen</button>
+        </div>
+      </fieldset>
+
       <fieldset><legend>Gmail &amp; Kalender</legend>
         <div class="check">
           <input type="checkbox" name="CORTEX_GOOGLE" id="google-on">
           <label for="google-on" style="margin:0">Termine und Mails lesen dürfen
             <span class="why">Cortex AI kann dann Fragen zu Terminen und E-Mails
-              beantworten und die Angaben für die Recherche nutzen. Nur lesen —
-              es wird nie eine Mail verschickt oder ein Termin geändert.</span></label>
+              beantworten und die Angaben für die Recherche nutzen. Für sich
+              genommen nur lesen — ändern kommt erst mit dem Schalter
+              darunter.</span></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" name="CORTEX_GOOGLE_WRITE" id="google-write">
+          <label for="google-write" style="margin:0">Ändern erlaubt
+            <span class="why">Cortex AI darf dann Termine anlegen und ändern und
+              Mail-<b>Entwürfe</b> schreiben. Vor jeder Änderung fragt er nach.
+              <b>Verschickt wird nie eine Mail</b> und gelöscht wird nichts —
+              dafür holt Cortex bei Google gar nicht erst die Rechte. Nach dem
+              Einschalten einmal neu verbinden, sonst fehlen die Rechte.</span></label>
         </div>
         <div class="row">
           <label><span class="lbl">Client-ID <span id="google-id-hint"></span></span>
@@ -1171,6 +1371,7 @@ function setMode(wanted){
   $("#input").placeholder = mode === "code"
     ? "Was soll ich bauen?" : "Frag etwas …";
   try { localStorage.setItem("cortex-mode", mode); } catch {}
+  zeigeWerkstattKnopf();
 }
 
 function setRecheck(on){
@@ -1184,7 +1385,15 @@ function setSandbox(on){
   sandbox = !!on;
   $("#werkstatt").checked = sandbox;
   try { localStorage.setItem("cortex-vm", sandbox ? "1" : "0"); } catch {}
+  zeigeWerkstattKnopf();
   refreshHeader();
+}
+
+// Der Knopf zur Werkstatt steht nur da, wo es eine gibt: im Code-Modus mit
+// eingeschalteter Maschine. Sonst waere es ein Knopf ins Leere.
+function zeigeWerkstattKnopf(){
+  const knopf = $("#btn-vmfiles");
+  if (knopf) knopf.hidden = !(mode === "code" && sandbox);
 }
 
 function setOnline(on){
@@ -1368,6 +1577,59 @@ function mark(bubble, text){
   }
   box.querySelector(".txt").textContent = text;
   scroll();
+}
+
+// Was auf dem Bildschirm steht, soll man auch mitnehmen koennen. Kopiert
+// und gespeichert wird der Wortlaut, nicht das gerenderte HTML: Markdown
+// laesst sich weiterverwenden, ein Ausschnitt aus dem DOM nicht.
+function answerTools(bubble, text, question){
+  if (!bubble || !bubble.parentNode || !text) return;
+  bubble.parentNode.querySelector(".answer-tools")?.remove();
+  const box = document.createElement("div");
+  box.className = "answer-tools";
+  box.innerHTML = '<button type="button" data-do="copy">Kopieren</button>'
+    + '<button type="button" data-do="save">Als Datei</button>';
+  box.querySelector('[data-do="copy"]').addEventListener("click", async (e) => {
+    const ok = await copyText(text);
+    e.target.textContent = ok ? "Kopiert" : "Ging nicht";
+    setTimeout(() => { e.target.textContent = "Kopieren"; }, 1400);
+  });
+  box.querySelector('[data-do="save"]').addEventListener("click", () => {
+    const kopf = question ? `# ${question.replace(/\s+/g, " ").trim()}\n\n` : "";
+    downloadText(dateiname(question || "antwort") + ".md", kopf + text);
+  });
+  bubble.parentNode.appendChild(box);
+}
+
+// Der moderne Weg braucht einen sicheren Kontext; ueber http:// im eigenen
+// Netz gibt es den nicht. Dann der alte Weg -- lieber unschoen als gar nicht.
+async function copyText(text){
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  try {
+    const feld = document.createElement("textarea");
+    feld.value = text;
+    feld.style.position = "fixed"; feld.style.opacity = "0";
+    document.body.appendChild(feld);
+    feld.select();
+    const ok = document.execCommand("copy");
+    feld.remove();
+    return ok;
+  } catch { return false; }
+}
+
+function downloadText(name, text){
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = name;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// Ein Dateiname aus einer Frage: nur Zeichen, die jedes Dateisystem mag.
+function dateiname(roh){
+  const rein = String(roh || "cortex").normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return rein.toLowerCase() || "cortex";
 }
 
 function step(box, tag, text, kind){
@@ -1816,7 +2078,9 @@ async function ask(text){
         answer += ev.text;
         bubble.innerHTML = md(answer) + '<span class="cursor"></span>'; scroll(); break;
       case "done":
-        bubble.innerHTML = md(answer || "(keine Antwort)"); scroll(); loadRecents(); break;
+        bubble.innerHTML = md(answer || "(keine Antwort)");
+        answerTools(bubble, answer, text);
+        scroll(); loadRecents(); break;
     }
   }
   setBusy(false); input.focus();
@@ -2024,14 +2288,38 @@ function chatGroup(touched){
 // vorhanden, und die Funktion darueber wuerde darueber stolpern.
 let drawnChats = "";
 
+// Wonach gerade gesucht wird. Leer = die gewohnte Liste.
+let chatQuery = "";
+
+// Den gesuchten Teil hervorheben, ohne dabei fremden Text als HTML zu
+// deuten: es wird immer nur Text eingesetzt, nie Markup.
+function markiere(ziel, text, needle){
+  ziel.textContent = "";
+  const stelle = needle ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+  if (stelle < 0){ ziel.textContent = text; return; }
+  ziel.append(text.slice(0, stelle));
+  const treffer = document.createElement("mark");
+  treffer.textContent = text.slice(stelle, stelle + needle.length);
+  ziel.append(treffer, text.slice(stelle + needle.length));
+}
+
 function drawRecents(){
   const box = $("#recents");
   box.innerHTML = "";
+  if (chatQuery && !chats.length){
+    const leer = document.createElement("div");
+    leer.className = "recents-leer";
+    leer.textContent = `Nichts gefunden zu „${chatQuery}".`;
+    box.appendChild(leer);
+    drawnChats = "leer:" + chatQuery;
+    return;
+  }
   // Ueberschriften nur, wenn es wirklich mehrere Tage gibt. Sonst stuende
   // unter "Letzte Chats" gleich noch ein "Heute" -- zwei Ueberschriften
-  // uebereinander, die dasselbe sagen.
+  // uebereinander, die dasselbe sagen. Beim Suchen gar keine: die Treffer
+  // sortieren sich nach Fund, nicht nach Tag.
   const groups = new Set(chats.map(chat => chatGroup(chat.touched || 0)));
-  const showGroups = groups.size > 1;
+  const showGroups = !chatQuery && groups.size > 1;
   let group = "";
   for (const chat of chats){
     const label = (chat.title || "Ohne Titel").replace(/\s+/g, " ").trim();
@@ -2048,8 +2336,15 @@ function drawRecents(){
     row.innerHTML = '<span class="name"></span>'
       + '<button class="more" title="Mehr" aria-label="Mehr">⋯</button>';
     const name = row.querySelector(".name");
-    name.textContent = label;
+    markiere(name, label, chatQuery);
     name.title = chat.turns > 1 ? `${label}  (${chat.turns} Fragen)` : label;
+    if (chatQuery && chat.snippet){
+      row.classList.add("fund");
+      const stelle = document.createElement("span");
+      stelle.className = "fund-text";
+      markiere(stelle, chat.snippet, chatQuery);
+      name.appendChild(stelle);
+    }
     name.addEventListener("click", () => openChat(chat.session_id));
     row.querySelector(".more").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2064,18 +2359,55 @@ function drawRecents(){
 }
 
 async function loadRecents(){
+  const gesucht = chatQuery;
   try {
-    const data = await (await api("/api/chats")).json();
+    const pfad = gesucht ? `/api/chats?q=${encodeURIComponent(gesucht)}` : "/api/chats";
+    const data = await (await api(pfad)).json();
+    // Wer weitergetippt hat, waehrend die Antwort unterwegs war, bekommt
+    // sonst das Ergebnis von vorgestern zurueck.
+    if (chatQuery !== gesucht) return;
     currentChat = data.current || "";
     chats = data.chats || [];
     drawRecents();
   } catch {}
 }
 
+// Erst tippen lassen, dann fragen: bei jedem Tastendruck eine Anfrage waere
+// eine Anfrage je Buchstabe.
+let sucheTimer = null;
+const sucheFeld = $("#chatsuche");
+function sucheJetzt(){
+  const wort = sucheFeld.value.trim();
+  if (wort === chatQuery) return;
+  chatQuery = wort;
+  $("#suche-weg").hidden = !wort;
+  loadRecents();
+}
+sucheFeld.addEventListener("input", () => {
+  clearTimeout(sucheTimer);
+  sucheTimer = setTimeout(sucheJetzt, 220);
+});
+sucheFeld.addEventListener("keydown", (e) => {
+  if (e.key === "Enter"){ e.preventDefault(); clearTimeout(sucheTimer); sucheJetzt(); }
+  if (e.key === "Escape"){ e.preventDefault(); sucheEnde(); }
+});
+function sucheEnde(){
+  clearTimeout(sucheTimer);
+  sucheFeld.value = "";
+  if (!chatQuery) return;
+  chatQuery = "";
+  $("#suche-weg").hidden = true;
+  loadRecents();
+}
+$("#suche-weg").addEventListener("click", sucheEnde);
+
 // Ein neuer Chat soll in dem Moment in der Liste stehen, in dem man ihn
 // beginnt -- nicht erst, wenn die Antwort fertig ist. Bis dahin waeren es
 // bei einer laengeren Recherche Minuten, in denen die Leiste leer bleibt.
 function noteChat(question){
+  // Waehrend gesucht wird, zeigt die Leiste Treffer. Ein neuer Chat, der
+  // nicht dazu passt, haette darin nichts zu suchen.
+  if (chatQuery) return;
   const known = chats.find(chat => chat.session_id === currentChat);
   if (known){ known.turns += 1; known.touched = Date.now() / 1000; }
   else {
@@ -2125,6 +2457,7 @@ function chatMenu(row, chat){
   menu.className = "chatmenu";
   menu.dataset.chat = chat.session_id;
   menu.innerHTML = '<button data-do="rename">Umbenennen</button>'
+    + '<button data-do="export">Exportieren</button>'
     + '<button class="danger" data-do="delete">Löschen</button>';
   const box = row.getBoundingClientRect();
   menu.style.left = Math.min(box.left + 12, innerWidth - 170) + "px";
@@ -2134,6 +2467,7 @@ function chatMenu(row, chat){
     const what = e.target.dataset.do;
     closeChatMenu();
     if (what === "rename") renameChat(row, chat);
+    if (what === "export") exportChat(chat);
     if (what === "delete") deleteChat(chat);
   });
   document.body.appendChild(menu);
@@ -2181,6 +2515,20 @@ function renameChat(row, chat){
   });
   field.addEventListener("blur", () => finish(true));
   field.addEventListener("click", (e) => e.stopPropagation());
+}
+
+// Einen ganzen Chat als Markdown herunterladen. Der Server setzt ihn
+// zusammen -- so laesst sich auch ein Chat mitnehmen, der gerade nicht
+// offen ist.
+async function exportChat(chat){
+  try {
+    const res = await api(
+      `/api/chatexport?session_id=${encodeURIComponent(chat.session_id)}`);
+    const data = await res.json();
+    if (!data.markdown){ toast(data.error || "Da war nichts zu exportieren."); return; }
+    downloadText(dateiname(data.title || chat.title) + ".md", data.markdown);
+    toast("Gespeichert.");
+  } catch { toast("Der Export ist nicht durchgekommen."); }
 }
 
 async function deleteChat(chat){
@@ -2233,6 +2581,7 @@ async function openChat(sessionId){
     const { steps, bubble } = addBot();
     steps.remove();
     bubble.innerHTML = md(turn.answer || "");
+    answerTools(bubble, turn.answer || "", turn.question);
   });
   stagger(thread.querySelectorAll(".msg"), 30, 8);
   setTimeout(() => thread.classList.remove("fresh"), 900);
@@ -2321,6 +2670,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (asking) return;              // die Rueckfrage liegt obenauf
   if (pickerOpen()) { closePicker(); return; }
+  if (vmBox.classList.contains("open")) { closeOverlay(vmBox); return; }
+  if (memBox.classList.contains("open")) { closeOverlay(memBox); return; }
   if (themeBox.classList.contains("open")) { closeTheme(); return; }
   if (overlay.classList.contains("open")) closeSettings();
 });
@@ -2382,6 +2733,11 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#model-note").textContent = "";
   $("#usage-note").innerHTML = "";
   api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
+  $("#usage-cleared").textContent = "";
+  loadUsage();
+  $("#job-note").textContent = "";
+  jobFelder();
+  loadJobs();
   $("#showtrace").checked = document.body.classList.contains("tracing");
   let wanted = false;
   try { wanted = localStorage.getItem("cortex-showload") === "1"; } catch {}
@@ -2405,6 +2761,351 @@ function closeSettings(){
 }
 $("#cancel").addEventListener("click", closeSettings);
 overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSettings(); });
+
+/* ---------- Nutzung ---------- */
+// Grosse Zahlen liest niemand als Ziffernfolge. 1234567 -> "1,23 Mio".
+function kurz(zahl){
+  const n = Number(zahl) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(2).replace(".", ",") + " Mrd";
+  if (n >= 1e6) return (n / 1e6).toFixed(2).replace(".", ",") + " Mio";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(".", ",") + " Tsd";
+  return String(n);
+}
+
+async function loadUsage(){
+  const box = $("#zaehler"), detail = $("#usage-detail");
+  box.innerHTML = "";
+  detail.textContent = "";
+  let data;
+  try { data = await (await api("/api/usage")).json(); }
+  catch { detail.textContent = "Der Zählerstand ließ sich nicht laden."; return; }
+
+  const kacheln = [
+    ["heute", data.today, "Heute"],
+    ["fenster", data.window, `Letzte ${data.window_days || 7} Tage`],
+    ["gesamt", data.total, "Insgesamt"],
+  ];
+  for (const [, wert, was] of kacheln){
+    const gesamt = (wert?.tokens_in || 0) + (wert?.tokens_out || 0);
+    const kachel = document.createElement("div");
+    kachel.className = "kachel";
+    kachel.innerHTML = '<div class="wert"></div><div class="was"></div>'
+      + '<div class="dazu"></div>';
+    kachel.querySelector(".wert").textContent = kurz(gesamt);
+    kachel.querySelector(".was").textContent = was + " (Token)";
+    kachel.querySelector(".dazu").textContent =
+      `${kurz(wert?.tokens_in || 0)} hinein · ${kurz(wert?.tokens_out || 0)} heraus`
+      + ` · ${wert?.calls || 0} Aufrufe`;
+    box.appendChild(kachel);
+  }
+
+  const zeilen = (data.models || []).map(m =>
+    `${m.model}: ${kurz((m.tokens_in || 0) + (m.tokens_out || 0))} Token `
+    + `in ${m.calls} Aufrufen`);
+  detail.textContent = zeilen.length
+    ? "Je Modell:\n" + zeilen.join("\n")
+    : "Noch nichts gezählt.";
+}
+
+$("#usage-reset").addEventListener("click", async () => {
+  if (!confirm("Den Zählerstand wirklich zurücksetzen?")) return;
+  try {
+    await api("/api/usage", { method: "DELETE" });
+    $("#usage-cleared").textContent = "Zurückgesetzt.";
+    loadUsage();
+  } catch { $("#usage-cleared").textContent = "Ging nicht."; }
+});
+
+/* ---------- Werkstatt: Dateien ---------- */
+// Ohne diese Liste muesste man raten, wie die Datei heisst, die Cortex
+// gerade gebaut hat -- und haette keine Moeglichkeit, sie mitzunehmen.
+const vmBox = $("#vmbox");
+
+function groesse(bytes){
+  const n = Number(bytes) || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(".", ",") + " MB";
+  if (n >= 1e3) return Math.round(n / 1e3) + " kB";
+  return n + " B";
+}
+
+async function loadWorkshop(){
+  const liste = $("#vmliste"), note = $("#vm-note");
+  liste.innerHTML = "";
+  note.textContent = "";
+  let data;
+  try { data = await (await api("/api/werkstatt")).json(); }
+  catch { note.textContent = "Die Werkstatt antwortet nicht."; return; }
+
+  if (!data.running){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Die Werkstatt läuft gerade nicht. Sie entsteht mit der "
+      + "nächsten Frage im Code-Modus — und verschwindet zwanzig Minuten nach "
+      + "der letzten wieder.";
+    liste.appendChild(leer);
+    return;
+  }
+  const dateien = data.files || [];
+  if (!dateien.length){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Die Werkstatt läuft, es liegt aber noch nichts darin.";
+    liste.appendChild(leer);
+  }
+  for (const datei of dateien) liste.appendChild(vmZeile(datei));
+  stagger(liste.querySelectorAll(".merk"), 16);
+  const belegt = data.usage_gb;
+  note.textContent = `${dateien.length} ${dateien.length === 1 ? "Datei" : "Dateien"}`
+    + (belegt != null ? ` · ${belegt} von ${data.disk_gb || 4} GB belegt` : "")
+    + (data.status?.idle_left_seconds != null
+        ? ` · noch ${Math.ceil(data.status.idle_left_seconds / 60)} Min.` : "");
+}
+
+function vmZeile(datei){
+  const zeile = document.createElement("div");
+  zeile.className = "merk";
+  zeile.innerHTML = '<div class="inhalt"><div class="kopf">'
+    + '<span class="thema"></span></div><div class="text"></div></div>'
+    + '<button type="button" class="weg">Holen</button>';
+  const kurzname = String(datei.path).replace(/^\/work\/?/, "") || datei.path;
+  zeile.querySelector(".thema").textContent = groesse(datei.bytes);
+  zeile.querySelector(".text").textContent = kurzname;
+  const knopf = zeile.querySelector(".weg");
+  knopf.addEventListener("click", async () => {
+    knopf.disabled = true;
+    try {
+      const res = await api(
+        `/api/werkstatt/datei?path=${encodeURIComponent(datei.path)}`);
+      if (!res.ok){
+        const fehler = await res.json().catch(() => ({}));
+        $("#vm-note").textContent = fehler.error || "Die Datei kam nicht durch.";
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = kurzname.split("/").pop() || "datei";
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch { $("#vm-note").textContent = "Die Datei kam nicht durch."; }
+    finally { knopf.disabled = false; }
+  });
+  return zeile;
+}
+
+$("#btn-vmfiles").addEventListener("click", () => {
+  loadWorkshop();
+  openOverlay(vmBox);
+});
+$("#vm-refresh").addEventListener("click", loadWorkshop);
+$("#vm-close").addEventListener("click", () => closeOverlay(vmBox));
+vmBox.addEventListener("click", (e) => { if (e.target === vmBox) closeOverlay(vmBox); });
+
+/* ---------- Was Cortex ueber mich weiss ---------- */
+// Ein Gedaechtnis, das man nicht einsehen kann, muesste man auf Zuruf
+// glauben. Darum diese Liste -- und ein Loeschknopf je Zeile, damit man
+// Einzelnes wegnehmen kann, ohne alles zu verlieren.
+const memBox = $("#membox");
+
+// SQLite legt die Zeit als "2026-09-06 14:03:11" in UTC ab. Ohne das Z
+// deutet der Browser das als Ortszeit und zeigt die Stunde falsch.
+function wann(roh){
+  if (!roh) return "";
+  const zeit = new Date(String(roh).replace(" ", "T") + "Z");
+  if (isNaN(zeit)) return String(roh);
+  return zeit.toLocaleDateString("de-DE",
+    { day: "2-digit", month: "short", year: "numeric" });
+}
+
+async function loadMemory(){
+  const liste = $("#merkliste"), note = $("#merk-note");
+  liste.innerHTML = "";
+  note.textContent = "";
+  let data;
+  try { data = await (await api("/api/memory")).json(); }
+  catch { liste.innerHTML = '<div class="merk-leer"></div>';
+          liste.firstChild.textContent = "Der Speicher ließ sich nicht laden."; return; }
+
+  if (!data.enabled){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Der Speicher ist abgeschaltet. Solange er aus ist, "
+      + "legt Cortex AI nichts ab — und es steht auch nichts drin.";
+    liste.appendChild(leer);
+    $("#merk-clear").disabled = true;
+    return;
+  }
+  $("#merk-clear").disabled = false;
+
+  const eintraege = data.entries || [];
+  if (!eintraege.length){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Noch nichts gemerkt. Was du im Gespräch über dich "
+      + "erzählst, landet von selbst hier.";
+    liste.appendChild(leer);
+    return;
+  }
+  for (const eintrag of eintraege) liste.appendChild(merkZeile(eintrag));
+  stagger(liste.querySelectorAll(".merk"), 18);
+  const platz = data.usage || {};
+  note.textContent = `${eintraege.length} ${eintraege.length === 1 ? "Eintrag" : "Einträge"}`
+    + (platz.used_mb != null ? ` · ${platz.used_mb} von ${platz.limit_mb} MB belegt` : "");
+}
+
+function merkZeile(eintrag){
+  const zeile = document.createElement("div");
+  zeile.className = "merk";
+  zeile.innerHTML = '<div class="inhalt"><div class="kopf">'
+    + '<span class="thema"></span><span class="zeit"></span></div>'
+    + '<div class="text"></div></div>'
+    + '<button type="button" class="weg">Löschen</button>';
+  zeile.querySelector(".thema").textContent = eintrag.topic || "notiz";
+  zeile.querySelector(".zeit").textContent = wann(eintrag.when);
+  zeile.querySelector(".text").textContent = eintrag.text || "";
+  zeile.querySelector(".weg").addEventListener("click", async () => {
+    const weg = zeile.querySelector(".weg");
+    weg.disabled = true;
+    try {
+      await api(`/api/memory?id=${encodeURIComponent(eintrag.id)}`, { method: "DELETE" });
+      zeile.classList.add("geht");
+      setTimeout(() => { zeile.remove(); loadMemory(); }, CLOSE_MS);
+    } catch {
+      weg.disabled = false;
+      $("#merk-note").textContent = "Ging nicht — läuft der Server noch?";
+    }
+  });
+  return zeile;
+}
+
+$("#btn-memory").addEventListener("click", () => {
+  loadMemory();
+  openOverlay(memBox);
+});
+$("#merk-close").addEventListener("click", () => closeOverlay(memBox));
+memBox.addEventListener("click", (e) => { if (e.target === memBox) closeOverlay(memBox); });
+$("#merk-clear").addEventListener("click", async () => {
+  if (!confirm("Wirklich alles vergessen, was Cortex AI über dich weiß?")) return;
+  try {
+    await api("/api/memory", { method: "DELETE" });
+    loadMemory();
+  } catch { $("#merk-note").textContent = "Ging nicht."; }
+});
+
+/* ---------- Auftraege ---------- */
+// Eine Frage, die sich von selbst stellt. Die Antwort landet als Chat --
+// so muss man nichts Neues lernen, um sie zu lesen.
+const TAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+              "Samstag", "Sonntag"];
+
+function wannGenau(stempel){
+  if (!stempel) return "";
+  const zeit = new Date(stempel * 1000);
+  if (isNaN(zeit)) return "";
+  return zeit.toLocaleString("de-DE",
+    { weekday: "short", day: "2-digit", month: "short", hour: "2-digit",
+      minute: "2-digit" });
+}
+
+async function loadJobs(){
+  const box = $("#auftraege");
+  box.innerHTML = "";
+  let data;
+  try { data = await (await api("/api/jobs")).json(); }
+  catch { box.innerHTML = '<div class="auftraege-leer"></div>';
+          box.firstChild.textContent = "Die Aufträge ließen sich nicht laden."; return; }
+  const jobs = data.jobs || [];
+  if (!jobs.length){
+    const leer = document.createElement("div");
+    leer.className = "auftraege-leer";
+    leer.textContent = "Noch kein Auftrag. Unten steht, wie einer entsteht.";
+    box.appendChild(leer);
+    return;
+  }
+  for (const job of jobs) box.appendChild(jobZeile(job));
+  stagger(box.querySelectorAll(".auftrag"), 18);
+}
+
+function jobZeile(job){
+  const zeile = document.createElement("div");
+  zeile.className = "auftrag" + (job.enabled ? "" : " pausiert");
+  zeile.innerHTML = '<div class="inhalt"><div class="frage"></div>'
+    + '<div class="wann"></div></div><div class="knoepfe">'
+    + '<button type="button" data-do="run">Jetzt</button>'
+    + '<button type="button" data-do="toggle"></button>'
+    + '<button type="button" class="weg" data-do="delete">Löschen</button></div>';
+  zeile.querySelector(".frage").textContent = job.question;
+
+  const takt = job.rhythm === "hourly"
+    ? `stündlich zur Minute ${String(job.minute).padStart(2, "0")}`
+    : job.rhythm === "weekly"
+      ? `wöchentlich, ${TAGE[job.weekday] || "Montag"} um `
+        + `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`
+      : `täglich um ${String(job.hour).padStart(2, "0")}:`
+        + `${String(job.minute).padStart(2, "0")}`;
+  const teile = [takt];
+  if (job.enabled) teile.push("nächstes Mal " + wannGenau(job.next_run));
+  else teile.push("angehalten");
+  if (job.last_run) teile.push(`zuletzt ${wannGenau(job.last_run)} — ${job.last_state}`);
+  zeile.querySelector(".wann").textContent = teile.join(" · ");
+
+  zeile.querySelector('[data-do="toggle"]').textContent =
+    job.enabled ? "Anhalten" : "Weiter";
+  zeile.querySelectorAll("button").forEach(knopf =>
+    knopf.addEventListener("click", async () => {
+      const was = knopf.dataset.do;
+      if (was === "delete"
+          && !confirm("Diesen Auftrag löschen? Die bisherigen Chats bleiben.")) return;
+      const aktion = was === "toggle" ? (job.enabled ? "pause" : "resume") : was;
+      knopf.disabled = true;
+      try {
+        const res = await api("/api/jobs", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ action: aktion, id: job.id }),
+        });
+        const antwort = await res.json();
+        if (!antwort.ok){ $("#job-note").textContent = antwort.error || "Ging nicht."; }
+        else if (aktion === "run"){
+          $("#job-note").textContent = "Läuft — die Antwort steht gleich in der Leiste.";
+        }
+      } catch { $("#job-note").textContent = "Ging nicht."; }
+      finally { knopf.disabled = false; loadJobs(); }
+    }));
+  return zeile;
+}
+
+// Bei "stündlich" gibt es keinen Wochentag und keine Stunde -- also weg damit.
+function jobFelder(){
+  const takt = $("#job-rhythm").value;
+  $("#job-tag-feld").hidden = takt !== "weekly";
+}
+$("#job-rhythm").addEventListener("change", jobFelder);
+
+$("#job-add").addEventListener("click", async () => {
+  const frage = $("#job-frage").value.trim();
+  const note = $("#job-note");
+  if (!frage){ note.textContent = "Ohne Frage gibt es nichts zu tun."; return; }
+  const [stunde, minute] = ($("#job-zeit").value || "08:00").split(":");
+  try {
+    const res = await api("/api/jobs", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        action: "add",
+        question: frage,
+        rhythm: $("#job-rhythm").value,
+        hour: Number(stunde) || 0,
+        minute: Number(minute) || 0,
+        weekday: Number($("#job-weekday").value) || 0,
+        structured: $("#job-struktur").checked,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok){ note.textContent = data.error || "Anlegen ging nicht."; return; }
+    $("#job-frage").value = "";
+    note.textContent = "Angelegt.";
+    loadJobs();
+  } catch { note.textContent = "Anlegen ging nicht."; }
+});
 
 /* ---------- Anbieter und Schluessel ---------- */
 // Wer welchen Schluessel braucht -- damit man den Anbieter waehlen kann,
@@ -2651,7 +3352,8 @@ function showGoogle(state){
   $("#google-secret-hint").textContent = state.has_secret ? "(gesetzt)" : "";
   if (state.connected){
     note.className = "note ok";
-    note.textContent = "Verbunden" + (state.account ? ` als ${state.account}` : "") + ".";
+    note.textContent = "Verbunden" + (state.account ? ` als ${state.account}` : "")
+      + (state.write ? " — darf auch ändern." : " — nur lesend.");
   } else {
     note.className = "note";
     note.textContent = state.has_id
@@ -2663,6 +3365,8 @@ function showGoogle(state){
 $("#google-connect").addEventListener("click", async () => {
   const data = await googleCall({
     action:"start", client_id: form.elements["__GOOGLE_ID__"].value.trim(),
+    // Was gerade angehakt ist, zaehlt -- nicht, was zuletzt gespeichert wurde.
+    write: $("#google-write").checked,
   });
   const note = $("#google-state");
   if (!data || !data.ok){

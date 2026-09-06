@@ -1539,6 +1539,44 @@ def test_the_prompt_says_it_cannot_send_mail(settings: Settings, toolbox: Toolbo
     assert "nur lesen" in agent.messages[0]["content"].lower()
 
 
+def test_writing_tools_stay_invisible_without_permission(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Lesen erlaubt heisst nicht aendern erlaubt -- und was es nicht sieht,
+    kann das Modell auch nicht aufrufen."""
+    settings.google_enabled = True
+    settings.google_client_id = "id.apps.googleusercontent.com"
+    settings.google_write = False
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    names = {schema["function"]["name"] for schema in agent.tools}
+    assert not ({"calendar_add", "calendar_edit", "mail_draft"} & names)
+
+
+def test_permission_makes_the_three_writing_tools_appear(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.google_enabled = True
+    settings.google_client_id = "id.apps.googleusercontent.com"
+    settings.google_write = True
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    names = {schema["function"]["name"] for schema in agent.tools}
+    assert {"calendar_add", "calendar_edit", "mail_draft"} <= names
+    # Und weiterhin nichts, womit sich etwas verschicken oder loeschen liesse.
+    for verboten in ("mail_send", "mail_delete", "calendar_delete"):
+        assert verboten not in names
+
+
+def test_the_write_prompt_says_drafts_are_not_sent(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.google_enabled = True
+    settings.google_client_id = "id.apps.googleusercontent.com"
+    settings.google_write = True
+    prompt = Agent(settings, cache=None, toolbox=toolbox).messages[0]["content"]
+    assert "Verschicken kannst du nichts" in prompt
+    assert "Loeschen kannst du auch nichts" in prompt
+
+
 # ---------------------------------------------------------------------------
 # Wer ist das hier eigentlich
 # ---------------------------------------------------------------------------
@@ -2574,3 +2612,19 @@ def test_the_second_round_prompt_forbids_inventing_a_correction() -> None:
     assert "Erfinde keine Korrektur" in RECHECK_PROMPT
     assert "ANDEREN Quellen" in RECHECK_PROMPT
     assert "VOLLSTAENDIGE Antwort" in RECHECK_PROMPT
+
+
+def test_every_call_is_counted(settings: Settings, toolbox: Toolbox, tmp_path: Any) -> None:
+    """Was hinausgeht und was zurueckkommt landet im Zaehler."""
+    from cortex.usage import UsageLog
+
+    settings.data_dir = tmp_path
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.messages.append({"role": "user", "content": "x" * 300})
+    agent._note_usage(agent.messages, {"role": "assistant", "content": "y" * 90})
+
+    summe = UsageLog(settings.db_path).summary()
+    assert summe["total"]["calls"] == 1
+    assert summe["total"]["tokens_in"] >= 100
+    assert summe["total"]["tokens_out"] == 30
+    assert summe["models"][0]["model"] == agent.active_model
