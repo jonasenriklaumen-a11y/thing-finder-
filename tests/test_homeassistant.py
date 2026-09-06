@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
@@ -200,7 +201,12 @@ def test_a_stale_cache_is_refused(ha: HomeAssistant, monkeypatch: pytest.MonkeyP
 
     module._states_cache.clear()
     ha.states()
-    monkeypatch.setattr(module.time, "monotonic", lambda: 10_000.0)
+    # Die Uhr muss VORWAERTS gestellt werden, und zwar von dort aus, wo sie
+    # gerade steht. Eine feste Zahl ging nur so lange gut, wie der Rechner
+    # weniger als knapp drei Stunden lief -- danach stellte sie die Uhr
+    # zurueck, der Eintrag galt als frisch und der Test schlug fehl.
+    spaeter = time.monotonic() + module.STATES_TTL + 1
+    monkeypatch.setattr(module.time, "monotonic", lambda: spaeter)
     ha.states()
     paths = [call.url.path for call in ha.calls]  # type: ignore[attr-defined]
     assert paths.count("/api/states") == 2

@@ -107,6 +107,9 @@ class FakeAgent:
         # damit der Rundgang auch das Zusammenwachsen in einer Zeile sieht.
         for stueck in ("Erst ", "die Frage ", "sortieren."):
             self.on_event("thought", {"text": stueck})
+        # Eine Mitlese-Zeile, die keine Denkzeile ist -- damit der Rundgang
+        # die beiden auseinanderhalten kann.
+        self.on_event("action", {"tool": "web_search", "arguments": {"query": "x"}})
         if structured:
             self.on_event("subagents", {"tasks": ["Teil eins", "Teil zwei"]})
             self.on_event("subagent_done", {"task": "Teil eins"})
@@ -570,7 +573,75 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
             pg.locator(".trace.think:visible").count() == 0,
             "ausgeschaltet verschwindet er wieder -- auch rueckwirkend",
         )
+        # Und das Mitlesen darf ihn nicht durch die Hintertuer wieder
+        # hereinlassen: sonst stuende er da, obwohl "Denken" aus ist.
+        pg.evaluate("document.body.classList.add('tracing')")
+        pg.wait_for_timeout(300)
+        log.pruefe(
+            pg.locator(".trace.think:visible").count() == 0,
+            "auch das Mitlesen zeigt die Gedanken nicht -- dafuer gibt es Denken",
+        )
+        log.pruefe(
+            pg.locator(".trace:not(.think):visible").count() > 0,
+            "die uebrigen Mitlese-Zeilen zeigt es sehr wohl",
+        )
+        pg.evaluate("document.body.classList.remove('tracing')")
+        pg.wait_for_timeout(200)
         foto("10a-denken")
+
+    if dran("einchat"):
+        log.abschnitt("10b. Ein Chat bleibt ein Chat")
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(300)
+        pg.click("#btn-new")
+        pg.wait_for_timeout(700)
+        # Nicht "Frage" nennen: die Attrappe stellt bei allem mit "frag"
+        # eine Rueckfrage und wartet dann auf eine Antwort.
+        for nummer in (1, 2, 3):
+            pg.fill("#input", f"Thema {nummer}")
+            pg.click("#send")
+            # Die Antwort steht schon da, waehrend der Lauf noch laeuft.
+            # Gewartet wird deshalb darauf, dass das Abbrechen verschwindet
+            # -- der Senden-Knopf taugt nicht dafuer, er ist auch bei leerem
+            # Eingabefeld aus.
+            pg.wait_for_selector("#stop", state="hidden", timeout=25000)
+            pg.wait_for_timeout(700)
+        log.pruefe(
+            pg.locator(".msg.user").count() == 3,
+            f"drei Fragen stehen im selben Verlauf ({pg.locator('.msg.user').count()})",
+        )
+        # Die Leiste zaehlt Chats, nicht Fragen: aus dreien darf einer werden.
+        namen = pg.eval_on_selector_all(
+            "#recents .recent .name", "es => es.map(e => e.textContent.trim())"
+        )
+        log.pruefe(
+            sum(1 for name in namen if name.startswith("Thema ")) <= 1,
+            f"und in der Leiste steht dafuer ein Eintrag, nicht drei ({namen})",
+        )
+
+        # Dass der Server ueber alle Fragen hinweg denselben Chat meint, kann
+        # der Rundgang nicht pruefen: hier steckt eine Attrappe in der
+        # Sitzung, deren Kennung fest ist. Das liegt bei den Tests in
+        # tests/test_web.py, die die echte ChatSession benutzen.
+
+        log.abschnitt("10c. Arbeitsweise wechseln")
+        vorher = pg.locator(".msg").count()
+        log.pruefe(vorher > 0, "im Chat steht etwas")
+        pg.click('#modes .mode[data-mode="code"]')
+        pg.wait_for_timeout(900)
+        log.pruefe(pg.locator(".msg").count() == 0, "der Wechsel raeumt den Chat")
+        log.pruefe(
+            pg.eval_on_selector("body", "e => e.classList.contains('start')"),
+            "und die Begruessung ist wieder da",
+        )
+        pg.click('#modes .mode[data-mode="code"]')
+        pg.wait_for_timeout(600)
+        log.pruefe(
+            pg.eval_on_selector("body", "e => e.classList.contains('code-mode')"),
+            "zweimal derselbe Modus aendert nichts",
+        )
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(600)
 
     if dran("suche"):
         log.abschnitt("11. Chats durchsuchen")

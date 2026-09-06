@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.2                                      │
+│ Cortex AI 8.7.3                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -358,6 +358,12 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   der Liste, in dem du ihn beginnst — nicht erst, wenn die Antwort fertig ist. Klick
   auf einen Eintrag holt ihn zurück, samt Verlauf, an den der Agent wieder anknüpft.
   Neueste oben, ab dem zweiten Tag nach *Heute*, *Gestern*, *Letzte 7 Tage* gruppiert.
+  **Ein Chat bleibt ein Chat**, auch wenn du zwischendurch etwas umstellst:
+  wer mitten im Gespräch das Modell wechselt oder eine Einstellung speichert,
+  will ein anderes Modell — kein anderes Gespräch. Cortex baut sich dafür intern
+  neu auf, kehrt danach aber in denselben Chat zurück und kennt den Verlauf noch.
+  Ein neuer Chat beginnt nur, wenn du ihn beginnst: über **Neuer Chat** oder
+  indem du zwischen *Normal* und *Code* wechselst (dazu unten mehr).
   Über **⋯** lässt sich ein Chat **umbenennen** (der eigene Name überschreibt die
   erste Frage; leer lassen setzt zurück), **exportieren** (der ganze Chat als
   Markdown-Datei) oder **löschen** — Letzteres mit Rückfrage, denn das lässt sich
@@ -459,6 +465,10 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Fragen, High für schwierige. Die Stufe geht als `reasoning_effort` an den
   Anbieter; wer den Begriff nicht kennt, bekommt ihn dank `drop_params` gar
   nicht erst zu sehen. Steht sie nicht auf Medium, sagt es die Kopfzeile.
+* **Normal oder Code** wechselt die Arbeitsweise — und fängt dabei einen neuen Chat
+  an, sofern im alten schon etwas steht. Code und Prosa im selben Verlauf zu mischen
+  geht selten gut: das Modell wechselt, der Systemtext wechselt, und die halbe
+  Unterhaltung davor passt nicht mehr zu dem, was jetzt gefragt ist.
 * **Denken an oder aus**, in der Modellauswahl (nur im Standardmodus) — aus ist der
   Normalfall. Angeschaltet denkt Cortex sichtbar nach, bevor er antwortet: du siehst
   zu, wie er sich die Antwort zurechtlegt, Wort für Wort in einer Zeile über der
@@ -467,8 +477,10 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   geht auch gar nicht erst an den Server. Er ist etwas anderes als *Strukturieren*
   darunter und ersetzt es nicht: hier geht es darum, was du siehst, dort darum, wie
   gearbeitet wird. Nur Modelle, die ihre Denkschritte überhaupt herausgeben, haben
-  dazu etwas zu zeigen. Wer alles sehen will — jede Suchanfrage, jeden
-  Werkzeugaufruf —, nimmt stattdessen *Mitlesen* in den Einstellungen.
+  dazu etwas zu zeigen. Die Denkschritte hängen **allein** an diesem Schalter:
+  *Mitlesen* in den Einstellungen zeigt Suchanfragen, geöffnete Seiten und
+  Werkzeugausgaben, aber keine Gedanken. Sonst stünde der Block da, obwohl *Denken*
+  aus ist — und der Schalter wäre eine Behauptung.
 * **Strukturieren an oder aus**, in der Modellauswahl oben — aus ist der Normalfall.
   (Der Schalter hieß einmal „Denken". Gedacht wird immer; was er umlegt, ist die
   Zerlegung.)
@@ -523,12 +535,13 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   nicht derselbe sein, der sie bekommt — sonst wäre die dreistufige Rechteauswahl beim
   Lager eine Verabredung statt einer Grenze, und ein Satz im Chat würde genügen, um
   sie aufzuheben. Diese Schalter bleiben im Formular.
-* **Mitlesen** unter *Einstellungen → Mitlesen*: Der Haken „Gedanken und Aktionen
-  mitlesen" zeigt während der Antwort, was Cortex AI gerade denkt und tut — jede
-  Suchanfrage im Wortlaut, jeden Werkzeugaufruf mit seinen Argumenten, was
-  zurückkam, und bei Modellen, die ihre Denkschritte offenlegen, auch die. Der
-  Schalter wirkt sofort und auch rückwirkend auf die Antwort, die schon dasteht:
-  die Zeilen sind die ganze Zeit da, sie werden nur ein- und ausgeblendet.
+* **Mitlesen** unter *Einstellungen → Mitlesen*: Der Schalter „Aktionen mitlesen"
+  zeigt während der Antwort, was Cortex AI gerade tut — jede Suchanfrage im
+  Wortlaut, jeden Werkzeugaufruf mit seinen Argumenten und was zurückkam. Die
+  Denkschritte gehören ausdrücklich **nicht** dazu; die schaltet *Denken* in der
+  Modellauswahl ein. Der Schalter wirkt sofort und auch rückwirkend auf die
+  Antwort, die schon dasteht: die Zeilen sind die ganze Zeit da, sie werden nur
+  ein- und ausgeblendet.
 * **Verbindung testen** im Feld *Suche*: schickt eine winzige Anfrage ans Modell und
   eine Testsuche los — dasselbe, was `cortex setup` am Ende macht. Geprüft wird, was
   gerade im Formular steht, nicht der gespeicherte Stand; so sieht man vor dem
@@ -584,7 +597,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.2                                                   │
+│ Cortex AI 8.7.3                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

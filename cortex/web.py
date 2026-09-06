@@ -190,6 +190,9 @@ class ChatSession:
         #: Eine Einstellung wurde im Gespraech geaendert -- nach dem Durchlauf
         #: wird der Agent neu gebaut.
         self._reload_after = False
+        #: Der Chat, in den ein neu gebauter Agent zurueckkehren soll. Leer
+        #: heisst: neuer Chat.
+        self._carry_over = ""
 
     def settings(self) -> Settings:
         if self._settings is None:
@@ -203,6 +206,18 @@ class ChatSession:
             settings = self.settings()
             cache = Cache(settings.db_path, settings.cache_ttl_hours)
             self._agent = Agent(settings, cache=cache)
+            # Ein neu gebauter Agent faengt sonst einen neuen Chat an -- und
+            # das Modell zu wechseln haette das laufende Gespraech mitten
+            # entzweigeschnitten: die naechste Frage stuende als eigener
+            # Eintrag in der Leiste, und der Agent wuesste nichts mehr von
+            # dem, was vorher besprochen wurde.
+            if self._carry_over:
+                weiter, self._carry_over = self._carry_over, ""
+                with contextlib.suppress(Exception):
+                    entries = cache.chat_history(weiter)
+                    self._agent.resume(
+                        weiter, [(entry.question, entry.answer) for entry in entries]
+                    )
         return self._agent
 
     def reset(self) -> None:
@@ -242,9 +257,13 @@ class ChatSession:
 
         Die Werkstatt gehoert dazu: haette jemand ihre Grenzen geaendert,
         arbeitete die laufende sonst noch mit den alten weiter.
+
+        Der Chat bleibt derselbe. Wer waehrend eines Gespraechs das Modell
+        wechselt, will ein anderes Modell -- nicht ein anderes Gespraech.
         """
         with self._lock:
             if self._agent is not None:
+                self._carry_over = str(getattr(self._agent, "session_id", ""))
                 with contextlib.suppress(Exception):
                     self._agent.close()
             self._agent = None

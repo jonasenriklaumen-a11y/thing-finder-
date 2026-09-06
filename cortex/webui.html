@@ -361,9 +361,11 @@ body:not(.start) .hint{display:none}
    so zeigt das Einschalten auch das, was schon gelaufen ist. */
 .trace{display:none}
 body.tracing .trace{display:flex}
-/* Der Denken-Schalter zeigt genau eine dieser Zeilen: die Denkschritte.
-   Alles andere -- Suchanfragen im Wortlaut, Werkzeugausgaben -- bleibt dem
-   Mitlesen in den Einstellungen vorbehalten. */
+/* Die Denkschritte haengen an ihrem eigenen Schalter -- und nur an ihm.
+   Das Mitlesen zeigt sie ausdruecklich NICHT mit: sonst stuende der Block
+   da, obwohl "Denken" aus ist, und der Schalter waere eine Behauptung.
+   Zwei Schalter, die dasselbe zeigen koennen, sind einer zu viel. */
+body.tracing .trace.think{display:none}
 body.denken .trace.think{display:flex}
 body.tracing .trace .txt,
 body.denken .trace.think .txt{white-space:pre-wrap;word-break:break-word;
@@ -1125,11 +1127,11 @@ input:focus,select:focus{border-color:var(--accent)}
       <fieldset><legend>Mitlesen</legend>
         <div class="check">
           <input type="checkbox" role="switch" class="schalter" id="showtrace">
-          <label for="showtrace" style="margin:0">Gedanken und Aktionen mitlesen
+          <label for="showtrace" style="margin:0">Aktionen mitlesen
             <span class="why">Zeigt jede Suchanfrage im Wortlaut, jede geöffnete
-              Seite und was ein Werkzeug zurückgab — bei Modellen, die ihre
-              Denkschritte offenlegen, auch die. Wirkt sofort, auch auf die
-              Antwort, die gerade dasteht.</span></label>
+              Seite und was ein Werkzeug zurückgab. Wirkt sofort, auch auf die
+              Antwort, die gerade dasteht. Die Denkschritte gehören nicht dazu —
+              die schaltet <b>Denken</b> in der Modellauswahl ein.</span></label>
         </div>
       </fieldset>
 
@@ -1488,7 +1490,16 @@ function setEffort(wanted){
 }
 
 document.querySelectorAll("#modes .mode").forEach(button =>
-  button.addEventListener("click", () => setMode(button.dataset.mode)));
+  button.addEventListener("click", () => {
+    // Ein Wechsel der Arbeitsweise faengt einen neuen Chat an. Code und
+    // Prosa im selben Verlauf zu mischen geht selten gut: das Modell
+    // wechselt, der Systemtext wechselt, und die halbe Unterhaltung davor
+    // passt nicht mehr zu dem, was jetzt gefragt ist. Steht schon nichts
+    // im Chat, gibt es auch nichts anzufangen.
+    const anders = button.dataset.mode !== mode;
+    setMode(button.dataset.mode);
+    if (anders && thread.children.length) neuerChat({ leiste: false });
+  }));
 document.querySelectorAll("#efforts .eff").forEach(button =>
   button.addEventListener("click", () => setEffort(button.dataset.effort)));
 $("#online").addEventListener("change", (e) => setOnline(e.target.checked));
@@ -2206,16 +2217,19 @@ $(".pane").addEventListener("click", (e) => {
     document.body.classList.add("collapsed");
   }
 }, true);
-$("#btn-new").addEventListener("click", async () => {
+// Einen neuen Chat anfangen. Steht als eigene Funktion da, weil es zwei
+// Wege dorthin gibt: den Knopf und den Wechsel der Arbeitsweise.
+async function neuerChat({ leiste = true } = {}){
   const res = await api("/api/clear", { method:"POST" });
   try { currentChat = (await res.json()).current || ""; } catch {}
   thread.innerHTML = "";
   document.body.classList.add("start");
   greet();
   loadRecents();
-  if (narrow()) document.body.classList.add("collapsed");
+  if (leiste && narrow()) document.body.classList.add("collapsed");
   input.value = ""; input.style.height = "auto"; input.focus();
-});
+}
+$("#btn-new").addEventListener("click", () => neuerChat());
 $("#btn-notes").addEventListener("click", () => {
   if (narrow()) document.body.classList.add("collapsed");
   ask("/notes");

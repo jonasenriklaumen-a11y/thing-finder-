@@ -2807,3 +2807,93 @@ def test_no_plain_checkbox_is_left_over() -> None:
     roh = html.count('<input type="checkbox"')
     angezogen = html.count('<input type="checkbox" role="switch" class="schalter"')
     assert roh == angezogen, f"{roh - angezogen} Ankreuzfelder ohne Schalter-Anstrich"
+
+
+# ---------------------------------------------------------------------------
+# Ein Chat bleibt ein Chat
+# ---------------------------------------------------------------------------
+def test_changing_a_setting_does_not_start_a_new_chat(
+    session: web.ChatSession, web_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Wer das Modell wechselt, will ein anderes Modell -- kein anderes Gespräch."""
+    # `reload` liest die Einstellungen neu ein -- in echt aus derselben .env.
+    monkeypatch.setattr(web, "get_settings", lambda: web_settings)
+    erst = session.agent()
+    vorher = erst.session_id
+    cache = Cache(web_settings.db_path, web_settings.cache_ttl_hours)
+    cache.add_history(vorher, "Erste Frage", "Erste Antwort")
+
+    session.reload()
+    danach = session.agent()
+
+    assert danach is not erst, "der Agent wird wirklich neu gebaut"
+    assert danach.session_id == vorher, "aber der Chat ist derselbe geblieben"
+    # Und er weiß noch, worüber gesprochen wurde.
+    verlauf = " ".join(str(m.get("content") or "") for m in danach.messages)
+    assert "Erste Frage" in verlauf
+    assert "Erste Antwort" in verlauf
+
+
+def test_a_reload_before_the_first_question_is_harmless(session: web.ChatSession) -> None:
+    """Ohne Verlauf gibt es nichts fortzusetzen -- der Chat bleibt trotzdem derselbe."""
+    vorher = session.chat_id()
+    session.reload()
+    assert session.chat_id() == vorher
+
+
+def test_a_new_chat_still_gets_a_new_id(session: web.ChatSession) -> None:
+    """Der Knopf muss weiterhin einen neuen Chat anfangen."""
+    vorher = session.chat_id()
+    session.reset()
+    assert session.chat_id() != vorher
+
+
+def test_a_new_chat_after_a_reload_is_still_new(session: web.ChatSession) -> None:
+    """Die Rückkehr in den alten Chat darf den Knopf nicht aushebeln."""
+    vorher = session.chat_id()
+    session.reload()
+    session.reset()
+    assert session.chat_id() != vorher
+
+
+def test_saving_settings_keeps_the_chat(client, session: web.ChatSession) -> None:
+    """Derselbe Weg wie in der Oberfläche: speichern und weiterreden."""
+    vorher = json.loads(client("GET", "/api/chats")[1])["current"]
+    status, _ = client("POST", "/api/config", {"CORTEX_LOCATION": "Bremen"})
+    assert status == 200
+    nachher = json.loads(client("GET", "/api/chats")[1])["current"]
+    assert nachher == vorher, "das Speichern hat den Chat gewechselt"
+
+
+# ---------------------------------------------------------------------------
+# Denken zeigt nur der Denken-Schalter
+# ---------------------------------------------------------------------------
+def test_reading_along_does_not_show_the_thoughts() -> None:
+    """Sonst stünde der Block da, obwohl „Denken" aus ist."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "body.tracing .trace.think{display:none}" in html
+    assert "body.denken .trace.think{display:flex}" in html
+    # Und die Reihenfolge muss stimmen: die spätere Regel gewinnt.
+    assert html.index("body.tracing .trace.think{display:none}") < html.index(
+        "body.denken .trace.think{display:flex}"
+    )
+
+
+def test_the_reading_along_text_says_where_the_thoughts_are() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "Die Denkschritte gehören nicht dazu" in html
+
+
+# ---------------------------------------------------------------------------
+# Arbeitsweise wechseln
+# ---------------------------------------------------------------------------
+def test_switching_the_mode_opens_a_new_chat() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "async function neuerChat(" in html
+    assert "if (anders && thread.children.length) neuerChat(" in html
+
+
+def test_switching_to_the_same_mode_changes_nothing() -> None:
+    """Zweimal auf „Normal" darf den Chat nicht wegwerfen."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "const anders = button.dataset.mode !== mode;" in html
