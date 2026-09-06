@@ -103,6 +103,10 @@ class FakeAgent:
             self.on_event("vm_write", {"path": "/work/loesung.py"})
             self.on_event("vm_run", {"command": "python loesung.py"})
             self.on_event("vm_done", {"exit_code": 0, "seconds": 0.4})
+        # Denkschritte kommen tokenweise -- genau wie beim echten Modell,
+        # damit der Rundgang auch das Zusammenwachsen in einer Zeile sieht.
+        for stueck in ("Erst ", "die Frage ", "sortieren."):
+            self.on_event("thought", {"text": stueck})
         if structured:
             self.on_event("subagents", {"tasks": ["Teil eins", "Teil zwei"]})
             self.on_event("subagent_done", {"task": "Teil eins"})
@@ -500,6 +504,73 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
             "erkzettel" in pg.inner_text("#thread") or "otiz" in pg.inner_text("#thread"),
             "der Merkzettel antwortet",
         )
+
+    if dran("denken"):
+        log.abschnitt("10a. Denken sichtbar machen")
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(300)
+        pg.click("#btn-model")
+        pg.wait_for_selector("#picker-models", state="visible")
+        pg.wait_for_timeout(400)
+        log.pruefe(pg.is_visible("#denken"), "der Denken-Schalter steht im Standardmodus")
+        log.pruefe(pg.is_visible("#structure"),
+                   "und er hat Strukturieren nicht ersetzt -- beide sind da")
+        zeile = pg.inner_text('label[for="denken"]')
+        log.pruefe("Denken" in zeile, "er heisst Denken")
+
+        # Der Schalter ist ein echtes Ankreuzfeld -- nur anders angezogen.
+        log.pruefe(
+            pg.eval_on_selector("#denken", "e => e.type") == "checkbox",
+            "unter dem Anstrich steckt ein Ankreuzfeld",
+        )
+        breite = pg.eval_on_selector("#denken", "e => e.getBoundingClientRect().width")
+        log.pruefe(40 <= breite <= 50, f"er ist eine Pille, kein Haken ({breite:.0f}px)")
+        vorher = pg.eval_on_selector(
+            "#denken", "e => getComputedStyle(e).backgroundColor")
+        pg.check("#denken")
+        pg.wait_for_timeout(400)
+        nachher = pg.eval_on_selector(
+            "#denken", "e => getComputedStyle(e).backgroundColor")
+        log.pruefe(vorher != nachher, f"angeschaltet wechselt er die Farbe ({nachher})")
+        weg = pg.eval_on_selector(
+            "#denken", "e => getComputedStyle(e, '::after').transform")
+        log.pruefe(weg not in ("none", ""), f"und der Knopf faehrt hinueber ({weg})")
+        log.pruefe(
+            pg.eval_on_selector(
+                "#denken",
+                "e => getComputedStyle(e).transitionDuration !== '0s'"),
+            "der Wechsel ist animiert, nicht hart",
+        )
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(300)
+        log.pruefe(
+            pg.eval_on_selector("body", "e => e.classList.contains('denken')"),
+            "der Schalter merkt sich seinen Stand",
+        )
+
+        pg.fill("#input", "Denk mal nach")
+        pg.click("#send")
+        pg.wait_for_selector(".msg.bot .bubble", state="visible")
+        pg.wait_for_timeout(800)
+        log.pruefe(
+            pg.locator(".trace.think:visible").count() > 0,
+            "der Denken-Block steht jetzt im Chat",
+        )
+        log.pruefe(
+            pg.locator(".trace:not(.think):visible").count() == 0,
+            "die uebrigen Mitlese-Zeilen bleiben weg -- die gehoeren zum Mitlesen",
+        )
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        pg.uncheck("#denken")
+        pg.wait_for_timeout(300)
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(300)
+        log.pruefe(
+            pg.locator(".trace.think:visible").count() == 0,
+            "ausgeschaltet verschwindet er wieder -- auch rueckwirkend",
+        )
+        foto("10a-denken")
 
     if dran("suche"):
         log.abschnitt("11. Chats durchsuchen")

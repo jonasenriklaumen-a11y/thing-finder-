@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.1                                      │
+│ Cortex AI 8.7.2                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -317,6 +317,13 @@ derselbe Agent wie im Terminal: dieselben zwei Werkzeuge, dieselben Subagenten,
 derselbe Verlauf, dieselbe `.env`. Die Zwischenschritte („Suche", „Lese", „Teile")
 laufen live mit, die Antwort wird Wort für Wort gestreamt.
 
+* **Die Schalter** sind Schalter, keine Haken: eine Pille, in der ein weißer Knopf
+  hin und her fährt, wie auf dem iPhone. Darunter steckt weiterhin ein ganz normales
+  Ankreuzfeld — Label, Tabulator, Leertaste und Vorlesehilfen funktionieren
+  unverändert. Der Knopf gleitet, die Farbe blendet über, und beim Draufdrücken
+  zieht er sich kurz in die Länge und schnellt zurück. Die Farbe kommt aus dem
+  gewählten Farbschema, nicht aus iOS: ein festes Apple-Grün sähe in Nord oder
+  Dracula wie ein Fremdkörper aus (im Standardschema ist sie ohnehin grün).
 * **Hell oder dunkel**, in acht Farbschemata — unter *Erscheinungsbild* unten links
   (siehe weiter unten). Die Versionsnummer steht klein in der Kopfzeile.
 * **Einstellungen** öffnet ein Formular mit *allem*, was auch `cortex setup` fragt.
@@ -452,6 +459,16 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Fragen, High für schwierige. Die Stufe geht als `reasoning_effort` an den
   Anbieter; wer den Begriff nicht kennt, bekommt ihn dank `drop_params` gar
   nicht erst zu sehen. Steht sie nicht auf Medium, sagt es die Kopfzeile.
+* **Denken an oder aus**, in der Modellauswahl (nur im Standardmodus) — aus ist der
+  Normalfall. Angeschaltet denkt Cortex sichtbar nach, bevor er antwortet: du siehst
+  zu, wie er sich die Antwort zurechtlegt, Wort für Wort in einer Zeile über der
+  Antwort. Ausgeschaltet kommt nur das Ergebnis. Auf die Antwort selbst hat der
+  Schalter keinen Einfluss — sie wird davon weder besser noch langsamer, und er
+  geht auch gar nicht erst an den Server. Er ist etwas anderes als *Strukturieren*
+  darunter und ersetzt es nicht: hier geht es darum, was du siehst, dort darum, wie
+  gearbeitet wird. Nur Modelle, die ihre Denkschritte überhaupt herausgeben, haben
+  dazu etwas zu zeigen. Wer alles sehen will — jede Suchanfrage, jeden
+  Werkzeugaufruf —, nimmt stattdessen *Mitlesen* in den Einstellungen.
 * **Strukturieren an oder aus**, in der Modellauswahl oben — aus ist der Normalfall.
   (Der Schalter hieß einmal „Denken". Gedacht wird immer; was er umlegt, ist die
   Zerlegung.)
@@ -567,7 +584,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.1                                                   │
+│ Cortex AI 8.7.2                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

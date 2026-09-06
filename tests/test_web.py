@@ -2734,3 +2734,68 @@ def test_without_the_workshop_an_attachment_is_not_copied_anywhere(
     )
     assert "Hallo" in text
     assert versuche == [], "ohne Werkstatt wird nichts hineingelegt"
+
+
+# ---------------------------------------------------------------------------
+# Der Denken-Schalter und die Schalter selbst
+# ---------------------------------------------------------------------------
+def test_thinking_has_its_own_switch_next_to_structuring() -> None:
+    """Ein eigener Schalter -- er ersetzt Strukturieren nicht, er steht daneben."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    picker = html[html.index('id="picker-models"') :]
+    picker = picker[: picker.index("picker-foot")]
+    assert 'id="denken"' in picker
+    assert 'id="structure"' in picker, "Strukturieren bleibt, wo es war"
+    assert "<b>Denken</b>" in picker
+    assert "<b>Strukturieren</b>" in picker
+
+
+def test_the_thinking_switch_belongs_to_the_standard_mode() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    zeile = html[html.index('for="denken"') - 120 : html.index('id="denken"')]
+    assert "only-normal" in zeile
+
+
+def test_the_thinking_switch_only_changes_what_is_shown() -> None:
+    """Gedacht wird immer -- der Schalter geht deshalb nicht an den Server."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    # Der Anfragekörper kennt ihn nicht.
+    koerper = html[html.index("JSON.stringify({") :]
+    koerper = koerper[: koerper.index("})")]
+    assert "denken" not in koerper
+    # Er schaltet eine Klasse am Körper, mehr nicht.
+    assert 'document.body.classList.toggle("denken", denken)' in html
+    assert "body.denken .trace.think{display:flex}" in html
+
+
+def test_thinking_shows_only_the_thoughts_not_the_whole_trace() -> None:
+    """Suchanfragen und Werkzeugausgaben gehören zum Mitlesen, nicht hierher."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "body.denken .trace.think{display:flex}" in html
+    assert "body.denken .trace{display:flex}" not in html
+
+
+def test_the_switches_are_still_real_checkboxes() -> None:
+    """Nur angezogen, nicht ersetzt: Label, Tastatur und Vorlesehilfen bleiben."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for wer in ("denken", "structure", "recheck", "online", "werkstatt", "memon"):
+        assert f'<input type="checkbox" role="switch" class="schalter" id="{wer}"' in html
+
+
+def test_the_switch_looks_like_a_switch_and_moves() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    stil = html[html.index(".schalter{") : html.index(".schalter:disabled")]
+    assert "appearance:none" in stil, "ohne das bliebe der Haken des Systems stehen"
+    assert "border-radius:999px" in stil, "eine Pille, kein Kasten"
+    assert "translateX(18px)" in stil, "der Knopf fährt hinüber"
+    assert "transition:background-color" in stil, "die Farbe blendet über"
+    assert "transition:transform" in stil, "und der Knopf gleitet"
+    assert ":active::after{width:26px}" in stil, "beim Drücken zieht er sich in die Länge"
+
+
+def test_no_plain_checkbox_is_left_over() -> None:
+    """Zwei Bauarten für dieselbe Ja/Nein-Frage wären nur verwirrend."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    roh = html.count('<input type="checkbox"')
+    angezogen = html.count('<input type="checkbox" role="switch" class="schalter"')
+    assert roh == angezogen, f"{roh - angezogen} Ankreuzfelder ohne Schalter-Anstrich"
