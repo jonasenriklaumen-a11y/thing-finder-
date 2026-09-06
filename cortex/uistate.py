@@ -49,8 +49,9 @@ PALETTES = (
 #: Hell, dunkel oder das, was das Betriebssystem sagt.
 THEMES = ("light", "dark", "system")
 
-#: Die Arbeitsweise.
-MODES = ("normal", "code")
+#: Die Arbeitsweise. Muss mit `cortex.agent.MODES` uebereinstimmen -- ein
+#: Test haelt beide Listen zusammen.
+MODES = ("normal", "code", "pro")
 
 #: Wie lange das Modell ueberlegen darf.
 EFFORTS = ("low", "medium", "high")

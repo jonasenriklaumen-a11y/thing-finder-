@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,8 +27,11 @@ SUBAGENT_PROMPT = """\
 Du bist ein Rechercheassistent und bearbeitest GENAU EINE Teilfrage. Du hast \
 zwei Werkzeuge: `web_search` und `fetch_page`.
 
-Vorgehen: ein bis zwei Suchanfragen, die aussichtsreichsten Treffer lesen, \
-dann antworten.
+Vorgehen: EIN `web_search`-Aufruf, in dem du ueber `queries` zwei weitere \
+Formulierungen mitgibst -- andere Woerter, anderer Blickwinkel, nicht dieselbe \
+Anfrage zweimal. Die drei laufen gleichzeitig, die Treffer werden gemischt, und \
+es kostet dich nur einen einzigen Aufruf von deinem knappen Budget. Dann die \
+aussichtsreichsten Treffer lesen und antworten.
 
 Regeln:
 - Sei ausfuehrlich: gib ALLE gefundenen Fakten weiter, auch Details am Rand \
@@ -362,6 +366,41 @@ def _run_one(
             on_event("subagent_done", {"task": task, "tool_calls": used, "error": result.error})
 
 
+#: Ab wie vielen gleichzeitigen Agenten sie versetzt starten -- und um wie
+#: viel. Nicht der Hoeflichkeit wegen: vierundzwanzig Anfragen in derselben
+#: Millisekunde sind fuer jeden Anbieter ein Ausschlag, auf den er mit einer
+#: Ratenbegrenzung antwortet. Ein Subagent, der die abbekommt, faellt aus --
+#: seine Teilfrage bleibt unbeantwortet. Ueber knapp zwei Sekunden verteilt
+#: passiert das nicht, und neben einer Recherche von vielen Sekunden faellt
+#: der Versatz nicht auf. Bis vier Agenten bleibt alles wie bisher.
+STAGGER_AFTER = 4
+LAUNCH_STAGGER = 0.08
+MAX_LAUNCH_DELAY = 2.0
+
+
+def _distinct(tasks: list[str]) -> list[str]:
+    """Die Teilfragen ohne Leerzeilen und ohne Wiederholungen.
+
+    Bei vier Teilfragen faellt eine doppelte kaum auf. Bei vierundzwanzig
+    schon: zwei gleichlautende Auftraege belegen zwei Agenten, lesen dieselben
+    Seiten und melden dasselbe zurueck -- bezahlt wird beides. Verglichen wird
+    nachlaessig (Kleinschreibung, zusammengefasste Leerzeichen, kein Satzende),
+    weil der Planer denselben Auftrag gern zweimal leicht anders schreibt.
+    """
+    out: list[str] = []
+    gesehen: set[str] = set()
+    for task in tasks:
+        text = " ".join(str(task or "").split())
+        if not text:
+            continue
+        marke = text.lower().rstrip(".!?")
+        if marke in gesehen:
+            continue
+        gesehen.add(marke)
+        out.append(text)
+    return out
+
+
 def run_subagents(
     tasks: list[str],
     settings: Settings,
@@ -369,6 +408,7 @@ def run_subagents(
     on_event: EventHook | None = None,
     parallel: int = 2,
     stop: threading.Event | None = None,
+    limit: int | None = None,
 ) -> list[SubagentResult]:
     """Bearbeitet *tasks* nebenlaeufig und gibt die Ergebnisse in Reihenfolge zurueck.
 
@@ -381,9 +421,11 @@ def run_subagents(
             zwei wenig, weil sie ohnehin nacheinander rechnen.
         stop: Wird sie gesetzt, brechen noch nicht begonnene Teilfragen ab und
             laufende enden nach ihrem naechsten Schritt.
+        limit: Obergrenze fuer diesen Aufruf. Ohne Angabe die Einstellung --
+            der Pro-Modus hebt sie fuer seinen Turn an.
     """
-    clean = [task.strip() for task in tasks if task and task.strip()]
-    clean = clean[: max(1, settings.max_subagents)]
+    ceiling = max(1, int(limit if limit is not None else settings.max_subagents))
+    clean = _distinct(tasks)[:ceiling]
     if not clean:
         return []
 
@@ -420,10 +462,15 @@ def run_subagents(
                 _run_one(task, settings, cache, on_event, toolbox=box, stop=stop)
                 for task, box in zip(clean, boxes, strict=True)
             ]
+        def start(position: int, task: str, box: Toolbox) -> SubagentResult:
+            if position and workers > STAGGER_AFTER:
+                time.sleep(min(position * LAUNCH_STAGGER, MAX_LAUNCH_DELAY))
+            return _run_one(task, settings, cache, on_event, toolbox=box, stop=stop)
+
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(_run_one, task, settings, cache, on_event, toolbox=box, stop=stop)
-                for task, box in zip(clean, boxes, strict=True)
+                pool.submit(start, position, task, box)
+                for position, (task, box) in enumerate(zip(clean, boxes, strict=True))
             ]
             return [future.result() for future in futures]
     finally:

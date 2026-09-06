@@ -121,12 +121,20 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 
 """
 
-#: Die beiden Arbeitsweisen. "normal" schreibt aus, "code" schreibt Code.
 #: Die Werkzeuge, die hinaus ins Web gehen. Sie fallen weg, wenn jemand das
 #: Suchen abschaltet.
 WEB_TOOLS = frozenset({"web_search", "fetch_page", "search_news"})
 
-MODES = ("normal", "code")
+#: Die drei Arbeitsweisen. "normal" fuehrt ein Gespraech, "code" schreibt
+#: Code, "pro" ist der Normalmodus mit voller Leistung: staerkstes Modell,
+#: bis zu PRO_SUBAGENTS Agenten. Was "pro" NICHT hat, ist das Gegenpruefen --
+#: eine zweite Runde auf anderen Quellen ist Gruendlichkeit, nicht Leistung,
+#: und wer Tempo waehlt, will nicht am Ende noch einmal von vorn anfangen.
+MODES = ("normal", "code", "pro")
+
+#: Die Obergrenze fuer Agenten im Pro-Modus. Zwoelf sind der Alltag; hier
+#: darf die Frage so breit werden, wie sie ist.
+PRO_SUBAGENTS = 24
 
 #: Die drei Stufen der Denktiefe, wie sie oben in der Modellauswahl stehen.
 #: Sie landen unveraendert als `reasoning_effort` beim Anbieter -- wer den
@@ -234,6 +242,44 @@ Code. Keine Liste moeglicher Ursachen, wenn die Meldung eindeutig ist.
 veraltete Schnittstelle).
 
 Kein "Gerne!", keine Vorrede, keine Zusammenfassung der Frage, kein Fazit.
+"""
+
+#: Der Pro-Modus. Kein eigenes Antwortformat -- er schreibt wie der
+#: Standardmodus. Was er aendert, ist die Leistung: das staerkste erreichbare
+#: Modell und ein weites Feld an Agenten. Und weil "bis zu 24" ohne Anleitung
+#: heisst "immer 24", steht hier, wonach sich die Zahl richtet. Die Staffelung
+#: folgt dem, was Anthropic fuer sein Research-System beschrieben hat: ein
+#: einzelner Fakt braucht keinen Agenten, ein Vergleich zwei bis vier, und
+#: erst eine wirklich breite Frage rechtfertigt zehn und mehr. Wer immer die
+#: Obergrenze nimmt, zahlt ein Vielfaches an Zeit und Token fuer Agenten, die
+#: einander dasselbe zurueckmelden.
+PRO_PROMPT = """
+
+Pro-Modus. Du laeufst auf dem staerksten Modell, das hier erreichbar ist, und \
+darfst bis zu %(agents)d Rechercheassistenten gleichzeitig losschicken. Das ist eine \
+Obergrenze, keine Vorgabe -- wie viele es werden, entscheidest du an der Frage:
+
+- Eine einzelne Angabe (ein Preis, ein Datum, ein Name): gar kein Agent. Das \
+suchst du selbst, das ist schneller als jede Uebergabe.
+- Ein Vergleich oder eine Frage mit zwei bis vier klar getrennten Teilen: zwei \
+bis vier Agenten, je einer pro Teil.
+- Eine wirklich breite Frage -- viele Kandidaten, mehrere Orte, mehrere \
+Kriterien, ein Marktueberblick: zehn und mehr, bis hin zu allen %(agents)d. Nur dann.
+
+Damit die Breite etwas bringt:
+- Ein Auftrag, ein Feld. Zwei Agenten auf derselben Teilfrage kosten doppelt und \
+bringen dasselbe zurueck. Ueberschneiden sich zwei Auftraege, streich einen.
+- Jeder Auftrag muss FUER SICH verstaendlich sein: Ort, Produkt, Zeitraum und \
+Kriterium gehoeren hinein. Der Assistent sieht das Gespraech nicht.
+- Schick alle Auftraege in EINEM Aufruf los, nicht nacheinander. Sie laufen \
+parallel; hintereinander wartest du fuer jeden einzeln.
+- Zerlege nach Sachgebieten, nicht nach Formulierungen. "Cafe A", "Cafe B", \
+"Cafe C" sind drei Felder; "gute Cafes", "schoene Cafes", "nette Cafes" ist \
+dreimal dasselbe.
+- Die Assistenten arbeiten auf getrennten Seiten -- was einer gelesen hat, ist \
+fuer die anderen verbraucht. Deine Aufgabe ist danach das Zusammenfuehren: aus \
+den Rueckmeldungen EINE Antwort schreiben, mit Quellen, ohne noch einmal zu \
+suchen, was dort schon steht.
 """
 
 #: Die Gegenprobe holt zuerst selbst frische Treffer -- dieser Text erklaert
@@ -910,7 +956,7 @@ class Agent:
             text,
             self.settings,
             context=self._planner_context(),
-            limit=max(1, self.settings.max_subagents),
+            limit=max(1, self.agent_limit),
         )
         elapsed = round(time.monotonic() - started, 2)
         if not needs:
@@ -954,11 +1000,11 @@ class Agent:
         """
         from cortex.subagents import plan_subtasks
 
-        # Wie viele Teilfragen hoechstens entstehen duerfen. Wie viele davon
-        # GLEICHZEITIG laufen, entscheidet effective_parallel -- zwoelf
-        # Anfragen auf einmal an eine lokale GPU waeren kontraproduktiv, also
-        # arbeitet sie der Pool in Wellen ab.
-        limit = max(1, self.settings.max_subagents)
+        # Wie viele Teilfragen hoechstens entstehen duerfen -- im Pro-Modus
+        # mehr. Wie viele davon GLEICHZEITIG laufen, entscheidet
+        # `parallel_for`: zwoelf Anfragen auf einmal an eine lokale GPU waeren
+        # kontraproduktiv, also arbeitet sie der Pool dort in Wellen ab.
+        limit = max(1, self.agent_limit)
         tasks = getattr(self, "_planned_tasks", None)
         if tasks:
             # Die Vorpruefung hat die Teilfragen schon mitgeliefert -- ein
@@ -1055,7 +1101,8 @@ class Agent:
             self.settings,
             cache=self.cache,
             on_event=self.on_event,
-            parallel=self.settings.effective_parallel,
+            parallel=self.settings.parallel_for(self.agent_limit),
+            limit=self.agent_limit,
             stop=self._stop,
         )
         for result in results:
@@ -1162,13 +1209,45 @@ class Agent:
     def active_model(self) -> str:
         """Das Modell fuer diesen Turn.
 
-        Im Code-Modus das staerkste, das gerade erreichbar ist -- programmieren
-        ist die Aufgabe, bei der ein schwaecheres Modell am teuersten wird:
-        Code, der falsch aussieht, erkennt man; Code, der falsch IST, nicht.
+        Im Code- und im Pro-Modus das staerkste, das gerade erreichbar ist.
+        Beim Programmieren, weil ein schwaecheres Modell dort am teuersten
+        wird: Code, der falsch aussieht, erkennt man; Code, der falsch IST,
+        nicht. Im Pro-Modus, weil genau das der Modus ist -- wer ihn waehlt,
+        bittet um die beste Leistung, die da ist.
         """
-        if clean_mode(self.mode) == "code":
+        if clean_mode(self.mode) in ("code", "pro"):
             return self._strongest_model() or self.settings.model
         return self.settings.model
+
+    @property
+    def pro_mode(self) -> bool:
+        """Laeuft dieser Turn im Pro-Modus?"""
+        return clean_mode(self.mode) == "pro"
+
+    @property
+    def agent_limit(self) -> int:
+        """Wie viele Agenten dieser Turn hoechstens einsetzen darf.
+
+        Im Alltag die Einstellung des Nutzers. Im Pro-Modus mindestens
+        PRO_SUBAGENTS -- das ist die Obergrenze, nicht die Vorgabe: wie viele
+        es wirklich werden, entscheidet der Planer an der Frage. Hat jemand
+        die Agenten ganz abgeschaltet (0), bleibt es dabei; ein Modus soll
+        keine Einstellung ueberstimmen, die "nein" heisst.
+        """
+        base = max(0, int(self.settings.max_subagents))
+        if base and self.pro_mode:
+            return max(base, PRO_SUBAGENTS)
+        return base
+
+    @property
+    def recheck_on(self) -> bool:
+        """Wird nach der Antwort gegengeprueft?
+
+        Im Pro-Modus nie -- dort gibt es den Schalter gar nicht. Der
+        gespeicherte Stand bleibt trotzdem stehen: wer zurueck in den
+        Standardmodus wechselt, findet sein Gegenpruefen wieder.
+        """
+        return bool(self.recheck) and not self.pro_mode
 
     def _strongest_model(self) -> str:
         """Sucht einmal je Sitzung, was das staerkste erreichbare Modell ist."""
@@ -1206,6 +1285,12 @@ class Agent:
         text = self._system_prompt(
             self.cache, self._home_prompt(), mode=self.mode, structured=self.structured
         )
+        # Nur wo es die Agenten wirklich gibt: ohne Strukturieren oder ohne
+        # Web bekommt das Modell das Werkzeug gar nicht erst angeboten, und
+        # eine Anleitung zum Verteilen von Auftraegen waere dann eine
+        # Aufforderung zu etwas, das nicht geht.
+        if self.pro_mode and self.use_subagents and self.structured and self.online:
+            text += PRO_PROMPT % {"agents": self.agent_limit}
         text += ASK_PROMPT if self.toolbox.ask_handler is not None else NO_ASK_PROMPT
         if self.workshop_on:
             text += VM_PROMPT
@@ -1473,7 +1558,7 @@ class Agent:
         Args:
             question: Die Frage.
             stream: Antwort Wort fuer Wort ausgeben.
-            mode: "normal" oder "code". Leer laesst den bisherigen stehen.
+            mode: "normal", "code" oder "pro". Leer laesst den bisherigen stehen.
             structured: Vor der Recherche planen und zerlegen. `None` laesst
                 den bisherigen Stand stehen.
             recheck: Nach der Antwort eine zweite Runde mit anderen Quellen.
@@ -1506,7 +1591,7 @@ class Agent:
             self._refresh_system()
         if self.workshop_on:
             self._touch_workshop()
-        if clean_mode(self.mode) == "code":
+        if clean_mode(self.mode) in ("code", "pro"):
             picked = self._strongest_model()
             if picked and picked != self.settings.model:
                 self._emit("code_model", model=picked)
@@ -1613,7 +1698,7 @@ class Agent:
                         }
                     )
 
-        if self.recheck and self.online and not result.stopped:
+        if self.recheck_on and self.online and not result.stopped:
             self._second_round(result, question=question, stream=stream)
         return self._finish(result, question)
 

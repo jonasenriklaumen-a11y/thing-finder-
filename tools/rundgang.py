@@ -96,7 +96,7 @@ class FakeAgent:
         )
         text = message.lower()
 
-        if mode == "code":
+        if mode in ("code", "pro"):
             self.on_event("code_model", {"model": "anthropic/claude-opus-5"})
         if sandbox and mode == "code":
             self.on_event("vm_start", {"runtime": "Docker (gehaertet)"})
@@ -368,6 +368,87 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.keyboard.press("Escape")
         pg.wait_for_timeout(400)
         log.pruefe("ohne Web" not in pg.inner_text("#status"), "und wieder zurück")
+
+    if dran("pro"):
+        log.abschnitt("4c. Pro-Modus")
+        pg.click('#modes .mode[data-mode="pro"]')
+        pg.wait_for_timeout(300)
+        log.pruefe(
+            pg.eval_on_selector("body", "e => e.classList.contains('pro-mode')"),
+            "Pro-Modus schaltet um",
+        )
+        # Optisch derselbe Knopf: gleiche Hoehe, gleiche Schrift wie die
+        # anderen beiden. Nur die Leistung dahinter ist eine andere.
+        masse = pg.eval_on_selector_all(
+            "#modes .mode",
+            "els => els.map(e => [Math.round(e.getBoundingClientRect().height),"
+            " getComputedStyle(e).fontSize, getComputedStyle(e).borderRadius])",
+        )
+        log.pruefe(len(masse) == 3, f"drei Knoepfe nebeneinander ({len(masse)})")
+        log.pruefe(len({str(m) for m in masse}) == 1,
+                   f"alle drei sehen gleich aus ({masse})")
+        pg.click("#btn-model")
+        pg.wait_for_timeout(500)
+        log.pruefe(pg.is_checked("#structure"),
+                   "Strukturieren geht beim Wechsel an -- ohne das keine Agenten")
+        log.pruefe(not pg.is_visible("#recheck"), "Gegenprüfen gibt es hier nicht")
+        log.pruefe(pg.is_visible("#online") and pg.is_visible("#denken")
+                   and pg.is_visible("#structure"),
+                   "alles andere aus dem Standardmodus steht bereit")
+        log.pruefe(not pg.is_visible("#werkstatt"), "die Werkstatt bleibt beim Code")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+        log.pruefe("Pro" in pg.inner_text("#status"), "die Kopfzeile sagt es")
+        pg.fill("#input", "Welche Lastenräder gibt es in Bremen?")
+        pg.click("#send")
+        pg.wait_for_timeout(1200)
+        letzte = agent.gesehen[-1]
+        log.pruefe(letzte["modus"] == "pro", f"der Modus kommt an ({letzte['modus']})")
+        log.pruefe(letzte["gegenprobe"] is not True,
+                   f"und die Gegenprobe bleibt aus ({letzte['gegenprobe']})")
+        schritte = pg.inner_text(".steps >> nth=-1")
+        log.pruefe("[Pro]" in schritte, "das stärkste Modell wird genannt")
+        log.pruefe("[Code]" not in schritte, "und zwar als Pro, nicht als Code")
+        foto("04c-pro")
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(700)
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        log.pruefe(pg.is_visible("#recheck"), "im Standardmodus ist es wieder da")
+        # Der Schalter bleibt umlegbar -- und der Rundgang laesst die Lage so
+        # zurueck, wie er sie vorgefunden hat.
+        pg.uncheck("#structure")
+        pg.wait_for_timeout(200)
+        log.pruefe(not pg.is_checked("#structure"), "und Strukturieren geht wieder aus")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(300)
+
+    if dran("vorschlaege"):
+        log.abschnitt("4d. Vorschläge passen zum Modus")
+        pg.reload()
+        pg.wait_for_selector("#chips")
+        vorschlag = pg.inner_text("#chips")
+        log.pruefe("Café" in vorschlag or "Netz" in vorschlag,
+                   f"im Standardmodus geht es ums Suchen ({vorschlag[:40]!r})")
+        log.pruefe(not pg.is_visible("#chips-code"), "die Coding-Vorschläge sind weg")
+        pg.click('#modes .mode[data-mode="code"]')
+        pg.wait_for_timeout(400)
+        log.pruefe(pg.is_visible("#chips-code"), "im Code-Modus stehen die anderen da")
+        log.pruefe(not pg.is_visible("#chips"), "und die Suchvorschläge sind weg")
+        code_text = pg.inner_text("#chips-code")
+        log.pruefe("Python" in code_text or "API" in code_text,
+                   f"es geht ums Programmieren ({code_text[:40]!r})")
+        pg.click('#modes .mode[data-mode="pro"]')
+        pg.wait_for_timeout(400)
+        log.pruefe(pg.is_visible("#chips") and not pg.is_visible("#chips-code"),
+                   "im Pro-Modus wieder die Suchvorschläge")
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(400)
+        # Ein Klick auf einen Vorschlag fuellt die Eingabe.
+        pg.click("#chips .chip >> nth=0")
+        pg.wait_for_timeout(200)
+        log.pruefe(len(pg.input_value("#input")) > 5, "ein Klick füllt die Eingabe")
+        pg.fill("#input", "")
 
     if dran("rueckfrage"):
         log.abschnitt("5. Rückfrage")
@@ -960,6 +1041,22 @@ def handy(pg: Any, log: Protokoll, bilder: Path | None) -> None:
     )
     log.pruefe(spalten >= 2, f"die Farbkarten stehen zu {spalten} nebeneinander")
     pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+    # Drei Arbeitsweisen statt zwei -- die Knopfzeile ueber der Eingabe ist
+    # die engste Stelle der ganzen Oberflaeche. Sie muss in eine Zeile passen,
+    # ohne dass etwas umbricht oder hinausragt.
+    log.pruefe(
+        pg.eval_on_selector(".crow", "e => e.scrollWidth <= e.clientWidth + 1"),
+        "die Knopfzeile passt in die Breite",
+    )
+    hoehen = pg.eval_on_selector_all(
+        "#modes .mode", "els => els.map(e => Math.round(e.getBoundingClientRect().top))"
+    )
+    log.pruefe(len(set(hoehen)) == 1, f"alle drei Modi stehen nebeneinander ({hoehen})")
+    log.pruefe(
+        pg.eval_on_selector("#send", "e => e.getBoundingClientRect().width") >= 28,
+        "der Senden-Knopf wird nicht zusammengedrückt",
+    )
 
 
 def ohne_bewegung(pg: Any, log: Protokoll) -> None:

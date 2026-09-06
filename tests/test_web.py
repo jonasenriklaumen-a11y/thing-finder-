@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import threading
 import time
 from http.client import HTTPConnection
@@ -2292,9 +2293,10 @@ def test_without_a_choice_the_stored_state_applies(
     assert agent.effort == "medium"
 
 
-def test_the_composer_offers_both_modes() -> None:
+def test_the_composer_offers_all_three_modes() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'data-mode="normal"' in html and 'data-mode="code"' in html
+    for modus in ("normal", "pro", "code"):
+        assert f'data-mode="{modus}"' in html
     # Neben Anhaengen und Abbrechen -- beides gehoert zur Frage, die man
     # gerade schreibt.
     row = html[html.index('<div class="crow">') :]
@@ -3032,3 +3034,118 @@ def test_more_attachments_than_allowed_are_cut(client, agent: FakeAgent) -> None
     viele = [{"name": f"{i}.txt", "data": encode(b"hallo")} for i in range(50)]
     status, _ = client("POST", "/api/chat", {"message": "Was ist das?", "attachments": viele})
     assert status == 200
+
+
+# ---------------------------------------------------------------------------
+# Pro-Modus
+# ---------------------------------------------------------------------------
+def test_the_pro_button_looks_like_the_others() -> None:
+    """Optisch derselbe Knopf -- kein Abzeichen, keine eigene Farbe.
+
+    Der Unterschied ist die Leistung, nicht das Aussehen. Ein Knopf, der
+    anders aussieht, verspricht etwas anderes.
+    """
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    modes = html[html.index('<div class="modes"') :]
+    modes = modes[: modes.index("</div>")]
+    knoepfe = re.findall(r'<button class="([^"]*)"\s+data-mode="([^"]+)"', modes)
+    assert [mode for _, mode in knoepfe] == ["normal", "pro", "code"]
+    # Nur der aktive Knopf traegt "on" -- sonst tragen alle dieselbe Klasse.
+    assert {klassen.replace(" on", "") for klassen, _ in knoepfe} == {"mode"}
+    # Und keine eigene Regel, die den Pro-Knopf heraushebt.
+    assert '[data-mode="pro"]' not in html
+
+
+def test_the_pro_mode_reaches_the_agent(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    client("POST", "/api/chat", {"message": "Was taugt der Markt?", "mode": "pro"})
+    assert agent.mode == "pro"
+
+
+def test_the_pro_mode_never_rechecks(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    """Das eine Standard-Merkmal, das Pro nicht hat -- und der Server sagt es,
+    nicht der Browser."""
+    client("POST", "/api/chat", {"message": "Frage", "recheck": True})
+    assert agent.recheck is True
+
+    client("POST", "/api/chat", {"message": "Frage", "mode": "pro", "recheck": True})
+    assert agent.recheck is False
+
+    # Der gespeicherte Wunsch bleibt trotzdem stehen: wer zurueckwechselt,
+    # findet sein Gegenpruefen wieder.
+    client("POST", "/api/chat", {"message": "Frage", "mode": "normal"})
+    assert agent.recheck is True
+
+
+def test_the_code_mode_does_not_switch_the_web_back_on(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    """Ein ausgeblendeter Schalter ist kein Wunsch.
+
+    Im Code-Modus wird immer nachgeschlagen -- das darf aber nicht bedeuten,
+    dass ein Ausflug dorthin das abgeschaltete Web dauerhaft wieder anmacht.
+    """
+    client("POST", "/api/chat", {"message": "Frage", "online": False})
+    assert agent.online is False
+
+    client("POST", "/api/chat", {"message": "Bau mir was", "mode": "code", "online": True})
+    assert agent.online is True
+
+    client("POST", "/api/chat", {"message": "Frage", "mode": "normal"})
+    assert agent.online is False, "die Einstellung von vorhin gilt weiter"
+
+
+def test_the_recheck_disappears_in_the_pro_mode() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    davor = html[html.index('id="recheck"') - 220 : html.index('id="recheck"')]
+    assert "only-standard" in davor
+    assert "body.pro-mode .only-standard{display:none}" in html
+    # Web und Denken bleiben: Pro hat alle Standard-Features ausser diesem.
+    for schalter in ('id="online"', 'id="denken"'):
+        umfeld = html[html.index(schalter) - 220 : html.index(schalter)]
+        assert "only-standard" not in umfeld, f"{schalter} gehoert auch zu Pro"
+
+
+def test_the_page_arrives_in_the_pro_mode() -> None:
+    """Der Modus steht schon im ausgelieferten HTML -- sonst blitzt beim Laden
+    kurz der falsche auf."""
+    web.ui_state().write({"mode": "pro"})
+    try:
+        html = web.with_state(web.UI_FILE.read_text(encoding="utf-8"))
+        assert '<body class="start pro-mode">' in html
+        assert '"mode": "pro"' in html
+    finally:
+        web.ui_state().reset()
+
+
+def test_the_code_mode_suggests_code(client) -> None:
+    """Ein Suchvorschlag hilft im Code-Modus niemandem."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    normal = html[html.index('<div class="chips only-normal"') :]
+    normal = normal[: normal.index("</div>")]
+    code = html[html.index('<div class="chips only-code"') :]
+    code = code[: code.index("</div>")]
+    assert "Cafés" in normal
+    assert "Cafés" not in code
+    assert "Python" in code or "FastAPI" in code
+    # Beide Listen stehen im HTML und werden per Klasse getauscht -- so ist
+    # von der ersten Zeile an die richtige da.
+    assert normal.count('class="chip"') == code.count('class="chip"') == 3
+
+
+def test_the_pro_mode_switches_structuring_on() -> None:
+    """Ohne Strukturieren gibt es keine Agenten -- und ohne Agenten waere Pro
+    nur ein staerkeres Modell. Der Schalter bleibt trotzdem ein Schalter."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'if (merken && mode === "pro" && !structured) setStructured(true);' in html
+    # Beim Laden nicht: wer es im Pro-Modus ausgeschaltet hat, hat es so gemeint.
+    assert 'setMode(START.mode || "normal", { merken: false });' in html
+
+
+def test_the_strongest_model_is_labelled_by_its_reason() -> None:
+    """„[Code]" über einer Recherche wäre eine falsche Auskunft."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'step(steps, mode === "pro" ? "[Pro]" : "[Code]",' in html

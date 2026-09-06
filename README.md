@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.4                                      │
+│ Cortex AI 9.0.0                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -256,7 +256,12 @@ bearbeiten, bevor der Hauptagent übernimmt:
 ```
 
 Jeder Subagent hat dieselben zwei Werkzeuge, ein eigenes kleines Budget (Default 6
-Aufrufe) und liefert eine knappe Zusammenfassung mit Quellen zurück. Zwei laufen
+Aufrufe) und liefert eine knappe Zusammenfassung mit Quellen zurück. Seine Anweisung
+ist, die Suche gleich **dreifach zu stellen** — eine Anfrage, dazu zwei andere
+Formulierungen über `queries`. Die drei laufen nebeneinander, die Trefferlisten werden
+gemischt (RRF), und es kostet trotzdem nur *einen* Aufruf von seinem knappen Budget.
+Gleichlautende Teilfragen werden vor dem Start aussortiert: zwei gleiche Aufträge lesen
+dieselben Seiten und melden dasselbe zurück — bezahlt wird beides. Zwei laufen
 gleichzeitig — bei lokalen Modellen bringt mehr wenig, weil die GPU ohnehin nacheinander
 rechnet. Lässt sich eine Anfrage nicht sinnvoll teilen, entsteht genau eine Teilfrage und
 der Ablauf bleibt wie zuvor. Nachfragen wie „nur die mit 4+ Sternen" bekommen das
@@ -408,12 +413,39 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   *Abbrechen*. Ein Klick beendet den Lauf wirklich — nicht nur die Anzeige:
   der Browser hört auf zuzuhören *und* der Agent hört auf zu arbeiten. Was bis
   dahin da war, bleibt stehen. Danach ist der Knopf wieder das Anhängen.
-* **Zwei Arbeitsweisen**, umschaltbar unten neben *Anhängen*:
+* **Drei Arbeitsweisen**, umschaltbar unten neben *Anhängen*:
   **Normal** ist ein Gespräch — Cortex antwortet selbst, in normaler Länge, und
   sucht, wenn die Frage es braucht (alles Aktuelle, Örtliche, Preise, Zahlen,
   Versionen) oder wenn du ihn darum bittest („such mal", „stimmt das?"). Kein
   Bericht, keine Vorrecherche im Hintergrund, keine Agenten: eine Runde zum
   Modell, und das ist die schnellste Betriebsart, die es hier gibt.
+  **Pro** ist derselbe Modus mit voller Leistung: dasselbe Antwortformat,
+  dieselben Schalter — nur läuft er auf dem **stärksten Modell, das erreichbar
+  ist**, und darf bis zu **24 Agenten** gleichzeitig losschicken statt zwölf.
+  Genau ein Merkmal des Standardmodus fehlt: das **Gegenprüfen**. Eine zweite
+  Runde auf anderen Quellen ist Gründlichkeit, nicht Leistung — und wer Tempo
+  wählt, will nicht am Ende noch einmal von vorn anfangen. Der Schalter ist
+  deshalb im Pro-Modus nicht da; sein Wert bleibt trotzdem gespeichert und ist
+  beim Zurückwechseln wieder da. Umgekehrt geht beim Umschalten *Strukturieren*
+  an — ohne das gibt es gar keine Agenten, und von Pro bliebe nur ein stärkeres
+  Modell übrig. Der Schalter bleibt ein Schalter: wer ihn im Pro-Modus wieder
+  auslegt, behält es so, auch über das Neuladen hinweg.
+
+  „Bis zu 24" heißt nicht „immer 24": im Systemtext steht, wonach sich die Zahl
+  richtet — eine einzelne Angabe sucht Cortex selbst, ein Vergleich bekommt zwei
+  bis vier Agenten, und erst eine wirklich breite Frage (viele Kandidaten,
+  mehrere Orte, mehrere Kriterien) rechtfertigt zehn und mehr. Die Staffelung
+  folgt dem, was Anthropic für sein Research-System beschrieben hat; wer immer
+  die Obergrenze nimmt, zahlt ein Vielfaches an Zeit und Token für Agenten, die
+  einander dasselbe zurückmelden. Damit die Breite etwas bringt, gilt außerdem:
+  ein Auftrag pro Sachgebiet (doppelte Aufträge werden vor dem Start
+  aussortiert), alle in einem Zug statt in Wellen — die Nebenläufigkeit wächst
+  bei Cloud-Modellen mit der Zahl mit, lokale Modelle bleiben bei zwei, weil
+  eine Grafikkarte ohnehin nacheinander rechnet. Ab fünf gleichzeitigen Agenten
+  starten sie **leicht versetzt** (80 ms Abstand, höchstens zwei Sekunden
+  insgesamt): 24 Anfragen in derselben Millisekunde beantwortet ein Anbieter
+  mit einer Ratenbegrenzung, und ein Subagent, der die abbekommt, fällt samt
+  seiner Teilfrage aus.
   **Code** dreht das um: der Codeblock steht zuerst, Erklärungen nur
   wenn sie etwas hinzufügen, das nicht im Code steht. Vollständiger, lauffähiger
   Code statt Ausschnitten mit „…", Kommentare sagen *warum* statt *was*. Und
@@ -432,6 +464,9 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   und laufen nicht.
 * **Virtual Environment** — der Schalter, den es **nur im Code-Modus** gibt (dafür
   verschwinden dort *Im Web suchen* und *Gegenprüfen*: die gehören zur Recherche).
+  Was ein Modus ausblendet, entscheidet dabei der Server und nicht der Browser —
+  und ein ausgeblendeter Schalter überschreibt den gespeicherten Stand nicht: ein
+  Ausflug in den Code-Modus macht das abgeschaltete Web nicht dauerhaft wieder an.
   Angeschaltet bekommt Cortex eine abgeschottete Maschine, in der er seinen Code
   **wirklich ausführt**, statt zu behaupten, er laufe: ein Prozessorkern, 1 GB
   Arbeitsspeicher, 4 GB Platte unter `/work`, Python — und **kein Netz**. Er
@@ -622,7 +657,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 8.7.4                                                   │
+│ Cortex AI 9.0.0                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1708,7 +1743,8 @@ python tools/rundgang.py --nur chat,einstellungen   # nur einzelne Abschnitte
 ```
 
 **Der Rundgang** unter `tools/rundgang.py` bedient die Weboberfläche wie ein Mensch:
-Frage stellen, abbrechen, Modus wechseln, Denken und Gegenprüfen umlegen, Rückfrage
+Frage stellen, abbrechen, zwischen Normal, Pro und Code wechseln, Denken und
+Gegenprüfen umlegen, Rückfrage
 beantworten, Chat umbenennen und löschen, jeden Abschnitt der Einstellungen anspringen,
 jeden Prüfknopf drücken, jedes Farbschema in Hell und Dunkel durchklicken, eine Datei
 anhängen, Slash-Befehle tippen — dazu dasselbe noch einmal auf einem Handy-Schirm und

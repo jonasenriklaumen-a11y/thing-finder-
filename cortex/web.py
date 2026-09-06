@@ -1030,6 +1030,8 @@ def with_state(html: str) -> str:
     koerper = ["start"]
     if stand.get("mode") == "code":
         koerper.append("code-mode")
+    if stand.get("mode") == "pro":
+        koerper.append("pro-mode")
     if stand.get("tracing"):
         koerper.append("tracing")
     if stand.get("denken"):
@@ -1829,6 +1831,17 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         }
         if "structured" not in wunsch and "thinking" in payload:
             wunsch["structured"] = payload["thinking"]
+        # Ein Schalter, den der gewaehlte Modus gar nicht zeigt, ist kein
+        # Wunsch: er darf den gespeicherten Stand nicht ueberschreiben. Sonst
+        # kaeme man aus dem Code-Modus zurueck und das abgeschaltete Web waere
+        # wieder an -- ohne dass jemand etwas angefasst haette.
+        from cortex.uistate import clean as clean_state
+
+        gewuenscht = str(clean_state(wunsch, base=ui_state().read())["mode"])
+        if gewuenscht == "code":
+            wunsch.pop("online", None)
+        if gewuenscht == "pro":
+            wunsch.pop("recheck", None)
         stand = ui_state().write(wunsch) if wunsch else ui_state().read()
         mode = str(stand["mode"])
         effort = str(stand["effort"])
@@ -1836,6 +1849,13 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         recheck = bool(stand["recheck"])
         online = bool(stand["online"])
         sandbox = bool(stand["sandbox"])
+        # Und was der Modus ausblendet, gilt auch nicht -- das entscheidet der
+        # Server, nicht der Browser. Im Code-Modus wird immer nachgeschlagen,
+        # im Pro-Modus nie gegengeprueft.
+        if mode == "code":
+            online = True
+        if mode == "pro":
+            recheck = False
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return

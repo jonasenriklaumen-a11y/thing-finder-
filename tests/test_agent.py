@@ -2825,3 +2825,147 @@ def test_every_call_is_counted(settings: Settings, toolbox: Toolbox, tmp_path: A
     assert summe["total"]["tokens_in"] >= 100
     assert summe["total"]["tokens_out"] == 30
     assert summe["models"][0]["model"] == agent.active_model
+
+
+# ---------------------------------------------------------------------------
+# Pro-Modus: dieselbe Arbeitsweise, mehr Leistung
+# ---------------------------------------------------------------------------
+def test_the_pro_mode_runs_on_the_strongest_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Wer Pro waehlt, bittet um das Beste, was da ist."""
+    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert agent.active_model == settings.model
+
+    agent._apply_mode("pro")
+    assert agent.active_model == "anthropic/claude-opus-5"
+
+    agent._apply_mode("normal")
+    assert agent.active_model == settings.model
+
+
+def test_the_pro_mode_may_send_more_agents(settings: Settings, toolbox: Toolbox) -> None:
+    """Zwoelf sind der Alltag, vierundzwanzig die Obergrenze im Pro-Modus."""
+    from cortex.agent import PRO_SUBAGENTS
+
+    settings.max_subagents = 12
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert agent.agent_limit == 12
+
+    agent._apply_mode("pro")
+    assert agent.agent_limit == PRO_SUBAGENTS >= 24
+
+    agent._apply_mode("code")
+    assert agent.agent_limit == 12
+
+
+def test_a_high_setting_survives_the_pro_mode(settings: Settings, toolbox: Toolbox) -> None:
+    """Wer selbst mehr eingestellt hat, verliert sie im Pro-Modus nicht."""
+    settings.max_subagents = 40
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    assert agent.agent_limit == 40
+
+
+def test_switched_off_agents_stay_off_in_the_pro_mode(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ein Modus ueberstimmt keine Einstellung, die "nein" heisst."""
+    settings.max_subagents = 0
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    assert agent.agent_limit == 0
+
+
+def test_the_pro_mode_never_rechecks(settings: Settings, toolbox: Toolbox) -> None:
+    """Das Gegenpruefen ist das eine Standard-Merkmal, das Pro nicht hat --
+    und der gespeicherte Schalter bleibt trotzdem stehen."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.recheck = True
+    assert agent.recheck_on is True
+
+    agent._apply_mode("pro")
+    assert agent.recheck_on is False
+    assert agent.recheck is True, "der Wunsch bleibt, er gilt hier nur nicht"
+
+    agent._apply_mode("normal")
+    assert agent.recheck_on is True
+
+
+def test_the_pro_mode_says_how_many_agents_are_sensible(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """"Bis zu 24" ohne Anleitung heisst "immer 24" -- und das waere teuer."""
+    settings.max_subagents = 12
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert "Pro-Modus" not in agent.messages[0]["content"]
+
+    agent._apply_mode("pro")
+    prompt = agent.messages[0]["content"]
+    assert "Pro-Modus" in prompt
+    assert "bis zu 24" in prompt, "die eigene Obergrenze, nicht irgendeine"
+    assert "Obergrenze, keine Vorgabe" in prompt
+    assert "gar kein Agent" in prompt, "die kleinste Stufe gehoert dazu"
+
+
+def test_the_pro_mode_writes_like_the_standard_mode(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Alle Features des Standardmodus -- also auch sein Antwortteil."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    normal = agent.messages[0]["content"]
+    agent._apply_mode("pro")
+    pro = agent.messages[0]["content"]
+
+    assert "Code-Modus" not in pro
+    assert "sei ausfuehrlich" in pro, "der Antwortteil des Standardmodus"
+    # Der Pro-Teil kommt dazu, er ersetzt nichts: nimmt man ihn heraus,
+    # steht Zeichen fuer Zeichen der Standardmodus da.
+    from cortex.agent import PRO_PROMPT
+
+    zusatz = PRO_PROMPT % {"agents": agent.agent_limit}
+    assert zusatz in pro
+    assert pro.replace(zusatz, "", 1) == normal
+
+
+def test_without_structuring_the_pro_mode_promises_no_agents(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ohne Strukturieren gibt es das Werkzeug nicht -- dann steht auch keine
+    Anleitung dafuer im Text. Sonst verteilt das Modell Auftraege, die es
+    gar nicht abgeben kann."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.structured = False
+    agent._apply_mode("pro")
+    prompt = agent.messages[0]["content"]
+    assert "Pro-Modus" not in prompt
+    assert "du fuehrst ein Gespraech" in prompt
+
+
+def test_the_pro_mode_needs_no_workshop(settings: Settings, toolbox: Toolbox) -> None:
+    """Die Werkstatt gehoert zum Programmieren, nicht zur Leistung."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.sandbox = True
+    agent._apply_mode("pro")
+    assert agent.workshop_on is False
+
+
+def test_the_pro_mode_arrives_at_the_agents(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Die angehobene Grenze muss auch wirklich unten ankommen."""
+    gesehen: dict[str, Any] = {}
+
+    def fake_run(tasks, s, **kwargs):
+        gesehen.update(kwargs)
+        gesehen["tasks"] = tasks
+        return []
+
+    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    settings.max_subagents = 12
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    agent._run_subagents(["a", "b"])
+    assert gesehen["limit"] == 24
+    assert gesehen["parallel"] >= 2

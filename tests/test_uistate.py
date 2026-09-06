@@ -139,3 +139,19 @@ def test_resetting_goes_back_to_the_start(tmp_path: Path) -> None:
     zustand.write({"theme": "dark", "mode": "code"})
     assert zustand.reset() == defaults()
     assert zustand.read() == defaults()
+
+
+def test_the_modes_are_the_same_on_both_sides() -> None:
+    """Zwei Listen, eine Wahrheit: was der Agent kennt, muss die Oberflaeche
+    durchlassen -- und umgekehrt. Sonst faellt ein gueltiger Modus hier auf
+    "normal" zurueck, ohne dass es jemandem auffiele."""
+    from cortex.agent import MODES as AGENT_MODES
+
+    assert set(MODES) == set(AGENT_MODES)
+    assert "pro" in MODES
+
+
+def test_the_pro_mode_gets_through(tmp_path: Path) -> None:
+    zustand = UIState(tmp_path / "u.db")
+    assert zustand.write({"mode": "pro"})["mode"] == "pro"
+    assert zustand.read()["mode"] == "pro"

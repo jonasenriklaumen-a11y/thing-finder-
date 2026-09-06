@@ -340,16 +340,20 @@ class Settings:
     def effective_vision_model(self) -> str:
         return self.vision_model or self.model
 
-    @property
-    def effective_parallel(self) -> int:
-        """Wie viele Subagenten gleichzeitig laufen duerfen.
+    def parallel_for(self, limit: int) -> int:
+        """Wie viele von *limit* Subagenten gleichzeitig laufen duerfen.
 
         Ohne eigene Angabe: zwei bei lokalen Modellen -- die GPU rechnet
         ohnehin nacheinander, mehr bringt nur Speicherdruck. In der Cloud
         alle auf einmal, denn dort ist Warten reine Netzwerklatenz.
+
+        Der Pro-Modus schiebt *limit* hoch; ohne diesen Weg blieben 24
+        Teilfragen in zwei Wellen haengen und die Breite kostete das Doppelte
+        an Wartezeit statt gar nichts.
         """
+        limit = max(1, int(limit or 1))
         if self.subagent_parallel > 0:
-            return self.subagent_parallel
+            return max(1, min(self.subagent_parallel, limit))
         local = provider_of(self.effective_subagent_model) in ("ollama", "ollama_chat")
         if local:
             return 2
@@ -357,7 +361,12 @@ class Settings:
         # von vier hiesse bei zwoelf Teilfragen: drei Wellen hintereinander,
         # also dreimal warten statt einmal -- gemessen 6,2s statt 3,7s.
         # Eine Ratenbegrenzung faengt der Wiederholungsversuch ab.
-        return max(1, self.max_subagents)
+        return limit
+
+    @property
+    def effective_parallel(self) -> int:
+        """Die Nebenlaeufigkeit fuer die eingestellte Zahl an Subagenten."""
+        return self.parallel_for(self.max_subagents)
 
     @property
     def effective_subagent_model(self) -> str:

@@ -522,3 +522,80 @@ def test_agents_share_one_list_of_claimed_domains(monkeypatch, tmp_path) -> None
     assert len(geteilt) == 1, "alle Agenten teilen sich dieselbe Menge"
     assert all(box.claim_sources for box in gesehen), "jeder traegt selbst ein"
     assert gesehen[0].avoid_domains == {"a.example", "b.example", "c.example"}
+
+
+def test_a_call_may_raise_the_cap(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    """Der Pro-Modus hebt die Grenze fuer seinen Turn an -- ohne die
+    Einstellung anzufassen."""
+    settings.max_subagents = 2
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="ok"))
+    results = run_subagents(["a", "b", "c", "d"], settings, parallel=1, limit=4)
+    assert len(results) == 4
+    assert settings.max_subagents == 2, "die Einstellung bleibt, wie sie war"
+
+
+def test_the_same_task_does_not_run_twice(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Zwei gleiche Auftraege lesen dieselben Seiten und melden dasselbe --
+    bezahlt wird beides. Bei 24 Agenten faellt das ins Gewicht."""
+    settings.max_subagents = 24
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="ok"))
+    results = run_subagents(
+        ["Cafes in Bremen", "cafes in bremen.", "  Cafes in Bremen  ", "Cafes in Kiel"],
+        settings,
+        parallel=1,
+    )
+    assert [result.task for result in results] == ["Cafes in Bremen", "Cafes in Kiel"]
+
+
+def test_the_subagent_is_told_to_ask_three_ways(settings: Settings) -> None:
+    """Drei Formulierungen in EINEM Aufruf: mehr Treffer, gleiche Kosten."""
+    from cortex.subagents import SUBAGENT_PROMPT
+
+    assert "`queries`" in SUBAGENT_PROMPT
+    assert "einen einzigen Aufruf" in SUBAGENT_PROMPT
+
+
+def test_many_agents_do_not_start_in_the_same_millisecond(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path
+) -> None:
+    """Vierundzwanzig Anfragen auf einmal beantwortet ein Anbieter mit einer
+    Ratenbegrenzung -- und jeder Subagent, der sie abbekommt, faellt aus."""
+    import time
+
+    from cortex.subagents import LAUNCH_STAGGER, STAGGER_AFTER
+
+    starts: list[float] = []
+
+    def fake_one(task, s, cache, on_event, toolbox=None, stop=None):
+        starts.append(time.monotonic())
+        return SubagentResult(task=task, summary="ok")
+
+    monkeypatch.setattr("cortex.subagents._run_one", fake_one)
+    settings.max_subagents = 24
+    aufgaben = [f"Teilfrage {nummer}" for nummer in range(8)]
+    run_subagents(aufgaben, settings, parallel=8)
+
+    assert len(starts) == 8
+    spanne = max(starts) - min(starts)
+    erwartet = (len(aufgaben) - 1) * LAUNCH_STAGGER
+    assert spanne >= erwartet * 0.6, f"zu dicht beieinander ({spanne:.2f}s)"
+    assert STAGGER_AFTER == 4, "bis vier Agenten bleibt alles wie bisher"
+
+
+def test_a_handful_of_agents_still_starts_at_once(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Der Versatz ist fuer die Breite da, nicht fuer den Alltag."""
+    import time
+
+    starts: list[float] = []
+
+    def fake_one(task, s, cache, on_event, toolbox=None, stop=None):
+        starts.append(time.monotonic())
+        return SubagentResult(task=task, summary="ok")
+
+    monkeypatch.setattr("cortex.subagents._run_one", fake_one)
+    run_subagents(["a", "b", "c"], settings, parallel=3)
+    assert max(starts) - min(starts) < 0.5

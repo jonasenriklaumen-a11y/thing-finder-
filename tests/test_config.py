@@ -292,3 +292,25 @@ def test_parallelism_follows_the_subagent_model(monkeypatch: pytest.MonkeyPatch)
 def test_explicit_parallelism_wins() -> None:
     settings = config.Settings(model="ollama_chat/x", subagent_parallel=6)
     assert settings.effective_parallel == 6
+
+
+def test_the_parallelism_follows_the_number_of_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Der Pro-Modus schiebt die Zahl hoch -- sonst liefen 24 Teilfragen in
+    zwei Wellen und die Breite kostete das Doppelte an Wartezeit."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    settings = config.Settings(model="anthropic/claude-sonnet-4-6", max_subagents=12)
+    assert settings.parallel_for(24) == 24
+    assert settings.parallel_for(12) == 12
+    assert settings.parallel_for(0) == 1
+
+
+def test_local_models_stay_at_two_however_many_agents() -> None:
+    """Eine Grafikkarte rechnet nacheinander -- daran aendert der Modus nichts."""
+    settings = config.Settings(model="ollama_chat/gemma4:12b")
+    assert settings.parallel_for(24) == 2
+
+
+def test_an_explicit_parallelism_is_never_exceeded() -> None:
+    """Wer sechs eingestellt hat, bekommt auch im Pro-Modus sechs."""
+    settings = config.Settings(model="ollama_chat/x", subagent_parallel=6)
+    assert settings.parallel_for(24) == 6

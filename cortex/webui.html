@@ -459,10 +459,14 @@ textarea::placeholder{color:var(--text-3)}
 .mode.on{background:var(--bg);color:var(--accent-text);font-weight:600;
   box-shadow:0 1px 2px rgba(0,0,0,.06)}
 /* Was nur im einen oder anderen Modus Sinn ergibt, steht auch nur dort:
-   im Web suchen und Gegenpruefen gehoeren zur Recherche, die Werkstatt zum
-   Programmieren. */
+   im Web suchen gehoert zur Recherche, die Werkstatt zum Programmieren.
+   `only-normal` heisst "ueberall ausser im Code-Modus" -- Pro ist der
+   Standardmodus mit voller Leistung und hat dieselben Schalter.
+   `only-standard` ist enger: nur der Standardmodus. Daran haengt das
+   Gegenpruefen, das es im Pro-Modus nicht gibt. */
 body:not(.code-mode) .only-code{display:none}
 body.code-mode .only-normal{display:none}
+body.pro-mode .only-standard{display:none}
 .picker-effort{padding:11px 16px;border-top:1px solid var(--line)}
 .eff-head{font-size:13px}
 .eff-head .why{display:block;color:var(--text-3);font-size:11.5px;line-height:1.5;
@@ -879,6 +883,13 @@ input:focus,select:focus{border-color:var(--accent)}
      ansetzen, sonst schneidet sie den Ortsfilter halb ab und es sieht aus
      wie ein Fehler beim Zeichnen. */
   .picker{top:74px}
+  /* Drei Arbeitsweisen brauchen Platz. Also bleibt vom Anhaengen und vom
+     Abbrechen hier nur das Sinnbild: es sagt dasselbe wie das Wort, und der
+     Titel sagt es noch einmal fuer den, der lange draufhaelt. Ohne das
+     wandert die Zeile bei 360px in die zweite Reihe -- oder darueber hinaus. */
+  .crow .tool .wort{display:none}
+  .crow .tool{padding:5px 9px}
+  .mode{padding:4px 9px;font-size:12px}
 }
 
 /* Randlose Bildschirme: unten liegt sonst die Wischleiste auf der Eingabe. */
@@ -987,7 +998,7 @@ input:focus,select:focus{border-color:var(--accent)}
           selbst und sucht nur, wenn die Frage es braucht oder du ihn darum
           bittest. Das ist schneller.</span></span>
     </label>
-    <label class="picker-think only-normal" for="recheck">
+    <label class="picker-think only-normal only-standard" for="recheck">
       <input type="checkbox" role="switch" class="schalter" id="recheck">
       <span><b>Gegenprüfen</b>
         <span class="why">Sucht nach der Antwort garantiert noch einmal — und
@@ -1017,11 +1028,13 @@ input:focus,select:focus{border-color:var(--accent)}
       <input type="file" id="picker" multiple hidden
              accept="image/*,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml">
       <div class="crow">
-        <button class="tool" id="clip" title="Bild oder PDF anhängen">📎 Anhängen</button>
-        <button class="tool stop" id="stop" title="Anfrage abbrechen" hidden>◼ Abbrechen</button>
+        <button class="tool" id="clip" title="Bild oder PDF anhängen">📎 <span class="wort">Anhängen</span></button>
+        <button class="tool stop" id="stop" title="Anfrage abbrechen" hidden>◼ <span class="wort">Abbrechen</span></button>
           <div class="modes" id="modes" role="group" aria-label="Arbeitsweise">
           <button class="mode on" data-mode="normal"
             title="Normales Gespräch — sucht, wenn die Frage es braucht">Normal</button>
+          <button class="mode" data-mode="pro"
+            title="Volle Leistung: stärkstes Modell, bis zu 24 Agenten">Pro</button>
           <button class="mode" data-mode="code"
             title="Code statt Prosa, auf dem stärksten Modell">Code</button>
         </div>
@@ -1029,10 +1042,19 @@ input:focus,select:focus{border-color:var(--accent)}
         <button class="send" id="send" title="Senden (Enter)">↑</button>
       </div>
     </div>
-    <div class="chips" id="chips">
+    <div class="chips only-normal" id="chips">
       <span class="chip">Gute Cafés mit WLAN in meiner Stadt</span>
       <span class="chip">Welche Geräte hängen in meinem Netz?</span>
       <span class="chip">Laptop bis 1200 € für Bildbearbeitung</span>
+    </div>
+    <!-- Im Code-Modus hilft ein Suchvorschlag niemandem. Beide Listen stehen
+         im HTML und werden per Klasse getauscht: der Modus steht schon in der
+         ausgelieferten Seite, so ist von der ersten Zeile an die richtige da
+         und es wird nichts umgeschrieben, was der Nutzer schon sieht. -->
+    <div class="chips only-code" id="chips-code">
+      <span class="chip">Schreib mir ein Python-Skript, das Ordner nach Datum sortiert</span>
+      <span class="chip">Warum wirft dieser Code einen IndexError?</span>
+      <span class="chip">Baue eine kleine REST-API mit FastAPI</span>
     </div>
     <div class="hint">Enter senden · Shift+Enter Zeilenumbruch · /help zeigt die Befehle</div>
   </footer>
@@ -1476,6 +1498,12 @@ let denken = false;
 // Schalter hintereinander dreimal dieselbe Anfrage.
 let zustandTimer = null;
 let zustandOffen = {};
+// Der Aufschub fuer die Kopfzeile. Die Funktion dazu steht ganz unten, die
+// Variable muss aber hier oben stehen: die Schalter unten rufen sie beim
+// Laden auf, und eine `let`-Zeile, die dann noch nicht gelaufen ist, wirft
+// einen ReferenceError -- der stoppt das ganze Skript, und dann bleibt auf
+// dem Handy die Seitenleiste offen ueber dem Chat liegen.
+let kopfTimer = null;
 function merkeZustand(teil){
   Object.assign(zustandOffen, teil);
   clearTimeout(zustandTimer);
@@ -1491,15 +1519,31 @@ function merkeZustand(teil){
   }, 180);
 }
 
+// Dieselbe Liste wie in `cortex/uistate.py` und `cortex/agent.py`. Was hier
+// nicht steht, wird "normal" -- der Server sieht es genauso.
+const MODI = ["normal", "pro", "code"];
+const PLATZHALTER = {
+  normal: "Frag etwas …",
+  pro: "Frag etwas Größeres …",
+  code: "Was soll ich bauen?",
+};
+
 function setMode(wanted, { merken = true } = {}){
-  mode = wanted === "code" ? "code" : "normal";
+  mode = MODI.includes(wanted) ? wanted : "normal";
   document.querySelectorAll("#modes .mode").forEach(button =>
     button.classList.toggle("on", button.dataset.mode === mode));
   document.body.classList.toggle("code-mode", mode === "code");
-  $("#input").placeholder = mode === "code"
-    ? "Was soll ich bauen?" : "Frag etwas …";
+  document.body.classList.toggle("pro-mode", mode === "pro");
+  $("#input").placeholder = PLATZHALTER[mode] || PLATZHALTER.normal;
   if (merken) merkeZustand({ mode });
   zeigeWerkstattKnopf();
+  refreshHeader();
+  // Pro heisst vor allem: viele Agenten. Die gibt es nur mit Strukturieren
+  // -- ohne das antwortet das Modell selbst, und vom Modus bliebe nur ein
+  // staerkeres Modell uebrig. Beim Wechsel wird es deshalb eingeschaltet:
+  // sichtbar am Schalter und jederzeit wieder umlegbar. Beim Laden nicht --
+  // wer es im Pro-Modus ausgeschaltet hat, hat es so gemeint.
+  if (merken && mode === "pro" && !structured) setStructured(true);
 }
 
 function setRecheck(on, { merken = true } = {}){
@@ -2013,7 +2057,9 @@ async function runCommand(line){
     const data = await res.json();
     bubble.innerHTML = md(data.ok ? (data.text || "") : ("**Fehler:** " + data.error));
     if (data.clear){ thread.innerHTML = ""; }
-    if (data.reload){ await refreshHeader(); }
+    // Kein `await`: die Kopfzeile zeichnet sich gleich von selbst neu, und
+    // nichts hier unten wartet auf sie.
+    if (data.reload){ refreshHeader(); }
   } catch (err){
     bubble.innerHTML = md("**Fehler:** " + String(err));
   }
@@ -2048,12 +2094,17 @@ async function ask(text){
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
-        message: text, attachments, mode, structured, recheck, effort, sandbox,
+        message: text, attachments, mode, structured, effort, sandbox,
         // Im Code-Modus gibt es den Web-Schalter nicht -- also darf er dort
         // auch nichts abschalten. Sonst haette ein "aus" aus dem
         // Standardmodus das Nachschlagen still mitgenommen, ohne dass ein
         // Schalter dafuer sichtbar waere.
         online: mode === "code" ? true : online,
+        // Dasselbe umgekehrt beim Gegenpruefen: im Pro-Modus gibt es den
+        // Schalter nicht, also laeuft er dort auch nicht mit. Der Server
+        // sieht das genauso -- das hier spart nur die Runde, in der er es
+        // richtigstellen muesste.
+        recheck: mode === "pro" ? false : recheck,
       }),
       signal: running.signal,
     });
@@ -2158,8 +2209,11 @@ async function ask(text){
       case "vm_stop":
         step(steps, "[Werkstatt]", `abgeräumt — ${ev.reason}`); break;
       case "code_model":
-        // Im Code-Modus zaehlt das staerkste Modell, nicht das eingestellte.
-        step(steps, "[Code]", `stärkstes Modell: ${ev.model}`); break;
+        // Im Code- wie im Pro-Modus zaehlt das staerkste Modell, nicht das
+        // eingestellte. Die Marke sagt, aus welchem der beiden Gruende --
+        // "[Code]" ueber einer Recherche waere eine falsche Auskunft.
+        step(steps, mode === "pro" ? "[Pro]" : "[Code]",
+             `stärkstes Modell: ${ev.model}`); break;
       case "subagents_empty":
         // Die Vorrecherche kam mit leeren Haenden zurueck. Das wandert
         // bewusst NICHT in den Kontext -- sonst schriebe das Modell eine
@@ -3675,7 +3729,17 @@ function greet(){
              : hour < 18 ? "Guten Tag" : "Guten Abend";
   $("#greeting").textContent = `${when} — was soll ich herausfinden?`;
 }
-async function refreshHeader(){
+// Die Kopfzeile wird von jedem Schalter angestossen. Beim Laden sind das
+// sieben Aufrufe hintereinander -- also sieben Abfragen fuer dasselbe
+// Ergebnis. Ein kurzer Aufschub fasst sie zu einer zusammen; sichtbar ist
+// davon nichts, die Zeile steht ohnehin erst da, wenn die Antwort kommt.
+// (Die Variable dazu steht weit oben -- siehe dort, warum.)
+function refreshHeader(){
+  clearTimeout(kopfTimer);
+  kopfTimer = setTimeout(kopfNeuZeichnen, 60);
+}
+
+async function kopfNeuZeichnen(){
   try {
     const cfg = await (await api("/api/config")).json();
     $("#version").textContent = "v" + cfg.version;
@@ -3689,8 +3753,9 @@ async function refreshHeader(){
     // das Ergebnis spuerbar, und man sieht es sonst nirgends.
     if (mode === "code" && sandbox) bits.push("Werkstatt");
     else if (!online) bits.push("ohne Web");
+    if (mode === "pro") bits.push("Pro");
     if (structured) bits.push("strukturiert");
-    if (recheck) bits.push("gegenprüfen");
+    if (recheck && mode !== "pro") bits.push("gegenprüfen");
     if (effort !== "medium") bits.push("Denktiefe " + effort);
     if (cfg.ha_connected) bits.push("Zuhause verbunden");
     if (cfg.values.CORTEX_MEMORY === "true") bits.push("Speicher an");
