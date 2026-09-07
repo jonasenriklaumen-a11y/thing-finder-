@@ -136,6 +136,17 @@ MODES = ("normal", "code", "pro")
 #: darf die Frage so breit werden, wie sie ist.
 PRO_SUBAGENTS = 24
 
+#: Die Pruefer im Pro-Modus. Sie recherchieren nicht, sie kontrollieren: jedes
+#: fertige Ergebnis wird auf ANDEREN Seiten gegengelesen -- und zwar waehrend
+#: die anderen noch suchen, nicht danach. Deshalb kostet die Gegenprobe hier
+#: kaum Wartezeit, waehrend sie im Standardmodus die Zeit verdoppelt.
+PRO_CHECKERS = 4
+
+#: Werkzeug-Budget je Agent im Pro-Modus. Sechs Aufrufe reichen fuer eine
+#: Suche und drei gelesene Seiten; mit acht bleibt Luft, einer Quelle noch
+#: einen Schritt weit zu folgen -- ein PDF, eine Unterseite, eine Preisliste.
+PRO_BUDGET = 8
+
 #: Die drei Stufen der Denktiefe, wie sie oben in der Modellauswahl stehen.
 #: Sie landen unveraendert als `reasoning_effort` beim Anbieter -- wer den
 #: Begriff nicht kennt, bekommt ihn dank `drop_params` gar nicht erst zu sehen.
@@ -280,6 +291,13 @@ dreimal dasselbe.
 fuer die anderen verbraucht. Deine Aufgabe ist danach das Zusammenfuehren: aus \
 den Rueckmeldungen EINE Antwort schreiben, mit Quellen, ohne noch einmal zu \
 suchen, was dort schon steht.
+- Manche Rueckmeldungen tragen einen Pruefvermerk: ein Kollege hat sie auf \
+anderen Seiten gegengelesen. "BESTAETIGT" heisst, du kannst die Angabe \
+verwenden. "ABWEICHUNG" heisst, dass zwei Quellen etwas Verschiedenes sagen -- \
+dann nennst du BEIDE Angaben mit ihrer Quelle, statt dich fuer eine zu \
+entscheiden. "UNKLAR" heisst nur, dass sich nichts finden liess; das macht die \
+urspruengliche Angabe nicht falsch, du schreibst dann aber dazu, dass sie an \
+einer einzigen Quelle haengt.
 """
 
 #: Die Gegenprobe holt zuerst selbst frische Treffer -- dieser Text erklaert
@@ -1103,11 +1121,23 @@ class Agent:
             on_event=self.on_event,
             parallel=self.settings.parallel_for(self.agent_limit),
             limit=self.agent_limit,
+            checkers=self.checker_count,
+            budget=self.subagent_budget,
             stop=self._stop,
         )
         for result in results:
             self.toolbox.stats.sources.extend(result.sources)
+            self.toolbox.stats.sources.extend(result.check_sources)
             self.toolbox.stats.searches.extend(result.searches)
+        # Was die Pruefer herausgefunden haben, gehoert auch an die Antwort --
+        # nicht nur in die Zwischenschritte, die man aufklappen muss.
+        geprueft = [result for result in results if result.verdict]
+        if geprueft:
+            self._emit(
+                "checks_done",
+                checked=len(geprueft),
+                deviations=sum(1 for result in geprueft if result.verdict == "ABWEICHUNG"),
+            )
         payloads = []
         for result in results:
             payload = result.as_dict()
@@ -1235,17 +1265,48 @@ class Agent:
         keine Einstellung ueberstimmen, die "nein" heisst.
         """
         base = max(0, int(self.settings.max_subagents))
-        if base and self.pro_mode:
-            return max(base, PRO_SUBAGENTS)
-        return base
+        if not (base and self.pro_mode):
+            return base
+        limit = max(base, PRO_SUBAGENTS)
+        # Bei hoher Denktiefe helfen die vier Pruefer beim Suchen mit: sie
+        # sind ohnehin da, und wer "hoch" waehlt, will Breite. Beim Schalter
+        # *Gegenpruefen* bleiben sie beim Pruefen -- danach hat er gefragt.
+        if self.checkers_on and clean_effort(self.effort) == "high":
+            limit += PRO_CHECKERS
+        return limit
+
+    @property
+    def checkers_on(self) -> bool:
+        """Laufen die Pruefer mit?
+
+        Zwei Wege dorthin, beide nur im Pro-Modus: der Schalter
+        *Gegenpruefen* -- oder die Denktiefe *hoch*, denn wer die waehlt,
+        will Gruendlichkeit und nicht Tempo. Ohne Agenten (Strukturieren aus,
+        Web aus, Agenten abgeschaltet) gibt es auch nichts zu pruefen.
+        """
+        if not (self.pro_mode and self.use_subagents and self.structured and self.online):
+            return False
+        return bool(self.recheck) or clean_effort(self.effort) == "high"
+
+    @property
+    def checker_count(self) -> int:
+        """Wie viele Pruefer mitlaufen -- vier oder keiner."""
+        return PRO_CHECKERS if self.checkers_on else 0
+
+    @property
+    def subagent_budget(self) -> int:
+        """Werkzeug-Aufrufe je Agent. Im Pro-Modus mehr."""
+        base = max(1, int(self.settings.subagent_budget))
+        return max(base, PRO_BUDGET) if self.pro_mode else base
 
     @property
     def recheck_on(self) -> bool:
-        """Wird nach der Antwort gegengeprueft?
+        """Wird nach der Antwort noch eine zweite Runde gedreht?
 
-        Im Pro-Modus nie -- dort gibt es den Schalter gar nicht. Der
-        gespeicherte Stand bleibt trotzdem stehen: wer zurueck in den
-        Standardmodus wechselt, findet sein Gegenpruefen wieder.
+        Im Pro-Modus nicht: dort pruefen die vier Pruefer schon MIT, waehrend
+        die anderen suchen. Eine zweite Runde hinterher waere dieselbe Arbeit
+        noch einmal -- nur eben nacheinander statt nebeneinander, und genau
+        das ist der Modus, den man nicht gewaehlt hat.
         """
         return bool(self.recheck) and not self.pro_mode
 
@@ -2153,10 +2214,17 @@ def format_findings(results: list[dict[str, Any]]) -> str:
     Anfuehrungszeichen -- Platz, der im Kontextfenster fehlt. Und kleine
     Modelle lesen Fliesstext zuverlaessiger als verschachtelte Objekte.
     """
+    # Lokal, weil `subagents` seinerseits aus diesem Modul importiert.
+    from cortex.subagents import ROLE_LABELS
+
     blocks: list[str] = []
     for result in results:
         task = str(result.get("task", "")).strip()
-        lines = [f"### {task}" if task else "###"]
+        # Der Blickwinkel gehoert dazu: was der Gegenstimmen-Agent gefunden
+        # hat, ist eine Auswahl und nicht das ganze Bild.
+        label = ROLE_LABELS.get(str(result.get("role") or ""), "")
+        kopf = f"### {task}" if task else "###"
+        lines = [f"{kopf}  [Blickwinkel: {label}]" if label else kopf]
         if result.get("error"):
             lines.append(f"(nicht beantwortet: {result['error']})")
         else:
@@ -2166,6 +2234,17 @@ def format_findings(results: list[dict[str, Any]]) -> str:
             sources = [str(url) for url in (result.get("sources") or []) if url]
             if sources:
                 lines.append("Quellen: " + ", ".join(dict.fromkeys(sources)))
+            # Der Pruefvermerk gehoert direkt an das, was er prueft. Sonst
+            # steht er am Ende in einem eigenen Block und das Modell muss
+            # zuordnen, wozu er gehoerte.
+            check = str(result.get("check", "")).strip()
+            if check:
+                lines.append("Gegenprobe: " + check)
+                geprueft = [str(url) for url in (result.get("check_sources") or []) if url]
+                if geprueft:
+                    lines.append(
+                        "Quellen der Gegenprobe: " + ", ".join(dict.fromkeys(geprueft))
+                    )
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 

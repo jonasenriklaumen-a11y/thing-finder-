@@ -1840,8 +1840,6 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         gewuenscht = str(clean_state(wunsch, base=ui_state().read())["mode"])
         if gewuenscht == "code":
             wunsch.pop("online", None)
-        if gewuenscht == "pro":
-            wunsch.pop("recheck", None)
         stand = ui_state().write(wunsch) if wunsch else ui_state().read()
         mode = str(stand["mode"])
         effort = str(stand["effort"])
@@ -1850,12 +1848,12 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         online = bool(stand["online"])
         sandbox = bool(stand["sandbox"])
         # Und was der Modus ausblendet, gilt auch nicht -- das entscheidet der
-        # Server, nicht der Browser. Im Code-Modus wird immer nachgeschlagen,
-        # im Pro-Modus nie gegengeprueft.
+        # Server, nicht der Browser: im Code-Modus wird immer nachgeschlagen.
+        # Das Gegenpruefen geht unveraendert durch; was es bedeutet,
+        # entscheidet der Agent am Modus (im Pro-Modus die vier Pruefer,
+        # sonst die zweite Runde).
         if mode == "code":
             online = True
-        if mode == "pro":
-            recheck = False
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return

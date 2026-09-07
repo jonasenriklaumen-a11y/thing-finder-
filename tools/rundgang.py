@@ -111,8 +111,23 @@ class FakeAgent:
         # die beiden auseinanderhalten kann.
         self.on_event("action", {"tool": "web_search", "arguments": {"query": "x"}})
         if structured:
-            self.on_event("subagents", {"tasks": ["Teil eins", "Teil zwei"]})
+            self.on_event(
+                "subagents",
+                {
+                    "tasks": ["Was kostet Teil eins?", "Teil zwei"],
+                    "roles": ["zahlen", "standard"],
+                },
+            )
             self.on_event("subagent_done", {"task": "Teil eins"})
+        # Die vier Pruefer: im Pro-Modus, sobald gegengeprueft werden soll
+        # oder die Denktiefe auf hoch steht.
+        if structured and mode == "pro" and (recheck or effort == "high"):
+            self.on_event("checkers", {"count": 4})
+            self.on_event("check", {"task": "Was kostet Teil eins?"})
+            self.on_event(
+                "check_done", {"task": "Was kostet Teil eins?", "verdict": "ABWEICHUNG"}
+            )
+            self.on_event("checks_done", {"checked": 2, "deviations": 1})
         if "frag" in text:
             self.on_event("ask", {"question": "Welches Budget?", "options": ["bis 800 €"]})
             self.ask_handler("Welches Budget?", ["bis 800 €"])
@@ -128,7 +143,11 @@ class FakeAgent:
                     break
         self.on_event("search", {"query": "beispiel"})
         self.on_event("fetch", {"url": "https://example.org/a"})
-        if recheck:
+        # Die zweite Runde gibt es im Pro-Modus nicht: dort haben die vier
+        # Pruefer schon nebenher gegengelesen. Der echte Agent haelt es
+        # genauso (`recheck_on`) -- der gestellte muss es auch, sonst prueft
+        # der Rundgang eine Lage, die es nie gibt.
+        if recheck and mode != "pro":
             self.on_event("recheck", {"sources": 2})
             self.on_event("recheck_done", {"changed": True})
         antwort = "```python\nprint('hallo')\n```" if mode == "code" else "Eine Antwort."
@@ -391,7 +410,13 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.wait_for_timeout(500)
         log.pruefe(pg.is_checked("#structure"),
                    "Strukturieren geht beim Wechsel an -- ohne das keine Agenten")
-        log.pruefe(not pg.is_visible("#recheck"), "Gegenprüfen gibt es hier nicht")
+        log.pruefe(pg.is_visible("#recheck"), "Gegenprüfen gibt es auch hier")
+        # Derselbe Schalter, andere Bedeutung -- und genau das steht dran.
+        erklaerung = pg.inner_text('label[for="recheck"]')
+        log.pruefe("vier Prüfer" in erklaerung,
+                   f"und es steht dran, was er hier heißt ({erklaerung[:60]!r})")
+        log.pruefe("doppelt so lang" not in erklaerung,
+                   "die Erklärung aus dem Standardmodus ist weg")
         log.pruefe(pg.is_visible("#online") and pg.is_visible("#denken")
                    and pg.is_visible("#structure"),
                    "alles andere aus dem Standardmodus steht bereit")
@@ -404,12 +429,40 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.wait_for_timeout(1200)
         letzte = agent.gesehen[-1]
         log.pruefe(letzte["modus"] == "pro", f"der Modus kommt an ({letzte['modus']})")
-        log.pruefe(letzte["gegenprobe"] is not True,
-                   f"und die Gegenprobe bleibt aus ({letzte['gegenprobe']})")
         schritte = pg.inner_text(".steps >> nth=-1")
         log.pruefe("[Pro]" in schritte, "das stärkste Modell wird genannt")
         log.pruefe("[Code]" not in schritte, "und zwar als Pro, nicht als Code")
+        log.pruefe("· Zahlen" in schritte, "die Rolle steht an der Teilfrage")
+
+        # Und jetzt die vier Pruefer: Schalter an, noch einmal fragen.
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        pg.check("#recheck")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(500)
+        log.pruefe("4 Prüfer" in pg.inner_text("#status"),
+                   f"die Kopfzeile sagt es ({pg.inner_text('#status')})")
+        pg.fill("#input", "Was kosten Lastenräder in Bremen?")
+        pg.click("#send")
+        pg.wait_for_timeout(1400)
+        log.pruefe(agent.gesehen[-1]["gegenprobe"] is True,
+                   "der Schalter kommt an")
+        schritte = pg.inner_text(".steps >> nth=-1")
+        log.pruefe("[Prüfer]" in schritte, "die Prüfer melden sich")
+        log.pruefe("prüfen mit, während" in schritte,
+                   "und sagen, dass sie nebenher laufen")
+        log.pruefe("Abweichung gefunden" in schritte, "ihr Urteil steht da")
+        log.pruefe("[Gegenprobe]" not in schritte,
+                   "und die zweite Runde entfällt dafür")
+        vermerk = pg.inner_text(".msg.bot >> nth=-1")
+        log.pruefe("Gegengeprüft" in vermerk and "abweichenden" in vermerk,
+                   "und an der Antwort steht der Vermerk")
         foto("04c-pro")
+        pg.click("#btn-model")
+        pg.wait_for_timeout(400)
+        pg.uncheck("#recheck")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(300)
         pg.click('#modes .mode[data-mode="normal"]')
         pg.wait_for_timeout(700)
         pg.click("#btn-model")

@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 9.0.0                                      │
+│ Cortex AI 9.1.0                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -261,7 +261,26 @@ ist, die Suche gleich **dreifach zu stellen** — eine Anfrage, dazu zwei andere
 Formulierungen über `queries`. Die drei laufen nebeneinander, die Trefferlisten werden
 gemischt (RRF), und es kostet trotzdem nur *einen* Aufruf von seinem knappen Budget.
 Gleichlautende Teilfragen werden vor dem Start aussortiert: zwei gleiche Aufträge lesen
-dieselben Seiten und melden dasselbe zurück — bezahlt wird beides. Zwei laufen
+dieselben Seiten und melden dasselbe zurück — bezahlt wird beides.
+
+**Rollen statt lauter gleicher Agenten.** Vierundzwanzig identische Agenten suchen
+vierundzwanzigmal dasselbe: was oben in den Treffern steht. Deshalb bekommt jede
+Teilfrage einen Blickwinkel, abgeleitet aus ihrem Wortlaut — reine Textarbeit, kein
+Modellaufruf, keine Wartezeit:
+
+| Rolle | wann | was sie ändert |
+| --- | --- | --- |
+| **Zahlen** | Preis, Kosten, Gebühr, Tarif, Miete … | jede Zahl mit Einheit, Stand und Quelle; zwei verschiedene Zahlen werden **beide** genannt |
+| **Gegenstimmen** | Erfahrung, Kritik, Problem, Mangel, Rückruf … | sucht ausdrücklich nach dem, was nicht in Werbetexten steht — und sagt dazu, wie verbreitet eine Klage ist |
+| **Aktuelles** | aktuell, derzeit, neueste, seit wann … | nimmt `search_news`, jede Angabe mit Datum, Altes wird als alt gekennzeichnet |
+| *(keine)* | alles andere | der normale Rechercheauftrag, unverändert |
+
+Die Rolle steht als kurzer Absatz im Auftrag und ändert sonst nichts: dieselben
+Werkzeuge, dasselbe Budget, dieselbe Form der Antwort. Trifft kein Stichwort, bleibt es
+beim normalen Auftrag — lieber keine Rolle als eine falsche, die am Thema vorbeisucht.
+In den Zwischenschritten steht der Blickwinkel hinter der Teilfrage, und der Hauptagent
+bekommt ihn mitgeliefert: was der Gegenstimmen-Agent gefunden hat, ist eine Auswahl und
+nicht das ganze Bild. Zwei laufen
 gleichzeitig — bei lokalen Modellen bringt mehr wenig, weil die GPU ohnehin nacheinander
 rechnet. Lässt sich eine Anfrage nicht sinnvoll teilen, entsteht genau eine Teilfrage und
 der Ablauf bleibt wie zuvor. Nachfragen wie „nur die mit 4+ Sternen" bekommen das
@@ -422,14 +441,31 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   **Pro** ist derselbe Modus mit voller Leistung: dasselbe Antwortformat,
   dieselben Schalter — nur läuft er auf dem **stärksten Modell, das erreichbar
   ist**, und darf bis zu **24 Agenten** gleichzeitig losschicken statt zwölf.
-  Genau ein Merkmal des Standardmodus fehlt: das **Gegenprüfen**. Eine zweite
-  Runde auf anderen Quellen ist Gründlichkeit, nicht Leistung — und wer Tempo
-  wählt, will nicht am Ende noch einmal von vorn anfangen. Der Schalter ist
-  deshalb im Pro-Modus nicht da; sein Wert bleibt trotzdem gespeichert und ist
-  beim Zurückwechseln wieder da. Umgekehrt geht beim Umschalten *Strukturieren*
-  an — ohne das gibt es gar keine Agenten, und von Pro bliebe nur ein stärkeres
-  Modell übrig. Der Schalter bleibt ein Schalter: wer ihn im Pro-Modus wieder
-  auslegt, behält es so, auch über das Neuladen hinweg.
+  Beim Umschalten geht *Strukturieren* an — ohne das gibt es gar keine Agenten,
+  und von Pro bliebe nur ein stärkeres Modell übrig. Der Schalter bleibt ein
+  Schalter: wer ihn im Pro-Modus wieder auslegt, behält es so, auch über das
+  Neuladen hinweg. Jeder Agent bekommt hier außerdem **acht statt sechs
+  Werkzeug-Aufrufe**: sechs reichen für eine Suche und drei gelesene Seiten,
+  mit acht bleibt Luft, einer Quelle noch einen Schritt weit zu folgen — ein
+  PDF, eine Unterseite, eine Preisliste.
+
+  **Gegenprüfen heißt hier: vier Prüfer** (24 + 4 = 28). Sie recherchieren
+  nicht, sie kontrollieren: jedes fertige Teilergebnis wird auf **anderen
+  Seiten** gegengelesen — und zwar *während* die übrigen Agenten noch suchen,
+  nicht danach. Ist die Recherche durch, helfen die frei gewordenen Agenten
+  beim Prüfen mit, der Rückstau leert sich also mit bis zu 28 gleichzeitig
+  statt mit vier. Deshalb kostet die Gegenprobe hier kaum Zeit, während sie im
+  Standardmodus die Zeit verdoppelt. Der Prüfer antwortet mit einem Wort —
+  **BESTÄTIGT**, **ABWEICHUNG** oder **UNKLAR** — und seinen Quellen; bei einer
+  Abweichung nennt Cortex in der Antwort **beide** Angaben mit ihrer Quelle,
+  statt sich für eine zu entscheiden.
+
+  Die vier laufen nur, wenn es einen Grund gibt: der Schalter *Gegenprüfen*
+  oder **Denktiefe High** — wer die wählt, will Gründlichkeit. Bei High suchen
+  sie zusätzlich mit, dann sind 28 Teilfragen möglich statt 24; beim Schalter
+  bleiben sie beim Prüfen, danach wurde ja gefragt. Die klassische zweite Runde
+  gibt es im Pro-Modus nicht mehr — das wäre dieselbe Arbeit noch einmal, nur
+  nacheinander statt nebeneinander.
 
   „Bis zu 24" heißt nicht „immer 24": im Systemtext steht, wonach sich die Zahl
   richtet — eine einzelne Angabe sucht Cortex selbst, ein Vergleich bekommt zwei
@@ -552,7 +588,10 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   selben Thema auf dieselben zwei Seiten zu und die Zerlegung bringt keine
   Breite. Das kostet zwei Runden zum Modell, bevor die erste Suche losgeht;
   ausgeschaltet entfallen beide. Steht es an, sagt es die Kopfzeile.
-* **Gegenprüfen**, der Schalter unter *Strukturieren* (nur im Standardmodus). Ist er an, wird nach der Antwort
+* **Gegenprüfen**, der Schalter unter *Strukturieren* (im Code-Modus nicht — dort zählt
+  die Werkstatt). Im **Pro-Modus** bedeutet er etwas anderes, und das steht auch dran:
+  dort schickt er die vier Prüfer mit, die nebenher gegenlesen (siehe oben). Im
+  Standardmodus ist er die klassische zweite Runde: ist er an, wird nach der Antwort
   garantiert noch einmal gesucht — Cortex holt die frischen Treffer selbst, bevor
   das Modell wieder zu Wort kommt, und lässt dabei jede Seite aus, die beim ersten
   Mal dran war. (Vorher konnte das Modell die Aufforderung überlesen und seine
@@ -657,7 +696,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 9.0.0                                                   │
+│ Cortex AI 9.1.0                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

@@ -508,7 +508,7 @@ def test_agents_share_one_list_of_claimed_domains(monkeypatch, tmp_path) -> None
 
     gesehen: list[object] = []
 
-    def fake_one(task, settings, cache, on_event, toolbox=None, stop=None):
+    def fake_one(task, settings, cache, on_event, toolbox=None, stop=None, **rest):
         gesehen.append(toolbox)
         toolbox.avoid_domains.add(f"{task}.example")
         return SubagentResult(task=task, summary="ok")
@@ -568,7 +568,7 @@ def test_many_agents_do_not_start_in_the_same_millisecond(
 
     starts: list[float] = []
 
-    def fake_one(task, s, cache, on_event, toolbox=None, stop=None):
+    def fake_one(task, s, cache, on_event, toolbox=None, stop=None, **rest):
         starts.append(time.monotonic())
         return SubagentResult(task=task, summary="ok")
 
@@ -592,10 +592,198 @@ def test_a_handful_of_agents_still_starts_at_once(
 
     starts: list[float] = []
 
-    def fake_one(task, s, cache, on_event, toolbox=None, stop=None):
+    def fake_one(task, s, cache, on_event, toolbox=None, stop=None, **rest):
         starts.append(time.monotonic())
         return SubagentResult(task=task, summary="ok")
 
     monkeypatch.setattr("cortex.subagents._run_one", fake_one)
     run_subagents(["a", "b", "c"], settings, parallel=3)
     assert max(starts) - min(starts) < 0.5
+
+
+# ---------------------------------------------------------------------------
+# Rollen
+# ---------------------------------------------------------------------------
+def test_the_role_comes_out_of_the_task() -> None:
+    """Reine Textarbeit -- die Zuordnung darf keine Wartezeit kosten."""
+    from cortex.subagents import role_for
+
+    assert role_for("Was kostet ein Lastenrad in Bremen?") == "zahlen"
+    assert role_for("Welche Probleme und Beschwerden gibt es zum Modell X?") == "gegenstimmen"
+    assert role_for("Was hat sich seit wann an der Förderung geändert?") == "frisch"
+    # Ohne Anhaltspunkt bleibt es beim normalen Auftrag: lieber keine Rolle
+    # als eine falsche, die am Thema vorbeisucht.
+    assert role_for("Cafés mit WLAN in Bremen") == "standard"
+    assert role_for("") == "standard"
+
+
+def test_each_role_says_something_different() -> None:
+    from cortex.subagents import ROLE_EXTRA, ROLE_LABELS
+
+    assert ROLE_EXTRA["standard"] == "", "der Normalfall bleibt, wie er war"
+    assert "Preise" in ROLE_EXTRA["zahlen"]
+    assert "BEIDE" in ROLE_EXTRA["zahlen"], "zwei Zahlen sind zwei Zahlen"
+    assert "Kritik" in ROLE_EXTRA["gegenstimmen"]
+    assert "search_news" in ROLE_EXTRA["frisch"]
+    assert set(ROLE_LABELS) == set(ROLE_EXTRA)
+    assert ROLE_LABELS["standard"] == "", "der Normalfall braucht keine Marke"
+
+
+def test_the_role_reaches_the_agent(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    gesehen: list[str] = []
+
+    def completion(**kwargs: Any):
+        gesehen.append(kwargs["messages"][0]["content"])
+        return _reply(content="ok")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    results = run_subagents(["Was kostet die Jahreskarte in Bremen?"], settings, parallel=1)
+    assert results[0].role == "zahlen"
+    assert "Deine Rolle: Zahlen" in gesehen[0]
+    assert "Deine Teilfrage lautet" in gesehen[0], "der Auftrag bleibt derselbe"
+
+
+def test_an_unknown_role_falls_back(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    from cortex.subagents import _run_one
+
+    monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="ok"))
+    ergebnis = _run_one("Frage", settings, None, None, role="quatsch")
+    assert ergebnis.role == "standard"
+
+
+# ---------------------------------------------------------------------------
+# Die Pruefer
+# ---------------------------------------------------------------------------
+def test_the_checkers_run_while_the_others_are_still_searching(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Der Punkt der vier: sie pruefen NEBENHER. Waere es eine zweite Runde,
+    koennte man sich den Aufwand sparen und die alte Gegenprobe nehmen.
+
+    Der Test haelt die spaeteren Rechercheure so lange fest, bis eine
+    Pruefung angefangen hat. Liefe die Pruefung erst nach der Recherche,
+    warteten beide aufeinander -- und der Test liefe in seinen Timeout.
+    """
+    import threading as th
+
+    pruefung_laeuft = th.Event()
+
+    def completion(**kwargs: Any):
+        text = kwargs["messages"][0]["content"]
+        if text.startswith("Du bist Pruefer"):
+            pruefung_laeuft.set()
+            return _reply(content="BESTAETIGT -- passt so (quelle.de)")
+        if "Teilfrage 0" in text:
+            return _reply(content="Ergebnis mit Zahl 42 (a.de)")
+        assert pruefung_laeuft.wait(timeout=5), "die Pruefung lief erst hinterher"
+        return _reply(content="Ergebnis (b.de)")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    settings.max_subagents = 8
+    results = run_subagents(
+        [f"Teilfrage {nummer}" for nummer in range(4)], settings, parallel=4, checkers=2
+    )
+    assert [result.verdict for result in results] == ["BESTAETIGT"] * 4
+
+
+def test_a_check_lands_on_its_own_result(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    def completion(**kwargs: Any):
+        text = kwargs["messages"][0]["content"]
+        if text.startswith("Du bist Pruefer"):
+            assert "Ergebnis: 12 Euro" in text, "der Pruefer sieht, was er pruefen soll"
+            return _reply(content="ABWEICHUNG -- anderswo 14 Euro (b.de)")
+        return _reply(content="Ergebnis: 12 Euro (a.de)")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    results = run_subagents(["Was kostet es?"], settings, parallel=2, checkers=1)
+    assert results[0].verdict == "ABWEICHUNG"
+    assert "14 Euro" in results[0].check
+    assert results[0].as_dict()["verdict"] == "ABWEICHUNG"
+
+
+def test_without_checkers_nothing_is_checked(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    aufrufe: list[str] = []
+
+    def completion(**kwargs: Any):
+        aufrufe.append(kwargs["messages"][0]["content"])
+        return _reply(content="Ergebnis (a.de)")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    results = run_subagents(["Frage a", "Frage b"], settings, parallel=2)
+    assert not any(text.startswith("Du bist Pruefer") for text in aufrufe)
+    assert all(not result.check for result in results)
+    assert "check" not in results[0].as_dict()
+
+
+def test_nothing_to_check_is_not_checked(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Ein gescheiterter Agent hat kein Ergebnis -- da gibt es nichts zu
+    pruefen, und ein Pruefer waere reine Wartezeit."""
+    def completion(**kwargs: Any):
+        if kwargs["messages"][0]["content"].startswith("Du bist Pruefer"):
+            raise AssertionError("hier gibt es nichts zu pruefen")
+        return _reply(content="   ")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    results = run_subagents(["Frage"], settings, parallel=2, checkers=2)
+    assert results[0].check == ""
+
+
+def test_the_verdict_is_read_from_the_first_word() -> None:
+    from cortex.subagents import verdict_of
+
+    assert verdict_of("BESTAETIGT — alles stimmt") == "BESTAETIGT"
+    assert verdict_of("**ABWEICHUNG**: Preis anders") == "ABWEICHUNG"
+    assert verdict_of("Kurz gesagt: UNKLAR, nichts gefunden") == "UNKLAR"
+    assert verdict_of("Ich habe nichts geprüft.") == ""
+    assert verdict_of("") == ""
+
+
+def test_the_budget_can_be_raised_for_one_call(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Im Pro-Modus bekommt jeder Agent mehr Aufrufe -- ohne dass sich die
+    Einstellung aendert."""
+    settings.subagent_budget = 2
+    runden = {"n": 0}
+
+    def completion(**kwargs: Any):
+        runden["n"] += 1
+        if runden["n"] > 20:
+            return _reply(content="Schluss")
+        return _reply(tool_calls=[_tool_call("web_search", {"query": "x"})])
+
+    monkeypatch.setattr("litellm.completion", completion)
+    ergebnis = run_subagents(["Frage"], settings, parallel=1, budget=5)[0]
+    assert ergebnis.tool_calls == 5
+
+
+def test_never_more_checkers_than_searchers(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Bei einem lokalen Modell laufen zwei Agenten nebeneinander -- vier
+    Pruefer obendrauf waeren sechs Anfragen an dieselbe Grafikkarte."""
+    gleichzeitig = {"jetzt": 0, "hoechstens": 0}
+    uhr = threading.Lock()
+
+    def completion(**kwargs: Any):
+        with uhr:
+            gleichzeitig["jetzt"] += 1
+            gleichzeitig["hoechstens"] = max(
+                gleichzeitig["hoechstens"], gleichzeitig["jetzt"]
+            )
+        try:
+            return _reply(content="BESTAETIGT -- passt (a.de)")
+        finally:
+            with uhr:
+                gleichzeitig["jetzt"] -= 1
+
+    monkeypatch.setattr("litellm.completion", completion)
+    settings.max_subagents = 8
+    run_subagents([f"Frage {n}" for n in range(6)], settings, parallel=2, checkers=4)
+    assert gleichzeitig["hoechstens"] <= 4, "zwei Suchende und hoechstens zwei Pruefer"

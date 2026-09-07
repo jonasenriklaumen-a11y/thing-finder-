@@ -3063,21 +3063,20 @@ def test_the_pro_mode_reaches_the_agent(
     assert agent.mode == "pro"
 
 
-def test_the_pro_mode_never_rechecks(
+def test_the_recheck_reaches_the_agent_in_every_mode(
     client, session: web.ChatSession, agent: FakeAgent
 ) -> None:
-    """Das eine Standard-Merkmal, das Pro nicht hat -- und der Server sagt es,
-    nicht der Browser."""
+    """Der Schalter geht unveraendert durch -- was er bedeutet, entscheidet
+    der Agent am Modus: im Pro-Modus die vier Pruefer, sonst die zweite
+    Runde. Der Server biegt daran nichts mehr zurecht."""
     client("POST", "/api/chat", {"message": "Frage", "recheck": True})
     assert agent.recheck is True
 
-    client("POST", "/api/chat", {"message": "Frage", "mode": "pro", "recheck": True})
-    assert agent.recheck is False
+    client("POST", "/api/chat", {"message": "Frage", "mode": "pro"})
+    assert agent.recheck is True, "im Pro-Modus schaltet er die Pruefer"
 
-    # Der gespeicherte Wunsch bleibt trotzdem stehen: wer zurueckwechselt,
-    # findet sein Gegenpruefen wieder.
-    client("POST", "/api/chat", {"message": "Frage", "mode": "normal"})
-    assert agent.recheck is True
+    client("POST", "/api/chat", {"message": "Frage", "mode": "normal", "recheck": False})
+    assert agent.recheck is False
 
 
 def test_the_code_mode_does_not_switch_the_web_back_on(
@@ -3098,15 +3097,18 @@ def test_the_code_mode_does_not_switch_the_web_back_on(
     assert agent.online is False, "die Einstellung von vorhin gilt weiter"
 
 
-def test_the_recheck_disappears_in_the_pro_mode() -> None:
+def test_the_recheck_explains_itself_per_mode() -> None:
+    """Denselben Schalter gibt es in beiden Modi -- er bedeutet nur etwas
+    anderes, und genau das muss dranstehen."""
     html = web.UI_FILE.read_text(encoding="utf-8")
-    davor = html[html.index('id="recheck"') - 220 : html.index('id="recheck"')]
-    assert "only-standard" in davor
+    stelle = html.index('id="recheck"')
+    label = html[html.rfind("<label", 0, stelle) :]
+    label = label[: label.index("</label>")]
+    assert "only-normal" in label, "im Code-Modus zaehlt die Werkstatt"
+    assert '"why only-standard"' in label and '"why only-pro"' in label
+    assert "vier Prüfer" in label
     assert "body.pro-mode .only-standard{display:none}" in html
-    # Web und Denken bleiben: Pro hat alle Standard-Features ausser diesem.
-    for schalter in ('id="online"', 'id="denken"'):
-        umfeld = html[html.index(schalter) - 220 : html.index(schalter)]
-        assert "only-standard" not in umfeld, f"{schalter} gehoert auch zu Pro"
+    assert "body:not(.pro-mode) .only-pro{display:none}" in html
 
 
 def test_the_page_arrives_in_the_pro_mode() -> None:
@@ -3149,3 +3151,32 @@ def test_the_strongest_model_is_labelled_by_its_reason() -> None:
     """„[Code]" über einer Recherche wäre eine falsche Auskunft."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'step(steps, mode === "pro" ? "[Pro]" : "[Code]",' in html
+
+
+def test_the_checkers_report_what_they_do() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for event in ("checkers", "check", "check_done", "checks_done"):
+        assert f'case "{event}"' in html, f"{event} wird nicht angezeigt"
+    # Eine Abweichung ist der Fall, den man sehen soll -- also gelb.
+    assert 'ev.verdict === "ABWEICHUNG" ? "warn" : ""' in html
+    # Und wie bei der Gegenprobe im Standardmodus steht es an der Antwort.
+    assert "Gegengeprüft — ${ev.checked} Teilergebnisse" in html
+
+
+def test_the_roles_are_named_the_same_on_both_sides() -> None:
+    """Die Marken im Browser kommen aus derselben Liste wie die Rollen."""
+    from cortex.subagents import ROLE_LABELS
+
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    zeile = html[html.index("const ROLLEN =") :]
+    zeile = zeile[: zeile.index("\n")]
+    for name, label in ROLE_LABELS.items():
+        if not label:
+            continue
+        assert f'{name}:"{label}"' in zeile, f"{name} fehlt im Browser"
+
+
+def test_the_header_says_when_four_are_checking() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'if (recheck || effort === "high") bits.push("4 Prüfer");' in html
+    assert 'else if (recheck) bits.push("gegenprüfen");' in html

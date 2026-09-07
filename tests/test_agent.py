@@ -2969,3 +2969,144 @@ def test_the_pro_mode_arrives_at_the_agents(
     agent._run_subagents(["a", "b"])
     assert gesehen["limit"] == 24
     assert gesehen["parallel"] >= 2
+
+
+# ---------------------------------------------------------------------------
+# Pro-Modus: die vier Pruefer
+# ---------------------------------------------------------------------------
+def test_the_checkers_need_a_reason(settings: Settings, toolbox: Toolbox) -> None:
+    """Zwei Wege zu den vier Pruefern -- und im Standardmodus keiner davon."""
+    from cortex.agent import PRO_CHECKERS
+
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.recheck = True
+    assert agent.checkers_on is False, "im Standardmodus zaehlt die zweite Runde"
+
+    agent._apply_mode("pro")
+    assert agent.checkers_on is True and agent.checker_count == PRO_CHECKERS
+
+    agent.recheck = False
+    assert agent.checkers_on is False, "ohne Schalter und ohne hohe Denktiefe: nein"
+
+    agent.effort = "high"
+    assert agent.checkers_on is True, "wer High waehlt, will Gruendlichkeit"
+
+    agent._apply_mode("normal")
+    assert agent.checkers_on is False, "die Pruefer gehoeren zum Pro-Modus"
+
+
+def test_the_checkers_replace_the_second_round(settings: Settings, toolbox: Toolbox) -> None:
+    """Beides waere dieselbe Arbeit zweimal -- einmal nebeneinander, einmal
+    hintereinander."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.recheck = True
+    agent._apply_mode("pro")
+    assert agent.checkers_on is True
+    assert agent.recheck_on is False
+
+
+def test_without_agents_there_is_nothing_to_check(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.recheck = True
+    agent._apply_mode("pro")
+    agent.structured = False
+    assert agent.checkers_on is False
+    agent.structured = True
+    agent.online = False
+    assert agent.checkers_on is False
+
+
+def test_at_high_effort_the_checkers_search_along(settings: Settings, toolbox: Toolbox) -> None:
+    """Sie sind ohnehin da -- und wer High waehlt, will Breite."""
+    from cortex.agent import PRO_CHECKERS, PRO_SUBAGENTS
+
+    settings.max_subagents = 12
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    agent.effort = "high"
+    assert agent.agent_limit == PRO_SUBAGENTS + PRO_CHECKERS == 28
+
+    # Beim Schalter *Gegenpruefen* bleiben sie beim Pruefen: danach wurde
+    # gefragt, nicht nach mehr Breite.
+    agent.effort = "medium"
+    agent.recheck = True
+    assert agent.checkers_on is True
+    assert agent.agent_limit == PRO_SUBAGENTS
+
+
+def test_the_pro_mode_gives_every_agent_more_budget(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Sechs Aufrufe reichen fuer eine Suche und drei Seiten; mit acht bleibt
+    Luft, einer Quelle noch einen Schritt weit zu folgen."""
+    from cortex.agent import PRO_BUDGET
+
+    settings.subagent_budget = 6
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    assert agent.subagent_budget == 6
+
+    agent._apply_mode("pro")
+    assert agent.subagent_budget == PRO_BUDGET == 8
+
+    # Wer selbst mehr eingestellt hat, verliert es nicht.
+    settings.subagent_budget = 12
+    assert agent.subagent_budget == 12
+
+
+def test_the_checkers_reach_the_agents(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    gesehen: dict[str, Any] = {}
+
+    def fake_run(tasks, s, **kwargs):
+        gesehen.update(kwargs)
+        return []
+
+    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    settings.max_subagents = 12
+    settings.subagent_budget = 6
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    agent.recheck = True
+    agent._run_subagents(["a", "b"])
+    assert gesehen["checkers"] == 4
+    assert gesehen["budget"] == 8
+    assert gesehen["limit"] == 24
+
+
+def test_a_check_note_lands_next_to_its_finding() -> None:
+    """Der Vermerk gehoert an das, was er prueft -- sonst muss das Modell
+    zuordnen, wozu er gehoerte."""
+    from cortex.agent import format_findings
+
+    text = format_findings(
+        [
+            {
+                "task": "Was kostet die Karte?",
+                "role": "zahlen",
+                "summary": "12 Euro (a.de)",
+                "sources": ["https://a.de/x"],
+                "check": "ABWEICHUNG -- bei b.de stehen 14 Euro",
+                "verdict": "ABWEICHUNG",
+                "check_sources": ["https://b.de/y"],
+            }
+        ]
+    )
+    assert "Blickwinkel: Zahlen" in text
+    assert "Gegenprobe: ABWEICHUNG" in text
+    assert "Quellen der Gegenprobe: https://b.de/y" in text
+    # Und alles zur selben Teilfrage, in einem Block.
+    assert text.count("###") == 1
+
+
+def test_the_pro_prompt_says_what_a_check_note_means(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    prompt = agent.messages[0]["content"]
+    assert "Pruefvermerk" in prompt
+    assert "BEIDE Angaben" in prompt, "bei einer Abweichung wird nicht gewaehlt"
+    assert "einer einzigen Quelle" in prompt

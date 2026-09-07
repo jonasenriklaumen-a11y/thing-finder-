@@ -42,9 +42,128 @@ Bis zu 400 Woerter.
 - Rate nie. Was du nicht gefunden hast, schreibst du als "nicht gefunden".
 - Liefert `fetch_page` einen `skipped_reason`, nimm eine andere Quelle.
 - Kein Vorwort, keine Wiederholung der Frage -- nur das Ergebnis.
-
+%(role)s
 Deine Teilfrage lautet:
 %(task)s"""
+
+#: Die Rollen. Vierundzwanzig gleiche Agenten suchen vierundzwanzigmal
+#: dasselbe: was oben in den Treffern steht. Wer nach Preisen sucht, braucht
+#: aber andere Genauigkeit als wer nach Erfahrungen sucht -- und wer nach
+#: Kritik sucht, findet sie nur, wenn er ausdruecklich danach fragt.
+#:
+#: Die Rolle steht als kurzer Absatz im Prompt und aendert sonst nichts:
+#: dieselben Werkzeuge, dasselbe Budget, dieselbe Form der Antwort. Wer
+#: keine Rolle bekommt, arbeitet wie bisher -- das ist der Normalfall.
+ROLE_EXTRA = {
+    "standard": "",
+    "zahlen": """
+Deine Rolle: Zahlen. Dich interessieren Preise, Gebuehren, Masse, Termine und \
+Fristen -- der Rest nur, soweit er eine Zahl einordnet. Jede Zahl bekommt \
+Einheit oder Waehrung, den Stand (seit wann gilt sie?) und ihre Quelle. \
+Findest du fuer dieselbe Angabe zwei verschiedene Zahlen, nenne BEIDE mit \
+ihrer Quelle, statt dich fuer eine zu entscheiden. Rechne nichts um, wenn du \
+den Kurs nicht kennst.
+""",
+    "gegenstimmen": """
+Deine Rolle: Gegenstimmen. Du suchst, was in Werbetexten nicht steht: Kritik, \
+bekannte Maengel, Beschwerden, Rueckrufe, Einschraenkungen, schlechte \
+Erfahrungen. Frag ausdruecklich danach ("... Probleme", "... Kritik", \
+"... Erfahrungen negativ") -- von selbst kommt das nicht nach oben. Bleib \
+fair: sag dazu, wie verbreitet eine Klage ist und woher sie kommt; ein \
+einzelner wuetender Beitrag ist noch kein Befund. Findest du nichts \
+Belastbares, schreibst du genau das -- auch das ist ein Ergebnis.
+""",
+    "frisch": """
+Deine Rolle: Aktuelles. Dich interessiert der Stand von heute: Neuerungen, \
+Aenderungen, Termine, Ankuendigungen. Nimm dafuer `search_news`. Zu jeder \
+Angabe gehoert ihr Datum; was aelter als ein Jahr ist, kennzeichnest du als \
+alt. Ist etwas seit Jahren unveraendert, sag auch das.
+""",
+}
+
+#: Wie die Rolle in der Oberflaeche heisst. Leer heisst: keine Marke, das ist
+#: der normale Rechercheauftrag.
+ROLE_LABELS = {"standard": "", "zahlen": "Zahlen", "gegenstimmen": "Gegenstimmen",
+               "frisch": "Aktuelles"}
+
+#: Woran eine Rolle zu erkennen ist. Reine Textarbeit, kein Modellaufruf --
+#: die Zuordnung darf keine Wartezeit kosten. Gezaehlt werden Treffer; die
+#: Rolle mit den meisten gewinnt, bei Gleichstand die weiter oben. Trifft
+#: nichts, bleibt es beim normalen Auftrag: lieber keine Rolle als eine
+#: falsche, die den Agenten am Thema vorbeisuchen laesst.
+_ROLE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("zahlen", ("preis", "kosten", "kostet", "guenstig", "günstig", "teuer", "euro",
+                "€", "gebuehr", "gebühr", "tarif", "miete", "gehalt", "rabatt",
+                "wie viel", "wieviel", "budget")),
+    ("gegenstimmen", ("erfahrung", "kritik", "problem", "nachteil", "beschwerde",
+                      "maengel", "mängel", "mangel", "rueckruf", "rückruf",
+                      "schwaech", "schwäch", "taugt", "lohnt sich")),
+    ("frisch", ("aktuell", "derzeit", "neueste", "neuesten", "momentan", "heute",
+                "diese woche", "news", "nachricht", "geaendert", "geändert",
+                "seit wann", "neu seit")),
+)
+
+
+def role_for(task: str) -> str:
+    """Welche Rolle zu dieser Teilfrage passt -- oder "standard"."""
+    text = (task or "").lower()
+    beste, punkte = "standard", 0
+    for rolle, hinweise in _ROLE_HINTS:
+        treffer = sum(1 for wort in hinweise if wort in text)
+        if treffer > punkte:
+            beste, punkte = rolle, treffer
+    return beste
+
+
+#: Der Pruefer. Er recherchiert nicht neu, er kontrolliert -- und zwar auf
+#: anderen Seiten als der Kollege, dessen Ergebnis er vor sich hat. Das
+#: erledigt die gemeinsame Domainliste von selbst: was gelesen wurde, ist aus
+#: seinen Treffern heraussortiert.
+CHECK_PROMPT = """\
+Du bist Pruefer. Ein Kollege hat gerade recherchiert, du kontrollierst sein \
+Ergebnis -- auf ANDEREN Seiten als er. Die Seiten, die er gelesen hat, sind \
+aus deinen Treffern heraussortiert; du siehst also von selbst nur Neues.
+
+Vorgehen: EIN `web_search`-Aufruf mit zwei bis drei Formulierungen ueber \
+`queries`, dann die aussichtsreichsten Treffer lesen.
+
+Pruefen sollst du die harten Angaben: Zahlen, Preise, Termine, \
+Oeffnungszeiten, Versionen, Namen, Adressen. Meinungen und Einschaetzungen \
+pruefst du nicht -- die kann man nicht nachschlagen.
+
+Antworte mit HOECHSTENS 150 Woertern und beginne mit genau einem dieser Woerter:
+BESTAETIGT -- alles, was du pruefen konntest, stimmt.
+ABWEICHUNG -- mindestens eine Angabe steht anderswo anders. Nenne sie: was \
+stand beim Kollegen, was steht bei dir, und beide Quellen.
+UNKLAR -- du hast dazu nichts Belastbares gefunden.
+
+Danach in Stichpunkten, was du geprueft hast, je mit Quelle. Erfinde keinen \
+Widerspruch, damit die Pruefung etwas hergibt: BESTAETIGT ist ein gutes \
+Ergebnis, und "nirgends bestaetigt" ist etwas anderes als "falsch".
+
+Teilfrage des Kollegen:
+%(task)s
+
+Sein Ergebnis:
+%(summary)s"""
+
+#: Die drei Urteile, in der Reihenfolge, in der sie zaehlen.
+VERDICTS = ("ABWEICHUNG", "UNKLAR", "BESTAETIGT")
+
+
+def verdict_of(text: str) -> str:
+    """Das Urteil aus der Antwort des Pruefers -- oder "" wenn keins dasteht."""
+    anfang = (text or "").strip().lstrip("*# ").upper()[:40]
+    for urteil in VERDICTS:
+        if anfang.startswith(urteil):
+            return urteil
+    # Manche Modelle stellen einen Satz voran. Dann suchen wir das Wort im
+    # ersten Absatz -- aber nur dort, sonst faengt man es aus der Begruendung.
+    kopf = (text or "").strip().upper()[:200]
+    for urteil in VERDICTS:
+        if urteil in kopf:
+            return urteil
+    return ""
 
 
 PLANNER_PROMPT = """\
@@ -202,15 +321,29 @@ class SubagentResult:
     searches: list[str] = field(default_factory=list)
     tool_calls: int = 0
     error: str = ""
+    #: Mit welcher Rolle gearbeitet wurde -- fuer die Anzeige und damit der
+    #: Hauptagent weiss, unter welchem Blickwinkel etwas gefunden wurde.
+    role: str = "standard"
+    #: Was der Pruefer dazu gesagt hat, und sein Urteil in einem Wort. Leer,
+    #: wenn nicht geprueft wurde -- das ist der Normalfall.
+    check: str = ""
+    verdict: str = ""
+    check_sources: list[dict[str, str]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"task": self.task}
+        payload: dict[str, Any] = {"task": self.task, "role": self.role}
         if self.error:
             payload["error"] = self.error
             return payload
         payload["summary"] = self.summary
         payload["sources"] = [source.get("url", "") for source in self.sources]
         payload["searches"] = self.searches
+        if self.check:
+            payload["check"] = self.check
+            payload["verdict"] = self.verdict
+            payload["check_sources"] = [
+                source.get("url", "") for source in self.check_sources
+            ]
         return payload
 
 
@@ -221,19 +354,31 @@ def _run_one(
     on_event: EventHook | None,
     toolbox: Toolbox | None = None,
     stop: threading.Event | None = None,
+    role: str = "standard",
+    budget: int = 0,
+    prompt: str = "",
+    kind: str = "subagent",
 ) -> SubagentResult:
-    """Fuehrt einen Subagenten aus -- eigene Toolbox, eigenes Budget."""
+    """Fuehrt einen Subagenten aus -- eigene Toolbox, eigenes Budget.
+
+    Args:
+        role: Der Blickwinkel (siehe ROLE_EXTRA). Aendert nur den Prompt.
+        budget: Werkzeug-Aufrufe fuer diesen Agenten. 0 = die Einstellung.
+        prompt: Ein eigener Auftrag statt des Rechercheauftrags -- so laeuft
+            der Pruefer durch dieselbe Schleife.
+        kind: Wofuer die Meldung am Ende steht: "subagent" oder "check".
+    """
     import litellm
 
     litellm.suppress_debug_info = True
-    result = SubagentResult(task=task)
+    role = role if role in ROLE_EXTRA else "standard"
+    result = SubagentResult(task=task, role=role)
     box = toolbox or Toolbox(settings, cache=cache, on_event=None)
     owns_box = toolbox is None
 
-    messages: list[dict[str, Any]] = [
-        {"role": "user", "content": SUBAGENT_PROMPT % {"task": task}}
-    ]
-    budget = max(1, settings.subagent_budget)
+    auftrag = prompt or SUBAGENT_PROMPT % {"task": task, "role": ROLE_EXTRA[role]}
+    messages: list[dict[str, Any]] = [{"role": "user", "content": auftrag}]
+    budget = max(1, int(budget) or settings.subagent_budget)
     used = 0
     # Faellt das kleine Subagenten-Modell aus (nicht geladen, abgestuerzt),
     # uebernimmt das Hauptmodell -- langsamer, aber die Teilfrage wird
@@ -340,9 +485,16 @@ def _run_one(
             messages.append(
                 {
                     "role": "user",
-                    "content": "Fasse jetzt zusammen, was du gefunden hast -- "
-                    "vollstaendig und mit allen Details samt Quelle je Angabe. "
-                    "Offene Punkte kennzeichnest du als 'nicht gefunden'.",
+                    "content": (
+                        "Gib jetzt dein Urteil ab: ein Wort (BESTAETIGT, "
+                        "ABWEICHUNG oder UNKLAR), danach in Stichpunkten, was du "
+                        "geprueft hast, je mit Quelle. Was du nicht pruefen "
+                        "konntest, faellt unter UNKLAR."
+                        if kind == "check"
+                        else "Fasse jetzt zusammen, was du gefunden hast -- "
+                        "vollstaendig und mit allen Details samt Quelle je Angabe. "
+                        "Offene Punkte kennzeichnest du als 'nicht gefunden'."
+                    ),
                 }
             )
             try:
@@ -363,7 +515,16 @@ def _run_one(
         if owns_box:
             box.close()
         if on_event:
-            on_event("subagent_done", {"task": task, "tool_calls": used, "error": result.error})
+            on_event(
+                f"{kind}_done",
+                {
+                    "task": task,
+                    "tool_calls": used,
+                    "error": result.error,
+                    "role": result.role,
+                    "verdict": verdict_of(result.summary) if kind == "check" else "",
+                },
+            )
 
 
 #: Ab wie vielen gleichzeitigen Agenten sie versetzt starten -- und um wie
@@ -409,6 +570,8 @@ def run_subagents(
     parallel: int = 2,
     stop: threading.Event | None = None,
     limit: int | None = None,
+    checkers: int = 0,
+    budget: int = 0,
 ) -> list[SubagentResult]:
     """Bearbeitet *tasks* nebenlaeufig und gibt die Ergebnisse in Reihenfolge zurueck.
 
@@ -423,14 +586,28 @@ def run_subagents(
             laufende enden nach ihrem naechsten Schritt.
         limit: Obergrenze fuer diesen Aufruf. Ohne Angabe die Einstellung --
             der Pro-Modus hebt sie fuer seinen Turn an.
+        checkers: Wie viele Pruefer nebenher mitlaufen. Sie nehmen sich jedes
+            fertige Ergebnis vor und suchen auf ANDEREN Seiten nach
+            Bestaetigung oder Widerspruch. 0 = keine Gegenprobe.
+        budget: Werkzeug-Aufrufe je Agent. 0 = die Einstellung.
     """
     ceiling = max(1, int(limit if limit is not None else settings.max_subagents))
     clean = _distinct(tasks)[:ceiling]
     if not clean:
         return []
 
+    # Die Rolle steckt in der Teilfrage: wer nach Preisen fragt, bekommt den
+    # Agenten, der auf Zahlen achtet. Das kostet keinen Modellaufruf.
+    roles = [role_for(task) for task in clean]
+    # Nie mehr Pruefer als Rechercheure gleichzeitig: bei einem lokalen
+    # Modell laufen zwei Agenten nebeneinander, und vier Pruefer obendrauf
+    # waeren sechs Anfragen an dieselbe Grafikkarte -- die rechnet sie
+    # ohnehin nacheinander, es wuerde nur alles langsamer.
+    checkers = max(0, min(int(checkers), max(1, parallel)))
     if on_event:
-        on_event("subagents", {"tasks": clean})
+        on_event("subagents", {"tasks": clean, "roles": roles})
+        if checkers:
+            on_event("checkers", {"count": checkers})
 
     # Ein gemeinsamer Fetcher fuer alle: dessen Drossel und robots.txt-Cache
     # gelten damit ueber die Subagenten hinweg. Mit je eigenem Fetcher wuerden
@@ -455,23 +632,98 @@ def run_subagents(
     for box in boxes:
         box.avoid_domains = shared_domains
         box.claim_sources = True
+    def pruefe(result: SubagentResult) -> None:
+        """Nimmt sich ein fertiges Ergebnis vor -- auf anderen Seiten.
+
+        Der Pruefer bekommt eine eigene Toolbox, aber dieselbe Domainliste:
+        was der Kollege gelesen hat, ist aus seinen Treffern heraussortiert.
+        Er prueft also zwangslaeufig woanders -- genau das macht die
+        Gegenprobe aus.
+        """
+        if stop is not None and stop.is_set():
+            return
+        if result.error or not result.summary.strip():
+            return  # nichts da, was sich pruefen liesse
+        if on_event:
+            on_event("check", {"task": result.task})
+        box = Toolbox(settings, cache=cache, fetcher=shared_fetcher)
+        box.avoid_domains = shared_domains
+        box.claim_sources = True
+        try:
+            geprueft = _run_one(
+                result.task,
+                settings,
+                cache,
+                on_event,
+                toolbox=box,
+                stop=stop,
+                budget=budget,
+                kind="check",
+                prompt=CHECK_PROMPT
+                % {"task": result.task, "summary": result.summary[:4000]},
+            )
+        finally:
+            box.close()
+        if geprueft.error:
+            return
+        result.check = geprueft.summary
+        result.verdict = verdict_of(geprueft.summary)
+        result.check_sources = list(geprueft.sources)
+        # Was der Pruefer gesucht hat, zaehlt mit: sonst steht am Ende eine
+        # Zahl unter der Antwort, die kleiner ist als das, was wirklich lief.
+        result.searches.extend(geprueft.searches)
+
     try:
-        workers = max(1, min(parallel, len(clean)))
+        # Die Pruefer bekommen eigene Faeden: sie sollen arbeiten, WAEHREND
+        # die anderen noch suchen. Ist die Recherche durch, stehen ihre Faeden
+        # dem Ruecksstau an Pruefungen zur Verfuegung -- aus vier Pruefern
+        # werden dann alle.
+        workers = max(1, min(parallel, len(clean)) + checkers)
         if workers == 1:
             return [
-                _run_one(task, settings, cache, on_event, toolbox=box, stop=stop)
-                for task, box in zip(clean, boxes, strict=True)
+                _run_one(
+                    task, settings, cache, on_event, toolbox=box, stop=stop,
+                    role=role, budget=budget,
+                )
+                for task, box, role in zip(clean, boxes, roles, strict=True)
             ]
-        def start(position: int, task: str, box: Toolbox) -> SubagentResult:
+
+        offene_pruefungen: list[Any] = []
+        schloss = threading.Lock()
+
+        def start(position: int, task: str, box: Toolbox, role: str) -> SubagentResult:
             if position and workers > STAGGER_AFTER:
                 time.sleep(min(position * LAUNCH_STAGGER, MAX_LAUNCH_DELAY))
-            return _run_one(task, settings, cache, on_event, toolbox=box, stop=stop)
+            ergebnis = _run_one(
+                task, settings, cache, on_event, toolbox=box, stop=stop,
+                role=role, budget=budget,
+            )
+            if checkers:
+                # Sofort weiterreichen, nicht erst am Ende: die Pruefung des
+                # ersten Ergebnisses laeuft, waehrend die letzte Teilfrage
+                # noch sucht.
+                auftrag = pool.submit(pruefe, ergebnis)
+                with schloss:
+                    offene_pruefungen.append(auftrag)
+            return ergebnis
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(start, position, task, box)
-                for position, (task, box) in enumerate(zip(clean, boxes, strict=True))
+                pool.submit(start, position, task, box, role)
+                for position, (task, box, role) in enumerate(
+                    zip(clean, boxes, roles, strict=True)
+                )
             ]
-            return [future.result() for future in futures]
+            results = [future.result() for future in futures]
+            # Der Ausstieg aus dem `with` wartet auf die Pruefungen, die noch
+            # laufen oder in der Warteschlange stehen. Erst danach stehen die
+            # Vermerke in den Ergebnissen.
+        # Eine gescheiterte Pruefung aendert nichts an der Recherche -- still
+        # verschwinden soll sie trotzdem nicht.
+        for auftrag in offene_pruefungen:
+            fehler = auftrag.exception()
+            if fehler is not None and on_event:
+                on_event("error", {"message": f"Pruefung fehlgeschlagen: {fehler}"})
+        return results
     finally:
         shared_fetcher.close()

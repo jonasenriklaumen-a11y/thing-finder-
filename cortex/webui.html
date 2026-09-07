@@ -462,11 +462,13 @@ textarea::placeholder{color:var(--text-3)}
    im Web suchen gehoert zur Recherche, die Werkstatt zum Programmieren.
    `only-normal` heisst "ueberall ausser im Code-Modus" -- Pro ist der
    Standardmodus mit voller Leistung und hat dieselben Schalter.
-   `only-standard` ist enger: nur der Standardmodus. Daran haengt das
-   Gegenpruefen, das es im Pro-Modus nicht gibt. */
+   `only-standard` ist enger: nur der Standardmodus, `only-pro` das
+   Gegenstueck. Das Gegenpruefen gibt es in beiden -- es bedeutet nur
+   Verschiedenes, und deshalb steht in jedem eine andere Erklaerung. */
 body:not(.code-mode) .only-code{display:none}
 body.code-mode .only-normal{display:none}
 body.pro-mode .only-standard{display:none}
+body:not(.pro-mode) .only-pro{display:none}
 .picker-effort{padding:11px 16px;border-top:1px solid var(--line)}
 .eff-head{font-size:13px}
 .eff-head .why{display:block;color:var(--text-3);font-size:11.5px;line-height:1.5;
@@ -998,13 +1000,18 @@ input:focus,select:focus{border-color:var(--accent)}
           selbst und sucht nur, wenn die Frage es braucht oder du ihn darum
           bittest. Das ist schneller.</span></span>
     </label>
-    <label class="picker-think only-normal only-standard" for="recheck">
+    <label class="picker-think only-normal" for="recheck">
       <input type="checkbox" role="switch" class="schalter" id="recheck">
       <span><b>Gegenprüfen</b>
-        <span class="why">Sucht nach der Antwort garantiert noch einmal — und
+        <span class="why only-standard">Sucht nach der Antwort garantiert noch einmal — und
           zwar ausschließlich auf Seiten, die beim ersten Mal nicht dran waren.
           Findet Zahlen, die nur in einer einzigen Quelle so stehen. Dauert
-          etwa doppelt so lang.</span></span>
+          etwa doppelt so lang.</span>
+        <span class="why only-pro">Schickt <b>vier Prüfer</b> mit, die jedes
+          Ergebnis auf anderen Seiten gegenlesen — währenddessen die übrigen
+          Agenten noch suchen. Sind die fertig, helfen sie beim Prüfen mit.
+          Kostet deshalb kaum Zeit statt der doppelten. Bei Denktiefe
+          <b>High</b> sind die vier ohnehin dabei und suchen zusätzlich mit.</span></span>
     </label>
     <div class="picker-foot">Weitere Anbieter und Schlüssel unter
       <button class="linkish" id="picker-settings">Einstellungen</button>.</div>
@@ -1522,6 +1529,11 @@ function merkeZustand(teil){
 // Dieselbe Liste wie in `cortex/uistate.py` und `cortex/agent.py`. Was hier
 // nicht steht, wird "normal" -- der Server sieht es genauso.
 const MODI = ["normal", "pro", "code"];
+// Wie die Rollen und die Urteile der Pruefer heissen. Dieselben Schluessel
+// wie in `cortex/subagents.py`; was hier fehlt, bleibt einfach unbeschriftet.
+const ROLLEN = {zahlen:"Zahlen", gegenstimmen:"Gegenstimmen", frisch:"Aktuelles"};
+const URTEILE = {BESTAETIGT:"bestätigt", ABWEICHUNG:"Abweichung gefunden",
+                 UNKLAR:"nichts Belastbares gefunden"};
 const PLATZHALTER = {
   normal: "Frag etwas …",
   pro: "Frag etwas Größeres …",
@@ -2094,17 +2106,12 @@ async function ask(text){
     const res = await api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
-        message: text, attachments, mode, structured, effort, sandbox,
+        message: text, attachments, mode, structured, recheck, effort, sandbox,
         // Im Code-Modus gibt es den Web-Schalter nicht -- also darf er dort
         // auch nichts abschalten. Sonst haette ein "aus" aus dem
         // Standardmodus das Nachschlagen still mitgenommen, ohne dass ein
         // Schalter dafuer sichtbar waere.
         online: mode === "code" ? true : online,
-        // Dasselbe umgekehrt beim Gegenpruefen: im Pro-Modus gibt es den
-        // Schalter nicht, also laeuft er dort auch nicht mit. Der Server
-        // sieht das genauso -- das hier spart nur die Runde, in der er es
-        // richtigstellen muesste.
-        recheck: mode === "pro" ? false : recheck,
       }),
       signal: running.signal,
     });
@@ -2190,11 +2197,30 @@ async function ask(text){
         break;
       case "subagents":
         step(steps, "[Teile]", `${ev.tasks.length} Teilfragen`);
-        ev.tasks.forEach(t => {
+        ev.tasks.forEach((t, i) => {
           const s = document.createElement("div");
           s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
-          s.querySelector(".sub").textContent = t; steps.appendChild(s);
+          // Der Blickwinkel steht dahinter, wenn es einen gibt: wer nach
+          // Preisen fragt, bekommt den Agenten, der auf Zahlen achtet.
+          const rolle = ROLLEN[(ev.roles || [])[i]] || "";
+          s.querySelector(".sub").textContent = rolle ? `${t}  · ${rolle}` : t;
+          steps.appendChild(s);
         }); break;
+      case "checkers":
+        step(steps, "[Prüfer]",
+          `${ev.count} prüfen mit, während die anderen noch suchen`); break;
+      case "check":
+        step(steps, "[Prüfer]", "prüft: " + ev.task); break;
+      case "check_done":
+        step(steps, "[Prüfer]", `${ev.task} — ${URTEILE[ev.verdict] || "geprüft"}`,
+             ev.verdict === "ABWEICHUNG" ? "warn" : ""); break;
+      case "checks_done":
+        // Wie bei der Gegenprobe im Standardmodus: dass geprueft wurde,
+        // gehoert an die Antwort und nicht nur in die Zwischenschritte.
+        mark(bubble, ev.deviations
+          ? `Gegengeprüft — ${ev.checked} Teilergebnisse, ${ev.deviations} mit abweichenden Angaben`
+          : `Gegengeprüft — ${ev.checked} Teilergebnisse auf anderen Quellen, nichts widersprochen`);
+        break;
       case "vm_start":
         step(steps, "[Werkstatt]", `wird gestartet (${ev.runtime})`); break;
       case "vm_run":
@@ -3755,7 +3781,11 @@ async function kopfNeuZeichnen(){
     else if (!online) bits.push("ohne Web");
     if (mode === "pro") bits.push("Pro");
     if (structured) bits.push("strukturiert");
-    if (recheck && mode !== "pro") bits.push("gegenprüfen");
+    // Im Pro-Modus pruefen vier Agenten mit -- der Schalter heisst gleich,
+    // meint aber etwas anderes, und bei hoher Denktiefe sind sie ohnehin da.
+    if (mode === "pro"){
+      if (recheck || effort === "high") bits.push("4 Prüfer");
+    } else if (recheck) bits.push("gegenprüfen");
     if (effort !== "medium") bits.push("Denktiefe " + effort);
     if (cfg.ha_connected) bits.push("Zuhause verbunden");
     if (cfg.values.CORTEX_MEMORY === "true") bits.push("Speicher an");

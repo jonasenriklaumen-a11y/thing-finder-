@@ -150,8 +150,57 @@ class ChatRenderer:
         self.console.print(
             Text.assemble(("  [Teile] ", "bold magenta"), (f"{len(tasks)} Teilfragen", "white"))
         )
-        for task in tasks:
-            self.console.print(f"          [dim]{shorten(task, 80)}[/dim]")
+        from cortex.subagents import ROLE_LABELS
+
+        rollen = payload.get("roles") or []
+        for position, task in enumerate(tasks):
+            label = ROLE_LABELS.get(str(rollen[position]) if position < len(rollen) else "", "")
+            zusatz = f"  · {label}" if label else ""
+            self.console.print(f"          [dim]{shorten(task, 80)}{zusatz}[/dim]")
+
+    def _on_checkers(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        anzahl = int(payload.get("count", 0) or 0)
+        self.console.print(
+            Text.assemble(
+                ("  [Pruefer] ", "bold magenta"),
+                (f"{anzahl} pruefen mit, waehrend die anderen suchen", "white"),
+            )
+        )
+
+    def _on_check(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        self.console.print(
+            f"  [magenta][Pruefer][/magenta] [dim]prueft: "
+            f"{shorten(payload.get('task', ''), 62)}[/dim]"
+        )
+
+    def _on_check_done(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        urteile = {
+            "BESTAETIGT": ("bestaetigt", "green"),
+            "ABWEICHUNG": ("Abweichung gefunden", "yellow"),
+            "UNKLAR": ("nichts Belastbares", "dim"),
+        }
+        text, farbe = urteile.get(str(payload.get("verdict", "")), ("geprueft", "dim"))
+        self.console.print(
+            Text.assemble(
+                ("  [Pruefer] ", "bold magenta"),
+                (shorten(payload.get("task", ""), 52), "white"),
+                (f"  {text}", farbe),
+            )
+        )
+
+    def _on_checks_done(self, payload: dict[str, Any]) -> None:
+        self._flush_reading()
+        geprueft = int(payload.get("checked", 0) or 0)
+        abweichungen = int(payload.get("deviations", 0) or 0)
+        text = (
+            f"{geprueft} Teilergebnisse gegengeprueft, {abweichungen} mit Abweichung"
+            if abweichungen
+            else f"{geprueft} Teilergebnisse gegengeprueft, keine Widersprueche"
+        )
+        self.console.print(Text.assemble(("  [Gegenprobe] ", "bold green"), (text, "white")))
 
     def _on_subagent_done(self, payload: dict[str, Any]) -> None:
         self._flush_reading()
