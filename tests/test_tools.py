@@ -36,7 +36,7 @@ def _html_handler(html: str):
 
 def test_core_tool_schemas() -> None:
     names = [schema["function"]["name"] for schema in TOOL_SCHEMAS]
-    assert names == ["web_search", "fetch_page", "search_news", "calculate"]
+    assert names == ["web_search", "fetch_page", "search_news", "local_places", "calculate"]
 
 
 def test_web_search_uses_settings_defaults(

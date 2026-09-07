@@ -258,8 +258,9 @@ bearbeiten, bevor der Hauptagent übernimmt:
 **Es sind immer alle.** Ein Planer, der drei Teilfragen liefert, während zwölf Agenten
 bereitstehen, lässt zwölf Agenten zu dritt suchen — und die Antwort ist so dünn wie die
 Zerlegung. Deshalb wird die Liste auf die volle Zahl **aufgefüllt**: erst fragt der Planer
-nach genau so vielen Teilfragen, wie Agenten da sind (12 im Standardmodus, 24 im
-Pro-Modus), und was dann noch fehlt, entsteht aus derselben Frage unter einem anderen
+nach genau so vielen Teilfragen, wie Agenten da sind (12 im Standardmodus; im Pro-Modus
+entscheidet der **Master** die Zahl, bis zu 44, und `/max` macht daraus alle), und was
+dann noch fehlt, entsteht aus derselben Frage unter einem anderen
 Blickwinkel — Preise und Kosten, Erfahrungen und Kritik, aktuelle Änderungen, offizielle
 Angaben, Alternativen, Tests, Bedingungen, Anfahrt und Öffnungszeiten. Das ist keine
 Verlegenheitslösung: genau diese Seiten fehlen sonst in der Antwort, weil niemand danach
@@ -289,7 +290,13 @@ Modellaufruf, keine Wartezeit:
 | **Zahlen** | Preis, Kosten, Gebühr, Tarif, Miete … | jede Zahl mit Einheit, Stand und Quelle; zwei verschiedene Zahlen werden **beide** genannt |
 | **Gegenstimmen** | Erfahrung, Kritik, Problem, Mangel, Rückruf … | sucht ausdrücklich nach dem, was nicht in Werbetexten steht — und sagt dazu, wie verbreitet eine Klage ist |
 | **Aktuelles** | aktuell, derzeit, neueste, seit wann … | nimmt `search_news`, jede Angabe mit Datum, Altes wird als alt gekennzeichnet |
+| **Spurensuche** | klein, lokal, in der Nähe, Verein, Geheimtipp … | Karte zuerst, dann Operatoren, Verzeichnisse, Umwege — und gibt nicht nach zwei Suchen auf |
 | *(keine)* | alles andere | der normale Rechercheauftrag, unverändert |
+
+Dazu kommt **Spurensuche** für das, was sich nicht einfach finden lässt (siehe *Was sich
+nicht finden lässt*). Und im Pro-Modus vergibt der **Master** die Rollen selbst, in
+eigenen Worten und auf den einzelnen Auftrag gemünzt — die Liste oben liefert dann nur
+noch die Technik dazu.
 
 Die Rolle steht als kurzer Absatz im Auftrag und ändert sonst nichts: dieselben
 Werkzeuge, dasselbe Budget, dieselbe Form der Antwort. Trifft kein Stichwort, bleibt es
@@ -444,6 +451,14 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   *Als Datei* speichert ihn als Markdown. Kopiert wird der Markdown-Text, nicht das
   gerenderte HTML — damit lässt sich weiterarbeiten.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
+* **Weggehen ist erlaubt.** Eine Anfrage lebt nicht mehr in ihrer Verbindung: der
+  Lauf gehört dem Server. Wer die Seite verlässt, das Handy sperrt oder kurz in
+  eine andere App wechselt, reißt nur die Leitung ab — Cortex arbeitet weiter.
+  Beim Zurückkommen hängt sich die Seite von selbst wieder an und lässt den
+  ganzen Verlauf ab dem ersten Ereignis nachwachsen (`[Weiter] Die Anfrage lief
+  weiter, während du weg warst.`). Auch eine Antwort, die in der Zwischenzeit
+  fertig wurde, ist noch da; wer sie einmal bis zum Schluss gesehen hat, bekommt
+  sie nicht ein zweites Mal vorgesetzt.
 * **Abbrechen:** Sobald eine Anfrage läuft, wird aus *Anhängen* ein
   *Abbrechen*. Ein Klick beendet den Lauf wirklich — nicht nur die Anzeige:
   der Browser hört auf zuzuhören *und* der Agent hört auf zu arbeiten. Was bis
@@ -456,46 +471,57 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Modell, und das ist die schnellste Betriebsart, die es hier gibt.
   **Pro** ist derselbe Modus mit voller Leistung: dasselbe Antwortformat,
   dieselben Schalter — nur läuft er auf dem **stärksten Modell, das erreichbar
-  ist**, und darf bis zu **24 Agenten** gleichzeitig losschicken statt zwölf.
-  Beim Umschalten geht *Strukturieren* an — ohne das gibt es gar keine Agenten,
-  und von Pro bliebe nur ein stärkeres Modell übrig. Der Schalter bleibt ein
-  Schalter: wer ihn im Pro-Modus wieder auslegt, behält es so, auch über das
-  Neuladen hinweg. Jeder Agent bekommt hier außerdem **acht statt sechs
-  Werkzeug-Aufrufe**: sechs reichen für eine Suche und drei gelesene Seiten,
-  mit acht bleibt Luft, einer Quelle noch einen Schritt weit zu folgen — ein
-  PDF, eine Unterseite, eine Preisliste.
+  ist**, und dahinter steht eine ganze Rechercheeinheit statt einer Handvoll
+  Agenten.
 
-  **Gegenprüfen heißt hier: vier Prüfer** (24 + 4 = 28). Sie recherchieren
+  **Der Master.** Im Pro-Modus plant nicht mehr ein kleiner Planer, sondern ein
+  **Master** auf dem starken Modell. Er macht drei Dinge:
+
+  1. **Beauftragen.** Er entscheidet, wie viele Agenten die Frage braucht —
+     bis zu **44** —, und gibt jedem einen eigenen Auftrag *und* eine eigene
+     Rolle, in seinen Worten („sucht Betreiberseiten statt Portale", „achtet
+     auf Preise und deren Stand"). Zwei Aufträge darf er als schwer markieren;
+     die gehen an die **zwei starken Agenten**, die auf dem starken Modell und
+     mit größerem Werkzeug-Budget arbeiten — für das, was am schwersten zu
+     finden ist.
+  2. **Bewerten.** Wenn alle zurück sind, liest er die Rückmeldungen und sagt,
+     was trägt und was nicht: leer, am Thema vorbei, nur Portalseiten ohne
+     Inhalt, offensichtlich veraltet.
+  3. **Nachschicken.** Was fehlt, vergibt er neu — mit anderer Technik als beim
+     ersten Mal. Höchstens zwei Runden: danach liegt es nicht mehr an der
+     Formulierung, sondern daran, dass es die Information nicht gibt, und genau
+     das gehört dann in die Antwort. **Man sieht es**: `[Master] Lücken: …`,
+     `[Nachrunde] 3 Aufträge noch einmal`. Eine Nachrunde ist kein Makel,
+     sondern der Grund, warum am Ende etwas dasteht.
+
+  Fällt der Master aus (Zeitlimit, Anbieter weg), plant der kleine Planer wie
+  im Standardmodus. Er darf die Recherche besser machen — verhindern darf er
+  sie nie.
+
+  **`/max`.** Ohne den Befehl entscheidet der Master die Zahl. Mit ihm sind es
+  alle: `/max Welche Fahrradläden in Bremen reparieren Lastenräder?` stellt die
+  volle Mannschaft auf — 44 Agenten, die beiden starken dazu und, wenn
+  *Gegenprüfen* an ist, die vier Prüfer. Bleibt der Master unter der Zahl, wird
+  mit Blickwinkeln aufgefüllt. `/max` allein getippt erklärt sich selbst.
+
+  **Gegenprüfen heißt hier: vier Prüfer** (44 + 2 + 4 = 50). Sie recherchieren
   nicht, sie kontrollieren: jedes fertige Teilergebnis wird auf **anderen
   Seiten** gegengelesen — und zwar *während* die übrigen Agenten noch suchen,
   nicht danach. Ist die Recherche durch, helfen die frei gewordenen Agenten
-  beim Prüfen mit, der Rückstau leert sich also mit bis zu 28 gleichzeitig
-  statt mit vier. Deshalb kostet die Gegenprobe hier kaum Zeit, während sie im
+  beim Prüfen mit. Deshalb kostet die Gegenprobe hier kaum Zeit, während sie im
   Standardmodus die Zeit verdoppelt. Der Prüfer antwortet mit einem Wort —
   **BESTÄTIGT**, **ABWEICHUNG** oder **UNKLAR** — und seinen Quellen; bei einer
-  Abweichung nennt Cortex in der Antwort **beide** Angaben mit ihrer Quelle,
-  statt sich für eine zu entscheiden.
+  Abweichung nennt Cortex in der Antwort **beide** Angaben mit ihrer Quelle.
+  Die vier laufen **nur mit dem Schalter**: die Denktiefe schaltet niemanden
+  ein, sie sagt nur, wie lange das Modell überlegt.
 
-  Die vier laufen nur, wenn es einen Grund gibt: der Schalter *Gegenprüfen*
-  oder **Denktiefe High** — wer die wählt, will Gründlichkeit. Bei High suchen
-  sie zusätzlich mit, dann sind 28 Teilfragen möglich statt 24; beim Schalter
-  bleiben sie beim Prüfen, danach wurde ja gefragt. Die klassische zweite Runde
-  gibt es im Pro-Modus nicht mehr — das wäre dieselbe Arbeit noch einmal, nur
-  nacheinander statt nebeneinander.
+  Beim Umschalten geht *Strukturieren* an — ohne das gibt es gar keine Agenten,
+  und von Pro bliebe nur ein stärkeres Modell übrig. Der Schalter bleibt ein
+  Schalter: wer ihn im Pro-Modus wieder auslegt, behält es so. Jeder Agent
+  bekommt hier außerdem **acht statt sechs Werkzeug-Aufrufe** (die starken
+  vierzehn): sechs reichen für eine Suche und drei gelesene Seiten, mit acht
+  bleibt Luft, einer Quelle noch einen Schritt weit zu folgen.
 
-  **Es sind immer 24** — nicht „bis zu". Ein Modell, das von sich aus drei
-  Teilfragen abgibt, lässt 24 Agenten zu dritt suchen; deshalb steht die Zahl im
-  Systemtext, der Planer wird nach genau so vielen gefragt, und was fehlt, wird
-  aus Blickwinkeln aufgefüllt (siehe *Subagenten*). Damit die Breite etwas
-  bringt, gilt außerdem:
-  ein Auftrag pro Sachgebiet (doppelte Aufträge werden vor dem Start
-  aussortiert), alle in einem Zug statt in Wellen — die Nebenläufigkeit wächst
-  bei Cloud-Modellen mit der Zahl mit, lokale Modelle bleiben bei zwei, weil
-  eine Grafikkarte ohnehin nacheinander rechnet. Ab fünf gleichzeitigen Agenten
-  starten sie **leicht versetzt** (80 ms Abstand, höchstens zwei Sekunden
-  insgesamt): 24 Anfragen in derselben Millisekunde beantwortet ein Anbieter
-  mit einer Ratenbegrenzung, und ein Subagent, der die abbekommt, fällt samt
-  seiner Teilfrage aus.
   **Code** dreht das um: der Codeblock steht zuerst, Erklärungen nur
   wenn sie etwas hinzufügen, das nicht im Code steht. Vollständiger, lauffähiger
   Code statt Ausschnitten mit „…", Kommentare sagen *warum* statt *was*. Und
@@ -754,6 +780,7 @@ ohne eine solche Freigabe — genau dafür ist es da.
 
 | Befehl | Wirkung |
 |---|---|
+| `/max <frage>` | im Pro-Modus mit voller Mannschaft recherchieren |
 | `/location <ort>` | Ortsfilter setzen (ohne Argument: aufheben) |
 | `/model <name>` | Modell wechseln, z. B. `openai/gpt-4o` |
 | `/export html\|md\|csv` | Recherche dieser Sitzung speichern |
@@ -1151,6 +1178,48 @@ docker run --network host ...                   # ohne Compose
 
 Merkt cortex, dass er im Container nur das Container-Netz sieht, sagt er es von sich aus,
 statt dich rätseln zu lassen.
+
+## Was sich nicht finden lässt
+
+Das härteste Suchproblem ist nicht die große Frage, sondern die kleine: der
+Fahrradladen in der Nebenstraße, die Werkstatt ohne Website, der Verein, dessen
+Programm nur als PDF existiert. Suchmaschinen kennen sie nicht oder erst auf
+Seite vier, weil niemand für sie optimiert. Dagegen hat Cortex drei Mittel.
+
+**Die Karte.** `local_places` fragt **OpenStreetMap** statt einer Suchmaschine —
+erst den Ort (Nominatim), dann die Umgebung (Overpass). Zurück kommen Name,
+Adresse, Telefon, Öffnungszeiten und, wenn es eine gibt, die **Website**:
+eingetragen von Leuten vor Ort, nicht von einer Marketingabteilung. Was dabei
+herauskommt, liest Cortex danach ganz normal mit `fetch_page`. Für alles
+Örtliche ist das der beste erste Griff, nicht der letzte.
+
+Beide Dienste gehören der OpenStreetMap Foundation und sind gespendete
+Rechenzeit, keine Selbstbedienung. Ihre Regeln sind eingebaut, nicht nur
+kommentiert: **ein Aufruf pro Sekunde** dienstweit (ein Schloss über alle
+Agenten — es hilft nichts, wenn jeder für sich höflich ist), **ehrlicher
+User-Agent** aus den Einstellungen, **keine systematischen Abfragen** (immer
+genau eine Umgebung zu einer Frage eines Menschen, nie ein Raster, nie eine
+Liste aller Postleitzahlen), harte Grenzen bei Umkreis (max. 15 km), Trefferzahl
+(30) und Zeit. Antwortet die Karte nicht, ist das kein Fehler, sondern ein
+leeres Ergebnis mit Begründung — die Antwort entsteht dann eben aus dem Web.
+
+**Die Technik der Spurensuche.** Jeder Agent bekommt sie im Auftrag mit, und es
+gibt eine eigene Rolle dafür („Spurensuche"), die der Master oder die
+Wortwahl der Teilfrage auslöst:
+
+* Suchoperatoren: der genaue Name in Anführungszeichen, `filetype:pdf` für
+  Aushänge, Programme, Satzungen und Amtsblätter, `site:` für eine bestimmte
+  Seite oder Endung.
+* Verzeichnisse, die die Website nennen, die sonst nirgends auftaucht: Das
+  Örtliche, Gelbe Seiten, 11880, meinestadt.de, Branchenbücher, das
+  Vereinsregister, die Seite der Gemeinde, der Kreis, die Innung.
+* Andere Worte: Ortsteil statt Stadt, Umgangssprache statt Fachwort, die alte
+  Bezeichnung, Englisch statt Deutsch.
+* Der Umweg über eine Nachbarseite: Impressum, Partner, Mitglieder, Presse.
+
+**Der Master lässt nicht locker.** Kommt ein Agent mit leeren Händen zurück,
+ist das im Pro-Modus kein Ende, sondern ein Nachauftrag mit anderer Technik
+(siehe oben).
 
 ## Ortsfilter
 
@@ -1557,7 +1626,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `CORTEX_LOCATION` | Standard-Ortsfilter | — |
 | `CORTEX_LANG` / `CORTEX_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
 | `CORTEX_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
-| `CORTEX_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus) | `12` |
+| `CORTEX_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus; im Pro-Modus bis 44) | `12` |
 | `CORTEX_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
 | `CORTEX_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
 | `CORTEX_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
@@ -1784,7 +1853,9 @@ cortex/
   usage.py       # der Token-Zähler (drei Zeichen sind ein Token)
   memory.py      # der verschlüsselte Speicher
   google.py      # Gmail und Kalender, lesend und (auf Wunsch) ändernd
-  subagents.py   # parallele Rechercheaufträge
+  subagents.py   # parallele Rechercheaufträge samt Rollen und Prüfern
+  master.py      # der Master: beauftragt, bewertet, schickt nach (Pro-Modus)
+  places.py      # die Karte: kleine Läden, die keine Suchmaschine kennt
   local_model.py # lokale Modelle per Ollama einrichten
   cache.py       # SQLite-Cache und Verlauf
   config.py      # Settings aus .env
@@ -1811,8 +1882,9 @@ python tools/rundgang.py --nur chat,einstellungen   # nur einzelne Abschnitte
 ```
 
 **Der Rundgang** unter `tools/rundgang.py` bedient die Weboberfläche wie ein Mensch:
-Frage stellen, abbrechen, zwischen Normal, Pro und Code wechseln, Denken und
-Gegenprüfen umlegen, Rückfrage
+Frage stellen, abbrechen, zwischen Normal, Pro und Code wechseln, den Master beim
+Nachschicken zusehen, `/max` tippen, mitten im Lauf die Seite neu laden und sich wieder
+anhängen, Denken und Gegenprüfen umlegen, Rückfrage
 beantworten, Chat umbenennen und löschen, jeden Abschnitt der Einstellungen anspringen,
 jeden Prüfknopf drücken, jedes Farbschema in Hell und Dunkel durchklicken, eine Datei
 anhängen, Slash-Befehle tippen — dazu dasselbe noch einmal auf einem Handy-Schirm und

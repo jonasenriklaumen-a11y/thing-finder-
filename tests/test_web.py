@@ -3169,7 +3169,7 @@ def test_the_roles_are_named_the_same_on_both_sides() -> None:
 
     html = web.UI_FILE.read_text(encoding="utf-8")
     zeile = html[html.index("const ROLLEN =") :]
-    zeile = zeile[: zeile.index("\n")]
+    zeile = zeile[: zeile.index("};")]
     for name, label in ROLE_LABELS.items():
         if not label:
             continue
@@ -3178,5 +3178,110 @@ def test_the_roles_are_named_the_same_on_both_sides() -> None:
 
 def test_the_header_says_when_four_are_checking() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'if (recheck || effort === "high") bits.push("4 Prüfer");' in html
+    assert 'if (recheck) bits.push("4 Prüfer");' in html
     assert 'else if (recheck) bits.push("gegenprüfen");' in html
+
+
+# ---------------------------------------------------------------------------
+# Der Lauf gehoert dem Server -- nicht der Verbindung
+# ---------------------------------------------------------------------------
+def test_a_run_survives_a_lost_connection(client, session: web.ChatSession) -> None:
+    """Wer die Seite verlässt, soll nicht neu fragen müssen."""
+    lauf = web.RUNS.start("Was kostet ein Lastenrad?")
+    lauf.add({"type": "chunk", "text": "Ein Teil der Antwort"})
+
+    _, roh = client("GET", "/api/runstate")
+    zustand = json.loads(roh)
+    assert zustand["running"] is True
+    assert zustand["resume"] is True
+    assert zustand["question"] == "Was kostet ein Lastenrad?"
+    assert zustand["events"] == 1
+
+    lauf.add({"type": "done"})
+    lauf.finish()
+    # Fertig, aber niemand hat es zu Ende gesehen: es bleibt abzuholen.
+    _, roh = client("GET", "/api/runstate")
+    zustand = json.loads(roh)
+    assert zustand["running"] is False and zustand["resume"] is True
+
+
+def test_reattaching_replays_everything(client, session: web.ChatSession) -> None:
+    lauf = web.RUNS.start("Frage")
+    lauf.add({"type": "chunk", "text": "Hallo"})
+    lauf.add({"type": "chunk", "text": " Welt"})
+    lauf.add({"type": "done"})
+    lauf.finish()
+
+    _, roh = client("GET", "/api/run?since=0")
+    strom = roh.decode()
+    assert "Hallo" in strom and "Welt" in strom
+    # Und wer es bis zum Schluss gesehen hat, bekommt es nicht noch einmal
+    # vorgesetzt.
+    _, zustand = client("GET", "/api/runstate")
+    assert json.loads(zustand)["resume"] is False
+
+
+def test_reattaching_can_skip_what_was_already_seen(
+    client, session: web.ChatSession
+) -> None:
+    lauf = web.RUNS.start("Frage")
+    lauf.add({"type": "chunk", "text": "alt"})
+    lauf.add({"type": "chunk", "text": "neu"})
+    lauf.finish()
+
+    _, roh = client("GET", "/api/run?since=1")
+    strom = roh.decode()
+    assert "neu" in strom and "alt" not in strom
+
+
+def test_without_a_run_there_is_nothing_to_resume(client, session: web.ChatSession) -> None:
+    web.RUNS.current = None
+    _, zustand = client("GET", "/api/runstate")
+    assert json.loads(zustand) == {"running": False, "resume": False}
+    status, _ = client("GET", "/api/run")
+    assert status == 404
+
+
+def test_a_run_does_not_grow_without_end() -> None:
+    """Eine lange Recherche kommt auf ein paar tausend Ereignisse. Die Grenze
+    ist gegen den Ausreisser, nicht gegen den Alltag."""
+    lauf = web.Run("x", "Frage")
+    for _ in range(web.MAX_RUN_EVENTS + 500):
+        lauf.add({"type": "chunk", "text": "x"})
+    assert len(lauf.events) == web.MAX_RUN_EVENTS
+
+
+def test_the_chat_answer_lands_in_the_run(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    client("POST", "/api/chat", {"message": "Frage"})
+    lauf = web.RUNS.latest()
+    assert lauf is not None
+    assert lauf.question == "Frage"
+    assert lauf.done is True
+    assert any(event.get("type") == "chunk" for event in lauf.events)
+
+
+def test_the_page_picks_a_run_back_up() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "async function wiederAufnehmen()" in html
+    assert 'api("/api/runstate")' in html
+    assert 'api("/api/run?since=0"' in html
+    assert "wiederAufnehmen();" in html, "beim Laden wird nachgesehen"
+    assert "[Weiter]" in html, "und es steht dran, dass weitergelaufen wurde"
+
+
+def test_max_with_a_question_goes_through_the_research_path(
+    client, session: web.ChatSession
+) -> None:
+    """"/max Frage" ist eine Recherche und gehört auf den Weg mit der
+    Live-Anzeige. "/max" allein ist eine Frage danach, was der Befehl tut."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert r"/^\/max\s+\S/i.test(eingabe)" in html
+    assert r"/^\/image\b/i.test(eingabe)" in html
+
+    _, roh = client("POST", "/api/command", {"line": "/max"})
+    antwort = json.loads(roh)
+    assert antwort["ok"] is True
+    assert "volle Mannschaft" in antwort["text"]
+    assert "Pro-Modus" in antwort["text"]

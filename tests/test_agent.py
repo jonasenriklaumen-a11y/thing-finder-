@@ -129,6 +129,7 @@ def test_tools_are_offered_to_the_llm(
         "web_search",
         "fetch_page",
         "search_news",
+        "local_places",
         "calculate",
         "recall_memory",
         "save_memory",
@@ -154,6 +155,7 @@ def test_subagents_can_be_switched_off(
         "web_search",
         "fetch_page",
         "search_news",
+        "local_places",
         "calculate",
         "change_setting",
     ]
@@ -548,14 +550,15 @@ def test_every_question_is_split_automatically(
     seen: list[list[str]] = []
     monkeypatch.setattr(
         "cortex.agent.Agent._run_subagents",
-        lambda self, tasks: seen.append(tasks) or [{"task": t, "summary": "ok"} for t in tasks],
+        lambda self, tasks: seen.append(tasks)
+        or [{"task": getattr(t, "text", t), "summary": "ok"} for t in tasks],
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
     result = agent.ask("Zusammengesetzte Frage", stream=False)
 
     # Die Teilfragen des Planers stehen vorn -- der Rest wird auf die Zahl der
     # Agenten aufgefuellt, damit nicht zwoelf Agenten zu zweit suchen.
-    assert seen[0][:2] == ["Teil A", "Teil B"]
+    assert [task.text for task in seen[0][:2]] == ["Teil A", "Teil B"]
     assert len(seen[0]) == settings.max_subagents
     assert result.answer == "Endantwort"
     # Die Vorrecherche steht dem Hauptagenten zur Verfuegung -- als Text,
@@ -1032,10 +1035,11 @@ def test_one_call_covers_triage_and_planning(
     seen: list[list[str]] = []
     monkeypatch.setattr(
         "cortex.agent.Agent._run_subagents",
-        lambda self, tasks: seen.append(tasks) or [{"task": t, "summary": "ok"} for t in tasks],
+        lambda self, tasks: seen.append(tasks)
+        or [{"task": getattr(t, "text", t), "summary": "ok"} for t in tasks],
     )
     Agent(settings, cache=None, toolbox=toolbox).ask("Zusammengesetzte Frage", stream=False)
-    assert seen[0][:2] == ["Teil A", "Teil B"]
+    assert [task.text for task in seen[0][:2]] == ["Teil A", "Teil B"]
     assert len(seen[0]) == settings.max_subagents
     assert planner_calls["n"] == 1, "kein zweiter Planungsaufruf"
 
@@ -2858,7 +2862,7 @@ def test_the_pro_mode_may_send_more_agents(settings: Settings, toolbox: Toolbox)
     assert agent.agent_limit == 12
 
     agent._apply_mode("pro")
-    assert agent.agent_limit == PRO_SUBAGENTS >= 24
+    assert agent.agent_limit == PRO_SUBAGENTS == 44
 
     agent._apply_mode("code")
     assert agent.agent_limit == 12
@@ -2866,10 +2870,10 @@ def test_the_pro_mode_may_send_more_agents(settings: Settings, toolbox: Toolbox)
 
 def test_a_high_setting_survives_the_pro_mode(settings: Settings, toolbox: Toolbox) -> None:
     """Wer selbst mehr eingestellt hat, verliert sie im Pro-Modus nicht."""
-    settings.max_subagents = 40
+    settings.max_subagents = 60
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent._apply_mode("pro")
-    assert agent.agent_limit == 40
+    assert agent.agent_limit == 60
 
 
 def test_switched_off_agents_stay_off_in_the_pro_mode(
@@ -2910,7 +2914,7 @@ def test_the_agents_are_counted_in_the_prompt(settings: Settings, toolbox: Toolb
 
     agent._apply_mode("pro")
     prompt = agent.messages[0]["content"]
-    assert "24 Rechercheassistenten" in prompt, "im Pro-Modus sind es alle 24"
+    assert "44 Rechercheassistenten" in prompt, "im Pro-Modus ist das Feld gross"
     assert "Pro-Modus" in prompt
     assert "breit gesucht" in prompt
 
@@ -2934,8 +2938,8 @@ def test_the_pro_mode_writes_like_the_standard_mode(
     assert zusatz in pro
     # Der Rest unterscheidet sich nur in der Zahl der Assistenten: zwoelf im
     # Standardmodus, vierundzwanzig hier.
-    ohne = pro.replace(zusatz, "", 1).replace("24 Rechercheassistenten", "12 Rechercheassistenten")
-    assert ohne.replace("auf 24, ohne", "auf 12, ohne") == normal
+    ohne = pro.replace(zusatz, "", 1).replace("44 Rechercheassistenten", "12 Rechercheassistenten")
+    assert ohne.replace("auf 44, ohne", "auf 12, ohne") == normal
 
 
 def test_without_structuring_the_pro_mode_promises_no_agents(
@@ -2976,7 +2980,7 @@ def test_the_pro_mode_arrives_at_the_agents(
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent._apply_mode("pro")
     agent._run_subagents(["a", "b"])
-    assert gesehen["limit"] == 24
+    assert gesehen["limit"] == 44
     assert gesehen["parallel"] >= 2
 
 
@@ -2995,11 +2999,12 @@ def test_the_checkers_need_a_reason(settings: Settings, toolbox: Toolbox) -> Non
     assert agent.checkers_on is True and agent.checker_count == PRO_CHECKERS
 
     agent.recheck = False
-    assert agent.checkers_on is False, "ohne Schalter und ohne hohe Denktiefe: nein"
+    assert agent.checkers_on is False, "ohne den Schalter: nein"
 
     agent.effort = "high"
-    assert agent.checkers_on is True, "wer High waehlt, will Gruendlichkeit"
+    assert agent.checkers_on is False, "die Denktiefe schaltet sie nicht ein"
 
+    agent.recheck = True
     agent._apply_mode("normal")
     assert agent.checkers_on is False, "die Pruefer gehoeren zum Pro-Modus"
 
@@ -3027,22 +3032,20 @@ def test_without_agents_there_is_nothing_to_check(
     assert agent.checkers_on is False
 
 
-def test_at_high_effort_the_checkers_search_along(settings: Settings, toolbox: Toolbox) -> None:
-    """Sie sind ohnehin da -- und wer High waehlt, will Breite."""
-    from cortex.agent import PRO_CHECKERS, PRO_SUBAGENTS
+def test_the_thinking_depth_does_not_hire_anybody(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Die Denktiefe sagt, wie lange das Modell ueberlegt -- nicht, wie viele
+    Agenten losziehen. Das entscheidet der Master."""
+    from cortex.agent import PRO_SUBAGENTS
 
     settings.max_subagents = 12
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent._apply_mode("pro")
-    agent.effort = "high"
-    assert agent.agent_limit == PRO_SUBAGENTS + PRO_CHECKERS == 28
-
-    # Beim Schalter *Gegenpruefen* bleiben sie beim Pruefen: danach wurde
-    # gefragt, nicht nach mehr Breite.
-    agent.effort = "medium"
-    agent.recheck = True
-    assert agent.checkers_on is True
-    assert agent.agent_limit == PRO_SUBAGENTS
+    for tiefe in ("low", "medium", "high"):
+        agent.effort = tiefe
+        assert agent.agent_limit == PRO_SUBAGENTS
+        assert agent.checkers_on is False
 
 
 def test_the_pro_mode_gives_every_agent_more_budget(
@@ -3082,7 +3085,7 @@ def test_the_checkers_reach_the_agents(
     agent._run_subagents(["a", "b"])
     assert gesehen["checkers"] == 4
     assert gesehen["budget"] == 8
-    assert gesehen["limit"] == 24
+    assert gesehen["limit"] == 44
 
 
 def test_a_check_note_lands_next_to_its_finding() -> None:
@@ -3119,3 +3122,214 @@ def test_the_pro_prompt_says_what_a_check_note_means(
     assert "Pruefvermerk" in prompt
     assert "BEIDE Angaben" in prompt, "bei einer Abweichung wird nicht gewaehlt"
     assert "einer einzigen Quelle" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Der Master im Pro-Modus
+# ---------------------------------------------------------------------------
+def _master_llm(monkeypatch: pytest.MonkeyPatch, plan: Any, review: Any, answer: str = "Fertig"):
+    """Stellt Master (JSON), Agenten und Hauptmodell in einem."""
+    import json as _json
+
+    runden = {"review": 0}
+
+    def completion(**kwargs: Any):
+        text = str(kwargs.get("messages", [{}])[0].get("content", ""))
+        if "response_format" in kwargs and "Du leitest eine Rechercheeinheit" in text:
+            if "Rueckmeldungen:" in text:
+                runden["review"] += 1
+                daten = review[min(runden["review"] - 1, len(review) - 1)]
+            else:
+                daten = plan
+            return _message(content=_json.dumps(daten, ensure_ascii=False))
+        if "response_format" in kwargs:  # die kleine Vorpruefung
+            return _message(content='{"recherche": true, "teilfragen": ["Teil"]}')
+        return _message(content=answer)
+
+    monkeypatch.setattr("litellm.completion", completion)
+    return runden
+
+
+def test_the_master_hands_out_the_assignments(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    _master_llm(
+        monkeypatch,
+        {
+            "plan": "Zwei Felder.",
+            "agenten": [
+                {"auftrag": "Cafés in Bremen", "rolle": "sucht Betreiberseiten"},
+                {"auftrag": "Preise in Bremen", "rolle": "achtet auf Zahlen", "schwer": True},
+            ],
+        },
+        [{"urteil": "gut"}],
+    )
+    gesehen: list[Any] = []
+    monkeypatch.setattr(
+        "cortex.agent.Agent._run_subagents",
+        lambda self, tasks: gesehen.append(list(tasks))
+        or [{"task": t.text, "summary": "gefunden", "sources": ["https://a.de"]} for t in tasks],
+    )
+    ereignisse: list[tuple[str, dict[str, Any]]] = []
+    agent = Agent(
+        settings, cache=None, toolbox=toolbox, on_event=lambda n, p: ereignisse.append((n, p))
+    )
+    agent.ask("Wo arbeiten in Bremen?", stream=False, mode="pro", structured=True)
+
+    assert [task.text for task in gesehen[0]] == ["Cafés in Bremen", "Preise in Bremen"]
+    assert gesehen[0][0].angle == "sucht Betreiberseiten"
+    assert gesehen[0][1].strong is True
+    plan = dict(next(payload for name, payload in ereignisse if name == "master_plan"))
+    assert plan["agents"] == 2 and plan["strong"] == 1
+    assert plan["plan"] == "Zwei Felder."
+
+
+def test_thin_results_are_sent_back_out(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Der eigentliche Punkt des Masters: was nichts hergab, geht noch einmal
+    los -- und der Nutzer sieht es."""
+    settings.subagents_auto = True
+    _master_llm(
+        monkeypatch,
+        {"plan": "", "agenten": [{"auftrag": "Teil A", "rolle": "r"}]},
+        [
+            {
+                "urteil": "luecken",
+                "fehlt": ["Die Öffnungszeiten fehlen"],
+                "nachrunde": [{"auftrag": "Öffnungszeiten über die Karte", "rolle": "Spuren"}],
+            },
+            {"urteil": "gut"},
+        ],
+    )
+    runden: list[list[str]] = []
+    monkeypatch.setattr(
+        "cortex.agent.Agent._run_subagents",
+        lambda self, tasks: runden.append([t.text for t in tasks])
+        or [{"task": t.text, "summary": "etwas", "sources": ["https://a.de"]} for t in tasks],
+    )
+    ereignisse: list[tuple[str, dict[str, Any]]] = []
+    agent = Agent(
+        settings, cache=None, toolbox=toolbox, on_event=lambda n, p: ereignisse.append((n, p))
+    )
+    agent.ask("Frage", stream=False, mode="pro", structured=True)
+
+    assert runden == [["Teil A"], ["Öffnungszeiten über die Karte"]]
+    namen = [name for name, _ in ereignisse]
+    assert "master_review" in namen and "master_retry" in namen
+    nachricht = next(payload for name, payload in ereignisse if name == "master_retry")
+    assert nachricht["missing"] == ["Die Öffnungszeiten fehlen"]
+    assert nachricht["round"] == 1
+
+
+def test_a_good_first_round_is_not_repeated(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.subagents_auto = True
+    _master_llm(
+        monkeypatch,
+        {"plan": "", "agenten": [{"auftrag": "Teil A", "rolle": "r"}]},
+        [{"urteil": "gut"}],
+    )
+    runden: list[Any] = []
+    monkeypatch.setattr(
+        "cortex.agent.Agent._run_subagents",
+        lambda self, tasks: runden.append(tasks)
+        or [{"task": t.text, "summary": "viel", "sources": ["https://a.de"]} for t in tasks],
+    )
+    Agent(settings, cache=None, toolbox=toolbox).ask(
+        "Frage", stream=False, mode="pro", structured=True
+    )
+    assert len(runden) == 1, "ohne Lücken keine Nachrunde"
+
+
+def test_a_failing_master_falls_back_to_the_small_planner(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ohne Master ist eine Recherche immer noch besser als keine."""
+    settings.subagents_auto = True
+
+    def completion(**kwargs: Any):
+        text = str(kwargs.get("messages", [{}])[0].get("content", ""))
+        if "Du leitest eine Rechercheeinheit" in text:
+            raise RuntimeError("Master weg")
+        if "response_format" in kwargs:
+            return _message(content='{"recherche": true, "teilfragen": ["Teil A", "Teil B"]}')
+        return _message(content="Antwort")
+
+    monkeypatch.setattr("litellm.completion", completion)
+    gesehen: list[Any] = []
+    monkeypatch.setattr(
+        "cortex.agent.Agent._run_subagents",
+        lambda self, tasks: gesehen.append(list(tasks))
+        or [{"task": t.text, "summary": "ok"} for t in tasks],
+    )
+    ereignisse: list[tuple[str, dict[str, Any]]] = []
+    agent = Agent(
+        settings, cache=None, toolbox=toolbox, on_event=lambda n, p: ereignisse.append((n, p))
+    )
+    result = agent.ask("Frage", stream=False, mode="pro", structured=True)
+
+    assert result.answer == "Antwort"
+    assert [task.text for task in gesehen[0][:2]] == ["Teil A", "Teil B"]
+    plan = next(payload for name, payload in ereignisse if name == "master_plan")
+    assert plan["fallback"] is True
+
+
+def test_max_fills_the_crew_and_only_in_the_pro_mode(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    from cortex.agent import strip_max
+
+    assert strip_max("/max Was kostet das?") == ("Was kostet das?", True)
+    assert strip_max("/MAX  Frage") == ("Frage", True)
+    assert strip_max("/max") == ("", True)
+    assert strip_max("maximale Größe?") == ("maximale Größe?", False)
+    assert strip_max("Was ist /max?") == ("Was ist /max?", False)
+
+    settings.subagents_auto = True
+    _master_llm(
+        monkeypatch,
+        {"plan": "", "agenten": [{"auftrag": "Teil A", "rolle": "r"}]},
+        [{"urteil": "gut"}],
+    )
+    gesehen: list[Any] = []
+    monkeypatch.setattr(
+        "cortex.agent.Agent._run_subagents",
+        lambda self, tasks: gesehen.append(list(tasks))
+        or [{"task": t.text, "summary": "ok"} for t in tasks],
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("/max Frage", stream=False, mode="pro", structured=True)
+    # Der Master gab einen Auftrag her -- /max füllt auf die volle Zahl auf.
+    assert len(gesehen[0]) == agent.agent_limit == 44
+    assert gesehen[0][0].text == "Teil A"
+
+    # Im Standardmodus gibt es nichts zu erzwingen: der Befehl wird
+    # abgetrennt, die Frage läuft normal.
+    agent.max_run = False
+    agent.ask("/max Frage", stream=False, mode="normal", structured=False)
+    assert agent.max_run is False
+
+
+def test_the_strong_model_reaches_the_agents(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    gesehen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        "cortex.subagents.run_subagents",
+        lambda tasks, s, **kwargs: gesehen.update(kwargs) or [],
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    assert agent.strong_count == 2
+    agent._run_subagents(["a"])
+    assert gesehen["strong_model"] == "anthropic/claude-opus-5"
+
+    # Ohne starkes Modell gibt es auch keine starken Agenten.
+    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "")
+    agent._code_model = None
+    assert agent.strong_count == 0

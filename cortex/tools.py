@@ -164,6 +164,43 @@ NEWS_SCHEMA: dict[str, Any] = {
     },
 }
 
+PLACES_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "local_places",
+        "description": (
+            "Sucht in der KARTE (OpenStreetMap) statt in einer Suchmaschine: kleine "
+            "Laeden, Werkstaetten, Praxen, Vereine, Spielplaetze -- mit Adresse, "
+            "Website, Telefon und Oeffnungszeiten. Nimm das immer dann, wenn es um "
+            "etwas Oertliches geht und die Websuche nur Portale und Verzeichnisse "
+            "ausspuckt: wer keine Website hat oder nichts fuer Suchmaschinen tut, "
+            "steht trotzdem in der Karte -- eingetragen von Leuten vor Ort. Die "
+            "gefundenen Websites kannst du danach mit `fetch_page` lesen."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "what": {
+                    "type": "string",
+                    "description": (
+                        "Was gesucht wird: 'Cafe', 'Fahrradladen', 'Schreiner', "
+                        "'Spielplatz' -- oder ein Name, wenn du einen suchst."
+                    ),
+                },
+                "where": {
+                    "type": "string",
+                    "description": "Der Ort. Leer lassen heisst: der eingestellte Ortsfilter.",
+                },
+                "radius_km": {
+                    "type": "number",
+                    "description": "Umkreis in Kilometern (0,2 bis 15). Standard 4.",
+                },
+            },
+            "required": ["what"],
+        },
+    },
+}
+
 CALC_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
@@ -811,7 +848,7 @@ SETTING_SCHEMA: dict[str, Any] = {
 }
 
 
-TOOL_SCHEMAS.extend([NEWS_SCHEMA, CALC_SCHEMA])
+TOOL_SCHEMAS.extend([NEWS_SCHEMA, PLACES_SCHEMA, CALC_SCHEMA])
 
 
 @dataclass
@@ -1704,6 +1741,16 @@ class Toolbox:
             return self.search_news(
                 query=str(arguments.get("query", "")), count=int(arguments.get("count") or 0)
             )
+        if name == "local_places":
+            try:
+                radius = float(arguments.get("radius_km") or 0)
+            except (TypeError, ValueError):
+                radius = 0.0
+            return self.local_places(
+                what=str(arguments.get("what", "")),
+                where=str(arguments.get("where") or ""),
+                radius_km=radius,
+            )
         if name == "vm_run":
             return self.vm_run(
                 command=str(arguments.get("command", "")),
@@ -1872,7 +1919,78 @@ class Toolbox:
         self._emit("search_done", query=query, hits=len(results))
         return {"query": query, "results": [result.as_tool_dict() for result in results]}
 
-    # -- Werkzeug 4: Rechner ----------------------------------------------
+    # -- Werkzeug 4: die Karte --------------------------------------------
+    def local_places(self, what: str, where: str = "", radius_km: float = 0.0) -> dict[str, Any]:
+        """Sucht Orte in OpenStreetMap statt in einer Suchmaschine.
+
+        Das haerteste Suchproblem ist die kleine Sache um die Ecke: der
+        Fahrradladen in der Nebenstrasse, die Werkstatt ohne Website. Eine
+        Suchmaschine kennt sie nicht oder erst auf Seite vier -- in der Karte
+        stehen sie, mit Adresse, Telefon und, wenn es eine gibt, der Website.
+
+        Faellt die Karte aus, ist das kein Abbruch: es kommt ein Ergebnis mit
+        Begruendung zurueck und die Antwort entsteht eben aus dem Web.
+        """
+        from cortex.places import DEFAULT_RADIUS_M, PlacesError, find_places
+
+        what = " ".join((what or "").split())
+        where = " ".join((where or "").split()) or (self.settings.location or "").strip()
+        if not what:
+            return {"results": [], "error": "Ohne Suchwort geht es nicht."}
+        if not where:
+            return {
+                "results": [],
+                "error": (
+                    "Kein Ort bekannt. Nenn einen Ort in `where` oder stell einen "
+                    "Ortsfilter ein -- ohne Ort gibt es keine Umgebung."
+                ),
+            }
+        radius_m = int(float(radius_km or 0) * 1000) or DEFAULT_RADIUS_M
+
+        key = cache_key("places", what.lower(), where.lower(), radius_m)
+        cached = self.cache.get(key) if self.cache else None
+        self._emit("places", what=what, where=where)
+        if cached is not None:
+            treffer = list(cached.get("results", [])) if isinstance(cached, dict) else []
+            self._emit("places_done", what=what, hits=len(treffer))
+            return dict(cached) if isinstance(cached, dict) else {"results": treffer}
+
+        try:
+            orte, ortsname = find_places(
+                what,
+                where,
+                self.settings.user_agent,
+                radius_m=radius_m,
+                timeout=max(15.0, self.settings.fetch_timeout),
+            )
+        except PlacesError as exc:
+            self._emit("error", message=str(exc))
+            return {"results": [], "error": str(exc)}
+
+        payload: dict[str, Any] = {
+            "what": what,
+            "place": ortsname,
+            "radius_km": round(radius_m / 1000, 1),
+            "results": [ort.as_dict() for ort in orte],
+        }
+        if not orte:
+            payload["note"] = (
+                "In der Karte steht dazu nichts im Umkreis. Ein groesserer Umkreis "
+                "oder ein anderes Suchwort kann helfen."
+            )
+        else:
+            payload["note"] = (
+                "Aus OpenStreetMap (Stand der Karte, nicht der Betreiber). Was eine "
+                "Website hat, kannst du mit `fetch_page` nachlesen; Oeffnungszeiten "
+                "gehoeren gegengeprueft, sie veralten in der Karte am schnellsten."
+            )
+        if self.cache:
+            # Die Karte aendert sich langsam -- ein Tag ist reichlich.
+            self.cache.set(key, payload, kind="places", label=f"{what} in {where}")
+        self._emit("places_done", what=what, hits=len(orte))
+        return payload
+
+    # -- Werkzeug 5: Rechner ----------------------------------------------
     def calculate(self, expression: str) -> dict[str, Any]:
         """Exakte Arithmetik -- damit das Modell nie selbst rechnen muss."""
         from cortex.calc import CalcError, calculate_pretty

@@ -55,6 +55,104 @@ DEFAULT_PORT = 8765
 #: Kurz genug, dass keine Zwischenstation die stille Leitung kappt.
 HEARTBEAT_SECONDS = 10.0
 
+#: Wie viele Ereignisse ein Lauf hoechstens aufhebt. Eine lange Recherche
+#: kommt auf ein paar tausend; die Grenze ist gegen den Ausreisser, nicht
+#: gegen den Alltag.
+MAX_RUN_EVENTS = 20_000
+
+#: So lange kann man einen fertigen Lauf noch abholen, den niemand zu Ende
+#: gesehen hat. Danach steht die Antwort ohnehin in den letzten Chats.
+RESUME_WINDOW = 15 * 60
+
+
+class Run:
+    """Ein laufender Turn -- auf dem Server, nicht im Browser.
+
+    Bisher lebte eine Anfrage in ihrer Verbindung: wer die Seite verliess,
+    das Handy sperrte oder in den Zug fuhr, riss die Leitung ab. Der Agent
+    arbeitete zwar weiter (der Faden laeuft), aber die Ereignisse gingen ins
+    Leere, und zurueck kam man vor einen leeren Chat -- die Frage musste neu
+    gestellt werden, samt aller Wartezeit noch einmal.
+
+    Jetzt schreibt der Turn in diesen Puffer, und die Verbindung liest nur
+    daraus. Reisst sie ab, laeuft der Lauf weiter; kommt jemand zurueck,
+    haengt er sich ab Ereignis 0 wieder an und sieht den ganzen Verlauf
+    nachwachsen, als waere er nie weg gewesen.
+    """
+
+    def __init__(self, run_id: str, question: str) -> None:
+        self.id = run_id
+        self.question = question
+        self.started = time.time()
+        self.finished = 0.0
+        self.events: list[dict[str, Any]] = []
+        self.done = False
+        #: Hat jemand den Lauf bis zum Schluss gesehen? Wenn nicht, ist er
+        #: beim naechsten Laden noch abzuholen.
+        self.delivered = False
+        self._cond = threading.Condition()
+
+    def add(self, event: dict[str, Any]) -> None:
+        with self._cond:
+            if len(self.events) < MAX_RUN_EVENTS:
+                self.events.append(event)
+            self._cond.notify_all()
+
+    def finish(self) -> None:
+        with self._cond:
+            self.done = True
+            self.finished = time.time()
+            self._cond.notify_all()
+
+    def read(self, since: int, timeout: float) -> tuple[list[dict[str, Any]], int, bool]:
+        """Wartet auf neue Ereignisse ab *since*.
+
+        Returns:
+            Die neuen Ereignisse, den neuen Stand und ob der Lauf fertig ist.
+        """
+        with self._cond:
+            if since >= len(self.events) and not self.done:
+                self._cond.wait(timeout)
+            return self.events[since:], len(self.events), self.done
+
+    @property
+    def resumable(self) -> bool:
+        """Lohnt es sich, diesen Lauf beim Laden wieder aufzunehmen?"""
+        if not self.done:
+            return True
+        return not self.delivered and (time.time() - self.finished) < RESUME_WINDOW
+
+    def state(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "question": self.question,
+            "events": len(self.events),
+            "running": not self.done,
+            "resume": self.resumable,
+            "seconds": round(time.time() - self.started, 1),
+        }
+
+
+class RunBook:
+    """Haelt den laufenden Turn. Es gibt immer nur einen -- die Sitzung
+    reicht die Anfragen ohnehin nacheinander durch."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.current: Run | None = None
+
+    def start(self, question: str) -> Run:
+        with self._lock:
+            self.current = Run(secrets.token_hex(8), question)
+            return self.current
+
+    def latest(self) -> Run | None:
+        with self._lock:
+            return self.current
+
+
+RUNS = RunBook()
+
 #: Alles, was sich auch in `cortex setup` einstellen laesst.
 SETTING_KEYS: tuple[str, ...] = (
     "CORTEX_MODEL",
@@ -184,6 +282,7 @@ HELP_MARKDOWN = """### Befehle
 
 - `/location <ort>` — Ortsfilter fuer diese Sitzung (leer = aufheben)
 - `/model <name>` — Modell wechseln, z. B. `openai/gpt-4o`
+- `/max <frage>` — im Pro-Modus mit voller Mannschaft recherchieren
 - `/image <pfad>` — Bild ansehen lassen und damit recherchieren (Datei oder Ordner)
 - `/export html|md|csv` — die letzten Recherchen speichern
 - `/history` — fruehere Recherchen
@@ -591,6 +690,22 @@ class ChatSession:
         with self._lock:
             if command == "help":
                 return {"text": HELP_MARKDOWN}
+
+            if command == "max":
+                # Allein getippt ist es keine Recherche, sondern eine Frage
+                # danach, was der Befehl tut. Mit Frage dahinter kommt er hier
+                # gar nicht erst an -- der laeuft ueber den Chat-Weg.
+                return {
+                    "text": (
+                        "**/max** stellt im **Pro-Modus** die volle Mannschaft auf: "
+                        "alle Agenten, die beiden starken dazu und -- wenn "
+                        "*Gegenprüfen* an ist -- die vier Prüfer.\n\n"
+                        "Schreib die Frage dahinter:\n\n"
+                        "`/max Welche Fahrradläden in Bremen reparieren Lastenräder?`\n\n"
+                        "Ohne den Befehl entscheidet der Master selbst, wie viele "
+                        "Agenten die Frage braucht."
+                    )
+                }
 
             if command == "location":
                 self.agent().set_location(argument)
@@ -1336,6 +1451,10 @@ class Handler(BaseHTTPRequestHandler):
                     "google": google_state(settings),
                 }
             )
+        elif route == "/api/run":
+            self._run_stream()
+        elif route == "/api/runstate":
+            self._run_state()
         elif route == "/api/chats":
             settings = SESSION.settings()
             cache = Cache(settings.db_path, settings.cache_ttl_hours)
@@ -1861,16 +1980,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
             # Nur Dateien, kein Text: das ist eine vollstaendige Bitte.
             message = "Sieh dir das Angehaengte an und sag mir, worum es geht."
 
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Accel-Buffering", "no")
-        # Ohne das puffert manch ein Zwischenstueck die Antwort und nichts
-        # kommt an, bevor alles fertig ist.
-        self.send_header("Connection", "close")
-        self.end_headers()
-
-        events: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        # Der Lauf gehoert ab hier dem Server, nicht der Verbindung. Reisst
+        # sie ab, laeuft er weiter und kann spaeter zu Ende gesehen werden.
+        lauf = RUNS.start(message)
         seen_done = threading.Event()
 
         def emit(name: str, payload: dict[str, Any]) -> None:
@@ -1880,7 +1992,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
             kind = "chunk" if name == "answer_chunk" else name
             if kind == "done":
                 seen_done.set()
-            events.put({"type": kind, **payload})
+            lauf.add({"type": kind, **payload})
 
         def run() -> None:
             try:
@@ -1896,39 +2008,70 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                     sandbox=sandbox,
                 )
             except Exception as exc:
-                events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+                lauf.add({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
             finally:
                 # Ohne ein "done" bliebe im Browser der blinkende Cursor
                 # stehen -- die Oberflaeche waere scheinbar haengen.
                 if not seen_done.is_set():
-                    events.put({"type": "done"})
-                events.put(None)
+                    lauf.add({"type": "done"})
+                lauf.finish()
 
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
+        self._stream_run(lauf, since=0)
+
+    def _run_stream(self) -> None:
+        """Haengt sich an den laufenden Turn -- oder sagt, dass es keinen gibt."""
+        lauf = RUNS.latest()
+        if lauf is None:
+            self._json({"error": "kein Lauf"}, 404)
+            return
+        roh = (parse_qs(urlsplit(self.path).query).get("since") or ["0"])[0]
+        try:
+            since = max(0, int(roh))
+        except (TypeError, ValueError):
+            since = 0
+        self._stream_run(lauf, since=since)
+
+    def _run_state(self) -> None:
+        """Was gerade laeuft -- fuer die Seite, die eben geladen wurde."""
+        lauf = RUNS.latest()
+        self._json(lauf.state() if lauf is not None else {"running": False, "resume": False})
+
+    def _stream_run(self, lauf: Run, since: int = 0) -> None:
+        """Schickt die Ereignisse eines Laufs als SSE, ab *since*."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        # Ohne das puffert manch ein Zwischenstueck die Antwort und nichts
+        # kommt an, bevor alles fertig ist.
+        self.send_header("Connection", "close")
+        self.end_headers()
 
         # Sofort ein Lebenszeichen: erst damit steht die Verbindung fuer den
         # Browser wirklich, und man sieht, dass etwas passiert.
         self._sse(": los\n\n")
 
+        stand = since
         while True:
-            try:
-                event = events.get(timeout=HEARTBEAT_SECONDS)
-            except queue.Empty:
-                # Ein Cloud-Modell schweigt zwischen zwei Schritten gern eine
-                # halbe Minute. Ohne ein Byte in der Leitung legt irgendwer in
-                # der Kette auf -- der Browser, das Handy-Funkmodul, ein Proxy
-                # -- und die Oberflaeche meldet "network error", obwohl die
-                # Recherche noch laeuft. Ein Doppelpunkt ist ein Kommentar im
-                # SSE-Format: er haelt die Leitung warm und wird nicht
-                # angezeigt.
-                if not self._sse(": warte\n\n"):
-                    break
-                continue
-            if event is None:
-                break
-            if not self._sse(f"data: {json.dumps(event, ensure_ascii=False)}\n\n"):
-                break
+            neue, stand, fertig = lauf.read(stand, HEARTBEAT_SECONDS)
+            for event in neue:
+                if not self._sse(f"data: {json.dumps(event, ensure_ascii=False)}\n\n"):
+                    return
+            if fertig and stand <= len(lauf.events):
+                # Bis zum Schluss gesehen -- der Lauf muss nicht noch einmal
+                # abgeholt werden.
+                lauf.delivered = True
+                return
+            # Ein Cloud-Modell schweigt zwischen zwei Schritten gern eine
+            # halbe Minute. Ohne ein Byte in der Leitung legt irgendwer in der
+            # Kette auf -- der Browser, das Handy-Funkmodul, ein Proxy -- und
+            # die Oberflaeche meldet "network error", obwohl die Recherche
+            # noch laeuft. Ein Doppelpunkt ist ein Kommentar im SSE-Format: er
+            # haelt die Leitung warm und wird nicht angezeigt.
+            if not neue and not self._sse(": warte\n\n"):
+                return
 
 
 def _route_to(target: str) -> str:

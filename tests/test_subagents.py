@@ -802,13 +802,12 @@ def test_the_tasks_are_filled_up_to_the_number_of_agents() -> None:
         ["Cafés mit WLAN Bremen Mitte", "Cafés mit Steckdosen Bremen"],
         12,
     )
-    assert len(aufgefuellt) == 12
-    assert aufgefuellt[:2] == ["Cafés mit WLAN Bremen Mitte", "Cafés mit Steckdosen Bremen"]
-    assert len(set(aufgefuellt)) == 12, "keine zwei gleichen Aufträge"
+    texte = [task.text for task in aufgefuellt]
+    assert len(texte) == 12
+    assert texte[:2] == ["Cafés mit WLAN Bremen Mitte", "Cafés mit Steckdosen Bremen"]
+    assert len(set(texte)) == 12, "keine zwei gleichen Aufträge"
     # Die Blickwinkel sind so gewählt, dass die Rollen von selbst passen.
-    from cortex.subagents import role_for
-
-    rollen = {role_for(task) for task in aufgefuellt}
+    rollen = {task.role for task in aufgefuellt}
     assert {"zahlen", "gegenstimmen", "frisch"} <= rollen
 
 
@@ -822,7 +821,7 @@ def test_nothing_is_invented_out_of_nothing() -> None:
     from cortex.subagents import spread_tasks
 
     assert spread_tasks("", [], 12) == []
-    assert spread_tasks("", ["Teil A"], 12) == ["Teil A"]
+    assert [task.text for task in spread_tasks("", ["Teil A"], 12)] == ["Teil A"]
 
 
 def test_the_planner_is_asked_for_the_full_number(

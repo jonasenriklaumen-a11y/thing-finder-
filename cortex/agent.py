@@ -67,6 +67,12 @@ kannst du zwei weitere Formulierungen derselben Frage mitgeben; alle laufen zusa
 und die Treffer werden gemischt. Das kostet nur EINEN Werkzeugaufruf.
 - `fetch_page(url)` -- laedt eine Seite (auch PDFs) und gibt den lesbaren Text zurueck.
 - `search_news(query, count)` -- Nachrichten mit Datum, fuer alles Aktuelle.
+- `local_places(what, where, radius_km)` -- sucht in der KARTE (OpenStreetMap) \
+statt in einer Suchmaschine: kleine Laeden, Werkstaetten, Praxen, Vereine, mit \
+Adresse, Telefon, Oeffnungszeiten und Website. Nimm es bei allem Oertlichen, und \
+besonders dann, wenn die Websuche nur Portale ausspuckt -- wer nichts fuer \
+Suchmaschinen tut, steht trotzdem in der Karte. Die gefundene Website liest du \
+danach mit `fetch_page`.
 - `calculate(expression)` -- exakte Arithmetik. Rechne nie selbst im Kopf.
 - `remember(text)` -- Notiz auf den dauerhaften Merkzettel, NUR auf ausdrueckliche \
 Bitte des Nutzers.
@@ -123,7 +129,7 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 
 #: Die Werkzeuge, die hinaus ins Web gehen. Sie fallen weg, wenn jemand das
 #: Suchen abschaltet.
-WEB_TOOLS = frozenset({"web_search", "fetch_page", "search_news"})
+WEB_TOOLS = frozenset({"web_search", "fetch_page", "search_news", "local_places"})
 
 #: Die drei Arbeitsweisen. "normal" fuehrt ein Gespraech, "code" schreibt
 #: Code, "pro" ist der Normalmodus mit voller Leistung: staerkstes Modell,
@@ -133,14 +139,41 @@ WEB_TOOLS = frozenset({"web_search", "fetch_page", "search_news"})
 MODES = ("normal", "code", "pro")
 
 #: Die Obergrenze fuer Agenten im Pro-Modus. Zwoelf sind der Alltag; hier
-#: darf die Frage so breit werden, wie sie ist.
-PRO_SUBAGENTS = 24
+#: darf die Frage so breit werden, wie sie ist. Wie viele davon wirklich
+#: losziehen, entscheidet der Master an der Frage -- ausser bei `/max`.
+PRO_SUBAGENTS = 44
+
+#: Zwei Agenten laufen auf dem starken Modell, mit groesserem Budget. Sie
+#: bekommen vom Master das, was am schwersten zu finden ist -- nicht das
+#: Wichtigste: fuer das Wichtigste reicht ein gewoehnlicher Agent, fuer den
+#: Laden ohne Website nicht.
+PRO_STRONG = 2
 
 #: Die Pruefer im Pro-Modus. Sie recherchieren nicht, sie kontrollieren: jedes
 #: fertige Ergebnis wird auf ANDEREN Seiten gegengelesen -- und zwar waehrend
 #: die anderen noch suchen, nicht danach. Deshalb kostet die Gegenprobe hier
-#: kaum Wartezeit, waehrend sie im Standardmodus die Zeit verdoppelt.
+#: kaum Wartezeit, waehrend sie im Standardmodus die Zeit verdoppelt. Sie
+#: laufen nur, wenn *Gegenpruefen* eingeschaltet ist.
 PRO_CHECKERS = 4
+
+#: Der Befehl fuer die volle Mannschaft. Ohne ihn entscheidet der Master, wie
+#: viele Agenten die Frage braucht -- mit ihm sind es alle.
+MAX_COMMAND = "/max"
+
+
+def strip_max(question: str) -> tuple[str, bool]:
+    """Trennt ein fuehrendes `/max` von der Frage ab.
+
+    Returns:
+        Die Frage ohne den Befehl und ob er dastand.
+    """
+    text = (question or "").strip()
+    unten = text.lower()
+    if unten == MAX_COMMAND:
+        return "", True
+    if unten.startswith(MAX_COMMAND + " ") or unten.startswith(MAX_COMMAND + "\n"):
+        return text[len(MAX_COMMAND) :].strip(), True
+    return question, False
 
 #: Werkzeug-Budget je Agent im Pro-Modus. Sechs Aufrufe reichen fuer eine
 #: Suche und drei gelesene Seiten; mit acht bleibt Luft, einer Quelle noch
@@ -300,9 +333,17 @@ suchen, was dort schon steht.
 PRO_PROMPT = """
 
 Pro-Modus. Du laeufst auf dem staerksten Modell, das hier erreichbar ist, und hast \
-das grosse Feld von %(agents)d Assistenten. Nutz es aus: hier wird breit gesucht, \
-nicht sparsam. Wer den Pro-Modus waehlt, hat sich fuer Gruendlichkeit \
-entschieden und nimmt die Wartezeit in Kauf.
+das grosse Feld von bis zu %(agents)d Assistenten. Hier wird breit gesucht, nicht \
+sparsam: wer den Pro-Modus waehlt, hat sich fuer Gruendlichkeit entschieden und \
+nimmt die Wartezeit in Kauf.
+
+Die Recherche unten hat ein Master geleitet: er hat die Auftraege vergeben, \
+jedem Agenten seine eigene Rolle gegeben, die Rueckmeldungen gelesen und, wo \
+etwas fehlte, nachgeschickt. Zwei der Agenten arbeiten auf dem starken Modell \
+und sitzen an dem, was am schwersten zu finden ist. Was unten steht, ist also \
+schon einmal geprueft worden -- schreib daraus die Antwort, statt noch einmal \
+von vorn zu suchen. Fehlt trotzdem etwas, sag es im Abschnitt "Nicht gefunden" \
+und schreib dazu, wo gesucht wurde.
 
 Manche Rueckmeldungen tragen einen Pruefvermerk: ein Kollege hat sie auf anderen \
 Seiten gegengelesen. "BESTAETIGT" heisst, du kannst die Angabe verwenden. \
@@ -870,6 +911,10 @@ class Agent:
         #: Gibt es ueberhaupt Agenten? Steht vor dem Werkzeugkasten, weil der
         #: Systemtext es wissen muss -- und der wird gleich darunter gebaut.
         self.use_subagents = settings.max_subagents > 0
+        #: Hat der Nutzer fuer diesen Turn `/max` verlangt? Gilt genau eine
+        #: Frage lang -- die volle Mannschaft ist eine Entscheidung, keine
+        #: Einstellung.
+        self.max_run = False
         self.toolbox = toolbox or Toolbox(
             settings,
             cache=cache,
@@ -1028,9 +1073,15 @@ class Agent:
     def _auto_research(self, question: str, budget: int) -> int:
         """Zerlegt die Frage, laesst die Teile parallel bearbeiten, meldet zurueck.
 
+        Im Pro-Modus uebernimmt das der Master: er beauftragt, bewertet und
+        schickt nach. Sonst bleibt es beim kleinen Planer -- der ist schnell
+        und kostet einen Aufruf statt dreien.
+
         Returns:
             Wie viele Werkzeug-Aufrufe das gekostet hat.
         """
+        if self.pro_mode:
+            return self._master_research(question, budget)
         from cortex.subagents import plan_subtasks, spread_tasks
 
         # Wie viele Teilfragen hoechstens entstehen duerfen -- im Pro-Modus
@@ -1065,12 +1116,112 @@ class Agent:
             return 0
         results = self._run_subagents(tasks)
         spent = sum(int(result.get("tool_calls", 0) or 0) for result in results)
+        # Kam nichts zurueck, waere die "Quellenlage" ein leeres Blatt mit der
+        # Aufforderung, daraus zu schreiben -- und genau das taete das Modell
+        # dann auch. Darum entscheidet `_hand_over`, ob ueberhaupt etwas
+        # vorgelegt wird.
+        return self._hand_over(results, spent, budget)
 
+    def _master_research(self, question: str, budget: int) -> int:
+        """Der Pro-Modus: der Master beauftragt, bewertet und schickt nach.
+
+        Drei Unterschiede zum kleinen Planer. Der Master laeuft auf dem
+        starken Modell, er gibt jedem Agenten eine eigene Rolle statt einer
+        Nummer -- und er liest hinterher, was zurueckkam. Bringt eine Runde
+        nichts, geht eine zweite los, mit anderer Technik. Das sieht der
+        Nutzer; eine Nachrunde ist kein Makel, sondern der Grund, warum am
+        Ende etwas dasteht.
+
+        Returns:
+            Wie viele Werkzeug-Aufrufe das gekostet hat.
+        """
+        from cortex.master import MAX_ROUNDS, plan_mission, review_results
+        from cortex.subagents import plan_subtasks, spread_tasks
+
+        limit = max(1, self.agent_limit)
+        strong = self.strong_count
+        self._emit("planning", question=question)
+        mission = plan_mission(
+            question,
+            self.settings,
+            model=self.active_model,
+            context=self._planner_context(),
+            limit=limit,
+            strong=strong,
+            forced=self.max_run,
+        )
+        if mission.fallback:
+            # Der Master kam nicht durch (Zeitlimit, Ausfall). Dann plant der
+            # kleine Planer wie im Standardmodus -- eine Recherche ohne
+            # Master ist immer noch besser als keine.
+            tasks = self._planned_tasks or []
+            self._planned_tasks = None
+            if not tasks:
+                try:
+                    tasks = plan_subtasks(
+                        question, self.settings, context=self._planner_context(), limit=limit
+                    )
+                except Exception as exc:
+                    self._emit("error", message=f"Planung fehlgeschlagen: {exc}")
+                    return 0
+            tasks = spread_tasks(question, tasks, limit)
+        else:
+            tasks = mission.tasks
+            self._planned_tasks = None
+            # `/max` heisst: alle. Bleibt der Master darunter, wird mit
+            # Blickwinkeln aufgefuellt.
+            if self.max_run and len(tasks) < limit:
+                tasks = spread_tasks(question, tasks, limit)
+        if not tasks:
+            return 0
+
+        self._emit(
+            "master_plan",
+            agents=len(tasks),
+            strong=sum(1 for task in tasks if task.strong),
+            plan=mission.plan,
+            forced=self.max_run,
+            fallback=mission.fallback,
+        )
+        results = self._run_subagents(tasks)
+        spent = sum(int(result.get("tool_calls", 0) or 0) for result in results)
+
+        # Und jetzt das, wofuer es den Master gibt: nachsehen, ob das taugt.
+        runde = 1
+        while runde <= MAX_ROUNDS and not self.stopped:
+            review = review_results(
+                question,
+                format_findings(results),
+                self.settings,
+                model=self.active_model,
+                strong=strong,
+            )
+            self._emit(
+                "master_review",
+                verdict=review.verdict,
+                missing=review.missing,
+                retries=len(review.retries),
+                round=runde,
+            )
+            if review.ok or not review.retries:
+                break
+            self._emit(
+                "master_retry",
+                tasks=[task.text for task in review.retries],
+                round=runde,
+                missing=review.missing,
+            )
+            nachrunde = self._run_subagents(review.retries)
+            spent += sum(int(result.get("tool_calls", 0) or 0) for result in nachrunde)
+            results.extend(nachrunde)
+            runde += 1
+
+        return self._hand_over(results, spent, budget)
+
+    def _hand_over(self, results: list[dict[str, Any]], spent: int, budget: int) -> int:
+        """Legt dem Hauptagenten die Quellenlage vor."""
         findings = format_findings(results)
         if not useful_findings(results):
-            # Kam nichts zurueck, waere die "Quellenlage" ein leeres Blatt mit
-            # der Aufforderung, daraus zu schreiben -- und genau das taete das
-            # Modell dann auch. Ohne den Block antwortet es einfach selbst.
             self._emit("subagents_empty", tasks=len(results))
             return min(spent, max(0, budget - 1))
         self.messages.append(
@@ -1145,6 +1296,7 @@ class Agent:
             limit=self.agent_limit,
             checkers=self.checker_count,
             budget=self.subagent_budget,
+            strong_model=self._strongest_model() if self.strong_count else "",
             stop=self._stop,
         )
         for result in results:
@@ -1289,26 +1441,26 @@ class Agent:
         base = max(0, int(self.settings.max_subagents))
         if not (base and self.pro_mode):
             return base
-        limit = max(base, PRO_SUBAGENTS)
-        # Bei hoher Denktiefe helfen die vier Pruefer beim Suchen mit: sie
-        # sind ohnehin da, und wer "hoch" waehlt, will Breite. Beim Schalter
-        # *Gegenpruefen* bleiben sie beim Pruefen -- danach hat er gefragt.
-        if self.checkers_on and clean_effort(self.effort) == "high":
-            limit += PRO_CHECKERS
-        return limit
+        return max(base, PRO_SUBAGENTS)
+
+    @property
+    def strong_count(self) -> int:
+        """Wie viele Agenten auf dem starken Modell laufen duerfen."""
+        if not (self.pro_mode and self.use_subagents):
+            return 0
+        return PRO_STRONG if self._strongest_model() else 0
 
     @property
     def checkers_on(self) -> bool:
         """Laufen die Pruefer mit?
 
-        Zwei Wege dorthin, beide nur im Pro-Modus: der Schalter
-        *Gegenpruefen* -- oder die Denktiefe *hoch*, denn wer die waehlt,
-        will Gruendlichkeit und nicht Tempo. Ohne Agenten (Strukturieren aus,
-        Web aus, Agenten abgeschaltet) gibt es auch nichts zu pruefen.
+        Ein Weg dorthin: der Schalter *Gegenpruefen*, und nur im Pro-Modus.
+        Ohne Agenten (Strukturieren aus, Web aus, Agenten abgeschaltet) gibt
+        es auch nichts zu pruefen.
         """
         if not (self.pro_mode and self.use_subagents and self.structured and self.online):
             return False
-        return bool(self.recheck) or clean_effort(self.effort) == "high"
+        return bool(self.recheck)
 
     @property
     def checker_count(self) -> int:
@@ -1656,6 +1808,10 @@ class Agent:
                 Stand stehen.
         """
         question = question.strip()
+        # `/max` gehoert zur Frage, nicht zu den Einstellungen: es gilt genau
+        # diesen einen Turn. Ausserhalb des Pro-Modus wird es abgetrennt und
+        # ignoriert -- ohne Master gibt es nichts zu erzwingen.
+        question, gewuenscht_max = strip_max(question)
         if effort:
             self.effort = clean_effort(effort)
         before = (self.mode, self.structured, self.online, self.workshop_on)
@@ -1674,6 +1830,12 @@ class Agent:
         # Frage anfasst, wirft beim Anbieter den zwischengespeicherten Prefix weg.
         if (self.mode, self.structured, self.online, self.workshop_on) != before:
             self._refresh_system()
+        self.max_run = bool(gewuenscht_max) and self.pro_mode
+        if gewuenscht_max and not self.pro_mode:
+            self._emit(
+                "note",
+                text="/max gibt es nur im Pro-Modus -- die Frage laeuft normal.",
+            )
         if self.workshop_on:
             self._touch_workshop()
         if clean_mode(self.mode) in ("code", "pro"):

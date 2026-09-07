@@ -1309,6 +1309,7 @@ HELP_TEXT = """\
 [bold]Slash-Befehle[/bold]
   [cyan]/location <ort>[/cyan]      Ortsfilter setzen (leer = aufheben)
   [cyan]/model <name>[/cyan]        Modell wechseln, z.B. openai/gpt-4o
+  [cyan]/max <frage>[/cyan]         mit voller Mannschaft recherchieren (Pro-Modus)
   [cyan]/export html|md|csv[/cyan]  Recherche dieser Sitzung speichern
   [cyan]/image <pfad>[/cyan]        Bild beschreiben lassen und danach recherchieren
   [cyan]/history[/cyan]             Fruehere Recherchen anzeigen
@@ -1484,7 +1485,10 @@ def chat_command(
                 break
             if not line:
                 continue
-            if line.startswith("/"):
+            # "/max <Frage>" ist eine Recherche, kein Befehl -- sie laeuft
+            # ueber den normalen Weg, damit man dabei zusieht. "/max" allein
+            # erklaert sich unten wie jeder andere Befehl.
+            if line.startswith("/") and not re.match(r"^/max\s+\S", line, re.IGNORECASE):
                 if _handle_slash(line, agent, settings, turns, renderer, stream, show_images):
                     break
                 continue
@@ -1600,6 +1604,14 @@ def _handle_slash(
 
     if command == "help":
         console.print(HELP_TEXT)
+    elif command == "max":
+        console.print(
+            "[bold]/max[/bold] stellt im Pro-Modus die volle Mannschaft auf. "
+            "Schreib die Frage dahinter:\n"
+            "  [cyan]/max Welche Fahrradlaeden in Bremen reparieren Lastenraeder?[/cyan]\n"
+            "[dim]Den Pro-Modus gibt es in der Weboberflaeche; im Terminal "
+            "recherchiert Cortex ohnehin mit allen eingestellten Agenten.[/dim]"
+        )
     elif command == "location":
         agent.set_location(argument)
         console.print(

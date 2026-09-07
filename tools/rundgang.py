@@ -110,6 +110,18 @@ class FakeAgent:
         # Eine Mitlese-Zeile, die keine Denkzeile ist -- damit der Rundgang
         # die beiden auseinanderhalten kann.
         self.on_event("action", {"tool": "web_search", "arguments": {"query": "x"}})
+        # Der Master: er stellt die Einheit auf, bewertet und schickt nach.
+        if structured and mode == "pro":
+            self.on_event(
+                "master_plan",
+                {
+                    "agents": 44 if "/max" in text else 3,
+                    "strong": 2,
+                    "plan": "Erst die Anbieter, dann die Preise.",
+                    "forced": "/max" in text,
+                    "fallback": False,
+                },
+            )
         if structured:
             self.on_event(
                 "subagents",
@@ -128,6 +140,28 @@ class FakeAgent:
                 "check_done", {"task": "Was kostet Teil eins?", "verdict": "ABWEICHUNG"}
             )
             self.on_event("checks_done", {"checked": 2, "deviations": 1})
+        # Die Karte -- fuer das, was keine Suchmaschine kennt.
+        if structured and mode == "pro":
+            self.on_event("places", {"what": "Fahrradladen", "where": "Bremen"})
+            self.on_event("places_done", {"what": "Fahrradladen", "hits": 3})
+            self.on_event(
+                "master_review",
+                {
+                    "verdict": "luecken",
+                    "missing": ["Die Öffnungszeiten fehlen"],
+                    "retries": 1,
+                    "round": 1,
+                },
+            )
+            self.on_event(
+                "master_retry",
+                {
+                    "tasks": ["Öffnungszeiten über die Karte"],
+                    "round": 1,
+                    "missing": ["Die Öffnungszeiten fehlen"],
+                },
+            )
+            self.on_event("master_review", {"verdict": "gut", "missing": [], "round": 2})
         if "frag" in text:
             self.on_event("ask", {"question": "Welches Budget?", "options": ["bis 800 €"]})
             self.ask_handler("Welches Budget?", ["bis 800 €"])
@@ -433,6 +467,14 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         log.pruefe("[Pro]" in schritte, "das stärkste Modell wird genannt")
         log.pruefe("[Code]" not in schritte, "und zwar als Pro, nicht als Code")
         log.pruefe("· Zahlen" in schritte, "die Rolle steht an der Teilfrage")
+        log.pruefe("[Master]" in schritte, "der Master stellt die Einheit auf")
+        log.pruefe("3 Agenten" in schritte and "starken Modell" in schritte,
+                   "mit Zahl und starken Agenten")
+        log.pruefe("Erst die Anbieter" in schritte, "und sagt, was er vorhat")
+        log.pruefe("[Karte]" in schritte, "die Karte wird befragt")
+        log.pruefe("Lücken" in schritte, "er bewertet die Rückmeldungen")
+        log.pruefe("[Nachrunde]" in schritte, "und schickt nach")
+        log.pruefe("die Rückmeldungen tragen" in schritte, "am Ende trägt es")
 
         # Und jetzt die vier Pruefer: Schalter an, noch einmal fragen.
         pg.click("#btn-model")
@@ -475,6 +517,53 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         log.pruefe(not pg.is_checked("#structure"), "und Strukturieren geht wieder aus")
         pg.keyboard.press("Escape")
         pg.wait_for_timeout(300)
+
+    if dran("max"):
+        log.abschnitt("4e. /max stellt die volle Mannschaft auf")
+        pg.click('#modes .mode[data-mode="pro"]')
+        pg.wait_for_timeout(600)
+        pg.fill("#input", "/max Was kosten Lastenräder in Bremen?")
+        pg.click("#send")
+        pg.wait_for_timeout(1300)
+        letzte = agent.gesehen[-1]
+        log.pruefe(letzte["text"].startswith("/max"),
+                   f"der Befehl kommt beim Agenten an ({letzte['text'][:20]!r})")
+        schritte = pg.inner_text(".steps >> nth=-1")
+        log.pruefe("44 Agenten" in schritte, "und es sind alle")
+        log.pruefe("volle Mannschaft" in schritte, "die Anzeige sagt es")
+        # Ohne Frage ist es keine Recherche, sondern eine Erklärung.
+        pg.fill("#input", "/max")
+        pg.click("#send")
+        pg.wait_for_timeout(900)
+        log.pruefe("volle Mannschaft" in pg.inner_text(".msg.bot >> nth=-1"),
+                   "/max allein erklärt sich")
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(700)
+
+    if dran("weiterlaufen"):
+        log.abschnitt("4f. Die Anfrage überlebt das Weggehen")
+        pg.fill("#input", "Das dauert langsam etwas")
+        pg.click("#send")
+        pg.wait_for_timeout(700)
+        log.pruefe(pg.is_visible("#stop"), "die Anfrage läuft")
+        # Weg von der Seite -- und zurück. Frueher war die Anfrage damit weg.
+        pg.reload()
+        # Nicht auf die Begruessung warten: sie ist weg, sobald der
+        # wiederaufgenommene Lauf im Chat steht. Genau darum geht es hier.
+        pg.wait_for_selector("#input")
+        pg.wait_for_timeout(1500)
+        schritte = pg.inner_text(".steps >> nth=-1")
+        log.pruefe("[Weiter]" in schritte, "der Lauf wird wieder aufgenommen")
+        log.pruefe(pg.locator(".msg.user").count() >= 1, "die Frage steht wieder da")
+        pg.wait_for_selector("#stop", state="hidden", timeout=30000)
+        log.pruefe("Eine Antwort" in pg.inner_text(".msg.bot >> nth=-1"),
+                   "und die Antwort kommt an, ohne dass jemand neu fragt")
+        # Ein zweites Laden holt denselben Lauf nicht noch einmal.
+        pg.reload()
+        pg.wait_for_selector("#input")
+        pg.wait_for_timeout(1000)
+        log.pruefe(pg.locator(".msg").count() == 0,
+                   "wer ihn zu Ende gesehen hat, bekommt ihn nicht wieder")
 
     if dran("vorschlaege"):
         log.abschnitt("4d. Vorschläge passen zum Modus")

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -42,6 +43,23 @@ Bis zu 400 Woerter.
 - Rate nie. Was du nicht gefunden hast, schreibst du als "nicht gefunden".
 - Liefert `fetch_page` einen `skipped_reason`, nimm eine andere Quelle.
 - Kein Vorwort, keine Wiederholung der Frage -- nur das Ergebnis.
+
+Findest du auf Anhieb nichts oder nur Portale ohne Inhalt, gib nicht auf -- \
+wechsel die Technik:
+- `local_places` fragt die KARTE statt der Suchmaschine. Kleine Laeden, \
+Werkstaetten, Praxen und Vereine stehen dort mit Adresse, Telefon und Website, \
+auch wenn keine Suchmaschine sie kennt. Fuer alles Oertliche der beste erste \
+Griff, nicht der letzte.
+- Suchoperatoren: den genauen Namen in Anfuehrungszeichen ("Radladen Meier"), \
+`filetype:pdf` fuer Aushaenge, Programme, Satzungen und Amtsblaetter, `site:` \
+fuer eine bestimmte Seite oder Endung (site:bremen.de).
+- Verzeichnisse nennen oft die Website, die sonst nirgends auftaucht: Das \
+Oertliche, Gelbe Seiten, 11880, meinestadt.de, Branchenbuecher, das \
+Vereinsregister, die Seite der Gemeinde, der Kreis, die Innung.
+- Andere Worte: Ortsteil statt Stadt, Umgangssprache statt Fachwort, die alte \
+Bezeichnung, Englisch statt Deutsch.
+- Eine gefundene Seite fuehrt oft zur gesuchten: Impressum, Partner, \
+Mitglieder, Links, ein Zeitungsartikel ueber sie.
 %(role)s
 Deine Teilfrage lautet:
 %(task)s"""
@@ -73,6 +91,16 @@ fair: sag dazu, wie verbreitet eine Klage ist und woher sie kommt; ein \
 einzelner wuetender Beitrag ist noch kein Befund. Findest du nichts \
 Belastbares, schreibst du genau das -- auch das ist ein Ergebnis.
 """,
+    "tiefe": """
+Deine Rolle: Spurensuche. Du bist fuer das zustaendig, was sich nicht einfach \
+finden laesst -- den kleinen Laden ohne Website, den Verein ohne \
+Suchmaschinen-Eintrag, die Zahl, die nur in einem PDF steht. Fang mit \
+`local_places` an, wenn es etwas Oertliches ist. Danach die Operatoren \
+(Anfuehrungszeichen, `filetype:pdf`, `site:`), dann die Verzeichnisse, dann \
+die Umwege ueber Nachbarseiten und Zeitungsartikel. Gib nicht nach zwei \
+Suchen auf: dass etwas nicht auf Seite eins steht, heisst nicht, dass es das \
+nicht gibt. Findest du wirklich nichts, schreib auf, WO du gesucht hast.
+""",
     "frisch": """
 Deine Rolle: Aktuelles. Dich interessiert der Stand von heute: Neuerungen, \
 Aenderungen, Termine, Ankuendigungen. Nimm dafuer `search_news`. Zu jeder \
@@ -84,7 +112,7 @@ alt. Ist etwas seit Jahren unveraendert, sag auch das.
 #: Wie die Rolle in der Oberflaeche heisst. Leer heisst: keine Marke, das ist
 #: der normale Rechercheauftrag.
 ROLE_LABELS = {"standard": "", "zahlen": "Zahlen", "gegenstimmen": "Gegenstimmen",
-               "frisch": "Aktuelles"}
+               "frisch": "Aktuelles", "tiefe": "Spurensuche"}
 
 #: Woran eine Rolle zu erkennen ist. Reine Textarbeit, kein Modellaufruf --
 #: die Zuordnung darf keine Wartezeit kosten. Gezaehlt werden Treffer; die
@@ -101,6 +129,10 @@ _ROLE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("frisch", ("aktuell", "derzeit", "neueste", "neuesten", "momentan", "heute",
                 "diese woche", "news", "nachricht", "geaendert", "geändert",
                 "seit wann", "neu seit")),
+    ("tiefe", ("klein", "lokal", "in der naehe", "in der nähe", "um die ecke",
+               "versteckt", "geheimtipp", "unbekannt", "nische", "wer bietet",
+               "gibt es ueberhaupt", "gibt es überhaupt", "inhabergefuehrt",
+               "inhabergeführt", "familienbetrieb", "verein", "ehrenamt")),
 )
 
 
@@ -216,8 +248,24 @@ ANGLES = (
     "Erfahrungsberichte aus Foren und Gruppen",
 )
 
+#: Und WO gesucht wird. Reicht die Zahl der Blickwinkel nicht (bei `/max` sind
+#: es vierundvierzig Agenten), entsteht die zweite Haelfte aus dieser Liste:
+#: dieselbe Frage, anderer Ort zum Suchen. Die Reihenfolge ist die aus der
+#: Recherche zu schwer auffindbaren Dingen -- Karte und Verzeichnisse zuerst,
+#: weil sie finden, was keine Suchmaschine kennt.
+SOURCES = (
+    "in der Karte (OpenStreetMap) statt in der Suchmaschine",
+    "in Verzeichnissen wie Das Oertliche, Gelbe Seiten, 11880, meinestadt.de",
+    "auf den Seiten der Betreiber selbst, nicht auf Portalen",
+    "auf offiziellen Seiten: Gemeinde, Kreis, Kammer, Verband",
+    "in PDFs und Dokumenten (filetype:pdf): Aushaenge, Programme, Satzungen",
+    "in der oertlichen Presse und in Wochenblaettern",
+    "in Foren, Gruppen und Kommentaren",
+    "ueber Nachbarseiten: Impressum, Partner, Mitglieder, Links",
+)
 
-def spread_tasks(question: str, tasks: list[str], limit: int) -> list[str]:
+
+def spread_tasks(question: str, tasks: Sequence[Any], limit: int) -> list[Task]:
     """Fuellt die Teilfragen auf *limit* auf.
 
     Der Planer liefert oft drei oder vier Teilfragen, auch wenn zwoelf oder
@@ -235,15 +283,25 @@ def spread_tasks(question: str, tasks: list[str], limit: int) -> list[str]:
     for angle in ANGLES:
         if len(out) >= limit:
             return out
-        out.append(f"{kern} -- {angle}")
-    # Immer noch Platz: dieselben Blickwinkel auf die Teilfragen des Planers.
+        out.append(Task(text=f"{kern} -- {angle}"))
+    # Immer noch Platz: dieselben Blickwinkel auf die Auftraege des Planers.
     for angle in ANGLES:
         for task in _distinct(tasks):
             if len(out) >= limit:
                 break
-            if task.lower() == kern.lower():
+            if task.text.lower() == kern.lower():
                 continue
-            out.append(f"{task} -- {angle}")
+            out.append(Task(text=f"{task.text} -- {angle}"))
+        if len(out) >= limit:
+            break
+    # Und wenn das immer noch nicht reicht (bei `/max` sind es vierundvierzig
+    # Agenten und manchmal nur ein Auftrag), kommt die zweite Achse dazu:
+    # nicht WAS, sondern WO gesucht wird.
+    for quelle in SOURCES:
+        for angle in ANGLES:
+            if len(out) >= limit:
+                break
+            out.append(Task(text=f"{kern} -- {angle}, gesucht {quelle}", angle=quelle))
         if len(out) >= limit:
             break
     return _distinct(out)[:limit]
@@ -391,6 +449,43 @@ def _subagent_kwargs(settings: Settings, model: str) -> dict[str, Any]:
 
 
 @dataclass
+class Task:
+    """Ein Auftrag, wie der Master ihn vergibt.
+
+    Frueher war ein Auftrag eine Zeichenkette. Das reichte, solange alle
+    Agenten dasselbe taten. Jetzt gibt der Master jedem seine eigene Rolle
+    ("achte auf die Oeffnungszeiten", "such die Betreiber, nicht die
+    Portale") -- und zwei Auftraege sind schwer genug fuer die starken
+    Agenten. Beides gehoert an den Auftrag, nicht in eine Parallelliste.
+    """
+
+    text: str
+    #: Die Rolle in eigenen Worten. Leer heisst: die aus dem Wortlaut
+    #: abgeleitete Rolle (siehe `role_for`).
+    angle: str = ""
+    #: Auf das starke Modell, mit groesserem Budget.
+    strong: bool = False
+
+    @property
+    def role(self) -> str:
+        """Die bekannte Rolle -- fuer die Technik-Hinweise im Auftrag."""
+        return role_for(f"{self.text} {self.angle}")
+
+
+def as_task(item: Any) -> Task:
+    """Macht aus einer Zeichenkette, einem dict oder einem Task einen Task."""
+    if isinstance(item, Task):
+        return item
+    if isinstance(item, dict):
+        return Task(
+            text=str(item.get("text") or item.get("auftrag") or item.get("task") or "").strip(),
+            angle=str(item.get("angle") or item.get("rolle") or "").strip(),
+            strong=bool(item.get("strong") or item.get("schwer")),
+        )
+    return Task(text=str(item or "").strip())
+
+
+@dataclass
 class SubagentResult:
     """Was ein Subagent herausgefunden hat."""
 
@@ -403,6 +498,10 @@ class SubagentResult:
     #: Mit welcher Rolle gearbeitet wurde -- fuer die Anzeige und damit der
     #: Hauptagent weiss, unter welchem Blickwinkel etwas gefunden wurde.
     role: str = "standard"
+    #: Die Rolle in den Worten des Masters, falls er eine vergeben hat.
+    angle: str = ""
+    #: Lief er auf dem starken Modell?
+    strong: bool = False
     #: Was der Pruefer dazu gesagt hat, und sein Urteil in einem Wort. Leer,
     #: wenn nicht geprueft wurde -- das ist der Normalfall.
     check: str = ""
@@ -411,6 +510,10 @@ class SubagentResult:
 
     def as_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"task": self.task, "role": self.role}
+        if self.angle:
+            payload["angle"] = self.angle
+        if self.strong:
+            payload["strong"] = True
         if self.error:
             payload["error"] = self.error
             return payload
@@ -437,6 +540,8 @@ def _run_one(
     budget: int = 0,
     prompt: str = "",
     kind: str = "subagent",
+    angle: str = "",
+    model: str = "",
 ) -> SubagentResult:
     """Fuehrt einen Subagenten aus -- eigene Toolbox, eigenes Budget.
 
@@ -446,23 +551,32 @@ def _run_one(
         prompt: Ein eigener Auftrag statt des Rechercheauftrags -- so laeuft
             der Pruefer durch dieselbe Schleife.
         kind: Wofuer die Meldung am Ende steht: "subagent" oder "check".
+        angle: Die Rolle in den Worten des Masters. Steht zusaetzlich zur
+            Technik der bekannten Rolle im Auftrag.
+        model: Ein anderes Modell als das eingestellte -- so laufen die
+            starken Agenten auf dem starken Modell.
     """
     import litellm
 
     litellm.suppress_debug_info = True
     role = role if role in ROLE_EXTRA else "standard"
-    result = SubagentResult(task=task, role=role)
+    result = SubagentResult(task=task, role=role, angle=angle, strong=bool(model))
     box = toolbox or Toolbox(settings, cache=cache, on_event=None)
     owns_box = toolbox is None
 
-    auftrag = prompt or SUBAGENT_PROMPT % {"task": task, "role": ROLE_EXTRA[role]}
+    # Die Rolle des Masters steht ueber der bekannten: sie ist auf diesen
+    # einen Auftrag gemuenzt, die andere bringt die Technik mit.
+    rollentext = ROLE_EXTRA[role]
+    if angle.strip():
+        rollentext = f"\nDein Auftrag im Team: {angle.strip()}\n{rollentext}"
+    auftrag = prompt or SUBAGENT_PROMPT % {"task": task, "role": rollentext}
     messages: list[dict[str, Any]] = [{"role": "user", "content": auftrag}]
     budget = max(1, int(budget) or settings.subagent_budget)
     used = 0
     # Faellt das kleine Subagenten-Modell aus (nicht geladen, abgestuerzt),
     # uebernimmt das Hauptmodell -- langsamer, aber die Teilfrage wird
     # beantwortet statt verworfen.
-    model_in_use = settings.effective_subagent_model
+    model_in_use = model or settings.effective_subagent_model
 
     try:
         while used < budget:
@@ -617,32 +731,38 @@ STAGGER_AFTER = 4
 LAUNCH_STAGGER = 0.08
 MAX_LAUNCH_DELAY = 2.0
 
+#: Wie viel mehr Werkzeug-Budget ein starker Agent bekommt. Er sitzt an dem,
+#: was die anderen nicht gefunden haben -- da reicht eine Suche selten.
+STRONG_EXTRA_BUDGET = 6
 
-def _distinct(tasks: list[str]) -> list[str]:
-    """Die Teilfragen ohne Leerzeilen und ohne Wiederholungen.
 
-    Bei vier Teilfragen faellt eine doppelte kaum auf. Bei vierundzwanzig
-    schon: zwei gleichlautende Auftraege belegen zwei Agenten, lesen dieselben
-    Seiten und melden dasselbe zurueck -- bezahlt wird beides. Verglichen wird
-    nachlaessig (Kleinschreibung, zusammengefasste Leerzeichen, kein Satzende),
-    weil der Planer denselben Auftrag gern zweimal leicht anders schreibt.
+def _distinct(tasks: Sequence[Any]) -> list[Task]:
+    """Die Auftraege ohne Leerzeilen und ohne Wiederholungen.
+
+    Bei vier Auftraegen faellt ein doppelter kaum auf. Bei vierundvierzig
+    schon: zwei gleichlautende belegen zwei Agenten, lesen dieselben Seiten
+    und melden dasselbe zurueck -- bezahlt wird beides. Verglichen wird
+    nachlaessig (Kleinschreibung, zusammengefasste Leerzeichen, kein
+    Satzende), weil der Master denselben Auftrag gern zweimal leicht anders
+    schreibt.
     """
-    out: list[str] = []
+    out: list[Task] = []
     gesehen: set[str] = set()
-    for task in tasks:
-        text = " ".join(str(task or "").split())
-        if not text:
+    for eintrag in tasks:
+        task = as_task(eintrag)
+        task.text = " ".join(task.text.split())
+        if not task.text:
             continue
-        marke = text.lower().rstrip(".!?")
+        marke = task.text.lower().rstrip(".!?")
         if marke in gesehen:
             continue
         gesehen.add(marke)
-        out.append(text)
+        out.append(task)
     return out
 
 
 def run_subagents(
-    tasks: list[str],
+    tasks: Sequence[Any],
     settings: Settings,
     cache: Cache | None = None,
     on_event: EventHook | None = None,
@@ -651,6 +771,7 @@ def run_subagents(
     limit: int | None = None,
     checkers: int = 0,
     budget: int = 0,
+    strong_model: str = "",
 ) -> list[SubagentResult]:
     """Bearbeitet *tasks* nebenlaeufig und gibt die Ergebnisse in Reihenfolge zurueck.
 
@@ -669,22 +790,32 @@ def run_subagents(
             fertige Ergebnis vor und suchen auf ANDEREN Seiten nach
             Bestaetigung oder Widerspruch. 0 = keine Gegenprobe.
         budget: Werkzeug-Aufrufe je Agent. 0 = die Einstellung.
+        strong_model: Modell fuer die als `strong` markierten Auftraege. Leer
+            heisst: alle arbeiten mit demselben Modell.
     """
     ceiling = max(1, int(limit if limit is not None else settings.max_subagents))
     clean = _distinct(tasks)[:ceiling]
     if not clean:
         return []
 
-    # Die Rolle steckt in der Teilfrage: wer nach Preisen fragt, bekommt den
+    # Die Rolle steckt im Auftrag: wer nach Preisen fragt, bekommt den
     # Agenten, der auf Zahlen achtet. Das kostet keinen Modellaufruf.
-    roles = [role_for(task) for task in clean]
+    roles = [task.role for task in clean]
     # Nie mehr Pruefer als Rechercheure gleichzeitig: bei einem lokalen
     # Modell laufen zwei Agenten nebeneinander, und vier Pruefer obendrauf
     # waeren sechs Anfragen an dieselbe Grafikkarte -- die rechnet sie
     # ohnehin nacheinander, es wuerde nur alles langsamer.
     checkers = max(0, min(int(checkers), max(1, parallel)))
     if on_event:
-        on_event("subagents", {"tasks": clean, "roles": roles})
+        on_event(
+            "subagents",
+            {
+                "tasks": [task.text for task in clean],
+                "roles": roles,
+                "angles": [task.angle for task in clean],
+                "strong": [task.strong for task in clean],
+            },
+        )
         if checkers:
             on_event("checkers", {"count": checkers})
 
@@ -757,26 +888,34 @@ def run_subagents(
         # die anderen noch suchen. Ist die Recherche durch, stehen ihre Faeden
         # dem Ruecksstau an Pruefungen zur Verfuegung -- aus vier Pruefern
         # werden dann alle.
+        def einer(task: Task, box: Toolbox) -> SubagentResult:
+            """Ein Agent. Die starken laufen auf dem starken Modell und
+            bekommen mehr Budget -- sie sitzen an den schweren Auftraegen."""
+            stark = bool(task.strong and strong_model)
+            return _run_one(
+                task.text,
+                settings,
+                cache,
+                on_event,
+                toolbox=box,
+                stop=stop,
+                role=task.role,
+                angle=task.angle,
+                budget=(budget + STRONG_EXTRA_BUDGET) if stark else budget,
+                model=strong_model if stark else "",
+            )
+
         workers = max(1, min(parallel, len(clean)) + checkers)
         if workers == 1:
-            return [
-                _run_one(
-                    task, settings, cache, on_event, toolbox=box, stop=stop,
-                    role=role, budget=budget,
-                )
-                for task, box, role in zip(clean, boxes, roles, strict=True)
-            ]
+            return [einer(task, box) for task, box in zip(clean, boxes, strict=True)]
 
         offene_pruefungen: list[Any] = []
         schloss = threading.Lock()
 
-        def start(position: int, task: str, box: Toolbox, role: str) -> SubagentResult:
+        def start(position: int, task: Task, box: Toolbox) -> SubagentResult:
             if position and workers > STAGGER_AFTER:
                 time.sleep(min(position * LAUNCH_STAGGER, MAX_LAUNCH_DELAY))
-            ergebnis = _run_one(
-                task, settings, cache, on_event, toolbox=box, stop=stop,
-                role=role, budget=budget,
-            )
+            ergebnis = einer(task, box)
             if checkers:
                 # Sofort weiterreichen, nicht erst am Ende: die Pruefung des
                 # ersten Ergebnisses laeuft, waehrend die letzte Teilfrage
@@ -788,10 +927,8 @@ def run_subagents(
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(start, position, task, box, role)
-                for position, (task, box, role) in enumerate(
-                    zip(clean, boxes, roles, strict=True)
-                )
+                pool.submit(start, position, task, box)
+                for position, (task, box) in enumerate(zip(clean, boxes, strict=True))
             ]
             results = [future.result() for future in futures]
             # Der Ausstieg aus dem `with` wartet auf die Pruefungen, die noch

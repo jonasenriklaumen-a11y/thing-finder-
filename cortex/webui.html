@@ -1010,8 +1010,9 @@ input:focus,select:focus{border-color:var(--accent)}
         <span class="why only-pro">Schickt <b>vier Prüfer</b> mit, die jedes
           Ergebnis auf anderen Seiten gegenlesen — währenddessen die übrigen
           Agenten noch suchen. Sind die fertig, helfen sie beim Prüfen mit.
-          Kostet deshalb kaum Zeit statt der doppelten. Bei Denktiefe
-          <b>High</b> sind die vier ohnehin dabei und suchen zusätzlich mit.</span></span>
+          Kostet deshalb kaum Zeit statt der doppelten. Ausgeschaltet laufen
+          sie nicht: der Master allein entscheidet dann, ob etwas nachgeholt
+          werden muss.</span></span>
     </label>
     <div class="picker-foot">Weitere Anbieter und Schlüssel unter
       <button class="linkish" id="picker-settings">Einstellungen</button>.</div>
@@ -1531,7 +1532,8 @@ function merkeZustand(teil){
 const MODI = ["normal", "pro", "code"];
 // Wie die Rollen und die Urteile der Pruefer heissen. Dieselben Schluessel
 // wie in `cortex/subagents.py`; was hier fehlt, bleibt einfach unbeschriftet.
-const ROLLEN = {zahlen:"Zahlen", gegenstimmen:"Gegenstimmen", frisch:"Aktuelles"};
+const ROLLEN = {zahlen:"Zahlen", gegenstimmen:"Gegenstimmen", frisch:"Aktuelles",
+                tiefe:"Spurensuche"};
 const URTEILE = {BESTAETIGT:"bestätigt", ABWEICHUNG:"Abweichung gefunden",
                  UNKLAR:"nichts Belastbares gefunden"};
 const PLATZHALTER = {
@@ -2083,10 +2085,14 @@ async function runCommand(line){
 async function ask(text){
   if (busy) return;
   if (!text.trim() && !pending.length) return;
-  // /image recherchiert und laeuft deshalb ueber den normalen Weg mit
-  // Live-Anzeige; alle anderen Befehle antworten sofort.
-  if (text.trim().startsWith("/") && !text.trim().startsWith("/image")){
-    return runCommand(text.trim());
+  // /image und "/max <Frage>" recherchieren und laufen deshalb ueber den
+  // normalen Weg mit Live-Anzeige; alle anderen Befehle antworten sofort.
+  // "/max" ohne Frage ist keine Recherche, sondern eine Frage an Cortex, was
+  // der Befehl tut -- die beantwortet der Befehlsweg.
+  const eingabe = text.trim();
+  if (eingabe.startsWith("/") && !/^\/image\b/i.test(eingabe)
+      && !/^\/max\s+\S/i.test(eingabe)){
+    return runCommand(eingabe);
   }
   setBusy(true);
   const attachments = pending;
@@ -2094,16 +2100,9 @@ async function ask(text){
   addUser(text, attachments); input.value = ""; input.style.height = "auto";
   noteChat(text.trim() || "Angehängte Datei");
   const { steps, bubble } = addBot();
-  // `thoughtLine` gehoert hier hoch und nicht zu seiner Funktion: die
-  // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile ueberhaupt
-  // ausgefuehrt waere -- das gaebe einen ReferenceError. Und sie traegt
-  // bewusst keinen Schalternamen: eine gleichnamige lokale Variable verdeckte
-  // hier einmal den Schalter, der dann als `null` beim Server ankam.
-  let answer = "", reading = null, readCount = 0, planning = null, thoughtLine = null;
-
-  try {
+  await verfolge(() => {
     running = new AbortController();
-    const res = await api("/api/chat", {
+    return api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
         message: text, attachments, mode, structured, recheck, effort, sandbox,
@@ -2115,6 +2114,22 @@ async function ask(text){
       }),
       signal: running.signal,
     });
+  }, steps, bubble, text);
+}
+
+// Eine laufende Anfrage mitlesen -- egal, ob sie gerade gestellt wurde oder
+// ob wir uns an eine anhaengen, die schon laeuft. `hole` liefert die Antwort
+// des Servers; alles danach ist fuer beide Wege dasselbe.
+async function verfolge(hole, steps, bubble, text){
+  // `thoughtLine` gehoert hier hoch und nicht zu seiner Funktion: die
+  // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile ueberhaupt
+  // ausgefuehrt waere -- das gaebe einen ReferenceError. Und sie traegt
+  // bewusst keinen Schalternamen: eine gleichnamige lokale Variable verdeckte
+  // hier einmal den Schalter, der dann als `null` beim Server ankam.
+  let answer = "", reading = null, readCount = 0, planning = null, thoughtLine = null;
+
+  try {
+    const res = await hole();
     if (!res.ok) throw new Error("HTTP " + res.status);
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
@@ -2206,6 +2221,39 @@ async function ask(text){
           s.querySelector(".sub").textContent = rolle ? `${t}  · ${rolle}` : t;
           steps.appendChild(s);
         }); break;
+      case "master_plan":
+        // Der Master hat die Einheit aufgestellt. Das ist die erste Zeile,
+        // die im Pro-Modus etwas ueber die Groesse der Recherche sagt.
+        step(steps, "[Master]",
+          `${ev.agents} ${ev.agents === 1 ? "Agent" : "Agenten"}`
+          + (ev.strong ? `, davon ${ev.strong} auf dem starken Modell` : "")
+          + (ev.forced ? " (volle Mannschaft)" : "")
+          + (ev.plan ? ` — ${ev.plan}` : ""),
+          ev.fallback ? "warn" : "");
+        break;
+      case "master_review":
+        step(steps, "[Master]", ev.verdict === "gut"
+          ? "die Rückmeldungen tragen"
+          : `Lücken: ${(ev.missing || []).join(" · ") || "es fehlt etwas"}`,
+          ev.verdict === "gut" ? "" : "warn");
+        break;
+      case "master_retry":
+        // Genau dafuer gibt es den Master: was nichts hergab, geht noch
+        // einmal los -- und man sieht es, statt es zu vermissen.
+        step(steps, "[Nachrunde]",
+          `${ev.tasks.length} ${ev.tasks.length === 1 ? "Auftrag" : "Aufträge"} noch einmal`);
+        (ev.tasks || []).forEach(t => {
+          const s = document.createElement("div");
+          s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
+          s.querySelector(".sub").textContent = t; steps.appendChild(s);
+        });
+        break;
+      case "places":
+        step(steps, "[Karte]", `${ev.what}${ev.where ? " in " + ev.where : ""}`); break;
+      case "places_done":
+        step(steps, "[Karte]", `${ev.hits} ${ev.hits === 1 ? "Ort" : "Orte"}`); break;
+      case "note":
+        step(steps, "[Hinweis]", ev.text, "warn"); break;
       case "checkers":
         step(steps, "[Prüfer]",
           `${ev.count} prüfen mit, während die anderen noch suchen`); break;
@@ -2321,6 +2369,35 @@ async function ask(text){
     }
   }
   setBusy(false); input.focus();
+}
+
+// Zurueck auf der Seite, waehrend Cortex noch arbeitet.
+//
+// Frueher lebte eine Anfrage in ihrer Verbindung: wer die Seite verliess,
+// das Handy sperrte oder kurz in eine andere App wechselte, riss die Leitung
+// ab -- und kam vor einen leeren Chat zurueck, die Frage musste neu gestellt
+// werden. Der Lauf liegt jetzt auf dem Server; hier haengen wir uns wieder
+// an und lassen den ganzen Verlauf ab Ereignis 0 nachwachsen, als waere man
+// nie weg gewesen.
+async function wiederAufnehmen(){
+  let stand;
+  try {
+    const res = await api("/api/runstate");
+    if (!res.ok) return;
+    stand = await res.json();
+  } catch { return; }
+  if (!stand || !stand.resume || busy) return;
+
+  addUser(stand.question || "…", []);
+  const { steps, bubble } = addBot();
+  step(steps, "[Weiter]", stand.running
+    ? "Die Anfrage lief weiter, während du weg warst."
+    : "Die Anfrage ist fertig geworden, während du weg warst.");
+  setBusy(true);
+  await verfolge(() => {
+    running = new AbortController();
+    return api("/api/run?since=0", { signal: running.signal });
+  }, steps, bubble, stand.question || "");
 }
 
 /* ---------- Eingabe ---------- */
@@ -3782,9 +3859,9 @@ async function kopfNeuZeichnen(){
     if (mode === "pro") bits.push("Pro");
     if (structured) bits.push("strukturiert");
     // Im Pro-Modus pruefen vier Agenten mit -- der Schalter heisst gleich,
-    // meint aber etwas anderes, und bei hoher Denktiefe sind sie ohnehin da.
+    // meint aber etwas anderes.
     if (mode === "pro"){
-      if (recheck || effort === "high") bits.push("4 Prüfer");
+      if (recheck) bits.push("4 Prüfer");
     } else if (recheck) bits.push("gegenprüfen");
     if (effort !== "medium") bits.push("Denktiefe " + effort);
     if (cfg.ha_connected) bits.push("Zuhause verbunden");
@@ -3796,6 +3873,7 @@ async function kopfNeuZeichnen(){
 greet();
 refreshHeader();
 loadRecents();
+wiederAufnehmen();
 input.focus();
 </script>
 </body>
