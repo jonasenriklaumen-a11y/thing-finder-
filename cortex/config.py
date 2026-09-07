@@ -26,27 +26,20 @@ ENV_CANDIDATES: tuple[Path, ...] = (
 #: Ort, an den `cortex setup` schreibt, wenn noch keine `.env` existiert.
 DEFAULT_ENV_PATH = Path.home() / ".config" / "cortex" / ".env"
 
-DEFAULT_MODEL = "anthropic/claude-sonnet-5"
+DEFAULT_MODEL = "mistral/mistral-large-latest"
 
 #: Welcher API-Key-Name gehoert zu welchem LiteLLM-Provider-Praefix?
+#:
+#: Cortex richtet sich auf zwei Anbieter ein -- Mistral und NVIDIA NIM --,
+#: weil sich fuer die beiden sagen laesst, welches Modell wofuer taugt und
+#: wie viele Anfragen pro Minute sie vertragen (siehe `cortex/system.py`).
+#: Alles andere bleibt trotzdem benutzbar: wer von Hand eine fremde
+#: Modell-ID eintraegt, hinterlegt den Key entweder unter
+#: :data:`GENERIC_KEY_NAME` oder unter dem Namen, den LiteLLM ohnehin
+#: selbst aus der Umgebung liest.
 PROVIDER_KEYS: dict[str, str] = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "claude": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "gpt": "OPENAI_API_KEY",
-    "azure": "AZURE_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "vertex_ai": "VERTEXAI_API_KEY",
-    "groq": "GROQ_API_KEY",
     "mistral": "MISTRAL_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
     "nvidia_nim": "NVIDIA_NIM_API_KEY",
-    "xai": "XAI_API_KEY",
-    "together_ai": "TOGETHER_API_KEY",
-    "fireworks_ai": "FIREWORKS_AI_API_KEY",
-    "cerebras": "CEREBRAS_API_KEY",
-    "perplexity": "PERPLEXITYAI_API_KEY",
     "ollama": "",  # lokal, kein Key noetig
     "ollama_chat": "",
     "lm_studio": "",
@@ -101,7 +94,7 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def provider_of(model: str) -> str:
-    """`anthropic/claude-sonnet-4-6` -> `anthropic`."""
+    """`mistral/mistral-large-latest` -> `mistral`."""
     return model.split("/", 1)[0].lower() if "/" in model else model.split("-", 1)[0].lower()
 
 
@@ -215,8 +208,8 @@ def model_problem(model: str) -> str:
         message += f"\nMeintest du: {suggestion}"
     else:
         message += (
-            "\nBeispiele: anthropic/claude-sonnet-4-6, openai/gpt-4o, "
-            "nvidia_nim/meta/llama-3.3-70b-instruct, ollama/llama3.1"
+            "\nBeispiele: mistral/mistral-large-latest, "
+            "nvidia_nim/meta/llama-3.3-70b-instruct, ollama_chat/qwen2.5:7b"
         )
     return message
 
@@ -352,6 +345,14 @@ class Settings:
         an Wartezeit statt gar nichts.
         """
         limit = max(1, int(limit or 1))
+        # Was der Anbieter vertraegt, ist die harte Grenze -- daran aendert
+        # auch ein Wunsch nichts. Vierundvierzig gleichzeitige Anfragen an
+        # NVIDIA bringen keine Antwort schneller; sie bringen 429er.
+        from cortex.pace import limits_for
+
+        _, erlaubt = limits_for(provider_of(self.effective_subagent_model))
+        if erlaubt:
+            limit = min(limit, erlaubt)
         if self.subagent_parallel > 0:
             return max(1, min(self.subagent_parallel, limit))
         local = provider_of(self.effective_subagent_model) in ("ollama", "ollama_chat")
@@ -370,8 +371,19 @@ class Settings:
 
     @property
     def effective_subagent_model(self) -> str:
-        """Womit die Subagenten arbeiten -- notfalls mit dem Hauptmodell."""
-        return self.subagent_model or self.model
+        """Womit die Subagenten arbeiten.
+
+        Ohne eigene Angabe das SCHNELLE Modell des Anbieters, nicht das
+        Hauptmodell: ein 70B-Modell fuer "such die Oeffnungszeiten" kostet
+        Sekunden, und die summieren sich mit jedem der vierundvierzig
+        Agenten. Kennt Cortex zum Anbieter kein kleines Modell (lokal, oder
+        von Hand eingetragen), bleibt es beim Hauptmodell.
+        """
+        if self.subagent_model:
+            return self.subagent_model
+        from cortex.system import fast_model
+
+        return fast_model(self) or self.model
 
     @property
     def api_key_name(self) -> str:
@@ -419,6 +431,24 @@ class Settings:
             kwargs["num_ctx"] = self.context_tokens
         return kwargs
 
+    def thinks(self, model: str) -> bool:
+        """Kann dieses Modell ueberhaupt "nachdenken"?
+
+        `reasoning_effort` ist fuer Modelle gedacht, die vor der Antwort
+        ueberlegen. Ein Llama oder Mistral kennt das nicht: der Wunsch wird
+        entweder stillschweigend weggeworfen (dann kostet er nur Bytes) oder
+        er kommt als Fehler zurueck -- und der Fehler kostet einen ganzen
+        Wiederholungsversuch, also Sekunden, bei jeder Frage. Deshalb wird er
+        nur noch dorthin geschickt, wo er hingehoert.
+        """
+        name = (model or "").lower()
+        if provider_of(model) in ("ollama", "ollama_chat"):
+            return True  # dort schaltet "disable" das Denken bewusst ab
+        return any(
+            wort in name
+            for wort in ("reason", "think", "-r1", "/r1", "qwq", "magistral", "o1", "o3", "gpt-5")
+        )
+
     def fast_kwargs_for(self, model: str) -> dict[str, object]:
         """Wie :meth:`llm_kwargs_for`, aber auf Tempo getrimmt.
 
@@ -434,12 +464,14 @@ class Settings:
             return kwargs
         # In der Cloud dasselbe Problem, nur teurer: ein Denk-Modell ueberlegt
         # sekundenlang, bevor drei Stichworte kommen -- und diese Sekunden
-        # liegen vor JEDER Anfrage. `drop_params` laesst LiteLLM den Wunsch
-        # stillschweigend weglassen, wenn der Anbieter ihn nicht kennt; das
-        # ist hier gefahrlos, weil diese Aufrufe keine Werkzeuge mitschicken,
-        # die dabei verlorengehen koennten.
-        kwargs["reasoning_effort"] = "low"
+        # liegen vor JEDER Anfrage. Modelle, die gar nicht denken koennen,
+        # bekommen den Wunsch erst gar nicht: er wuerde nichts bewirken und
+        # im schlechten Fall einen Fehler samt Wiederholung kosten.
+        if self.thinks(model):
+            kwargs["reasoning_effort"] = "low"
         kwargs["drop_params"] = True
+        # Kein Zeitlimit von hier: die Aufrufer setzen ihr eigenes (Planer,
+        # Master), und zwei Angaben desselben Arguments sind ein TypeError.
         return kwargs
 
     def missing_requirements(self) -> list[str]:

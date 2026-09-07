@@ -22,6 +22,7 @@ from typing import Any
 
 from cortex.cache import Cache
 from cortex.config import Settings
+from cortex.pace import paced
 from cortex.tools import TOOL_SCHEMAS, EventHook, Toolbox
 
 SUBAGENT_PROMPT = """\
@@ -352,17 +353,18 @@ def plan_request(
         "context": f"Bisheriges Gespraech:\n{context}\n\n" if context.strip() else "",
     }
     try:
-        response = litellm.completion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            timeout=max(2.0, settings.planner_timeout),
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "plan", "schema": PLANNER_SCHEMA},
-            },
-            **settings.fast_kwargs_for(model),
-        )
+        with paced(model):
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                timeout=max(2.0, settings.planner_timeout),
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "plan", "schema": PLANNER_SCHEMA},
+                },
+                **settings.fast_kwargs_for(model),
+            )
         raw = (response.choices[0].message.content or "").strip()
     except Exception:
         return True, _located([question.strip()], settings.location)
@@ -444,13 +446,17 @@ def _subagent_kwargs(settings: Settings, model: str) -> dict[str, Any]:
 
     Volles Kontextfenster (sie lesen ganze Seiten), aber ohne Denk-Modus:
     eine eng umrissene Teilfrage braucht keine seitenlange Ueberlegung, und
-    bei vier parallelen Subagenten summiert sich das spuerbar.
+    bei vierundvierzig Agenten summiert sich das zu Minuten. Dazu ein
+    Zeitlimit -- ein haengender Agent darf die Recherche nicht aufhalten,
+    die anderen dreiundvierzig sind ja laengst zurueck.
     """
     kwargs = settings.llm_kwargs_for(model)
     from cortex.config import provider_of
 
     if provider_of(model) in ("ollama", "ollama_chat"):
         kwargs["reasoning_effort"] = "disable"
+    kwargs.setdefault("timeout", 90.0)
+    kwargs.setdefault("drop_params", True)
     return kwargs
 
 
@@ -592,13 +598,14 @@ def _run_one(
                 result.error = result.error or "Abgebrochen."
                 break
             try:
-                response = litellm.completion(
-                    model=model_in_use,
-                    messages=messages,
-                    tools=TOOL_SCHEMAS,
-                    tool_choice="auto",
-                    **_subagent_kwargs(settings, model_in_use),
-                )
+                with paced(model_in_use):
+                    response = litellm.completion(
+                        model=model_in_use,
+                        messages=messages,
+                        tools=TOOL_SCHEMAS,
+                        tool_choice="auto",
+                        **_subagent_kwargs(settings, model_in_use),
+                    )
             except Exception as exc:
                 if model_in_use != settings.model:
                     if on_event:
@@ -697,11 +704,12 @@ def _run_one(
                 }
             )
             try:
-                response = litellm.completion(
-                    model=model_in_use,
-                    messages=messages,
-                    **_subagent_kwargs(settings, model_in_use),
-                )
+                with paced(model_in_use):
+                    response = litellm.completion(
+                        model=model_in_use,
+                        messages=messages,
+                        **_subagent_kwargs(settings, model_in_use),
+                    )
                 result.summary = (response.choices[0].message.content or "").strip()
             except Exception as exc:
                 result.error = f"{type(exc).__name__}: {exc}"

@@ -156,25 +156,33 @@ RUNS = RunBook()
 #: Wie lange die Liste der staerksten Modelle gilt. Sie fragt bei Ollama nach;
 #: bei jedem Aufruf der Kopfzeile waere das eine Abfrage zu viel.
 STRONG_TTL = 30.0
-_strong_cache: dict[str, Any] = {"when": 0.0, "models": []}
+
+#: Je Zweck eine eigene Liste: fuers Programmieren zaehlen andere Modelle als
+#: fuer eine Recherche. Codestral ist beim Code stark und bei der Suche
+#: nutzlos -- eine gemeinsame "Bestenliste" waere fuer beide Seiten falsch.
+_strong_cache: dict[str, dict[str, Any]] = {}
 
 
-def strong_models(limit: int = 3) -> list[dict[str, str]]:
+def strong_models(limit: int = 3, purpose: str = "work") -> list[dict[str, str]]:
     """Die staerksten erreichbaren Modelle -- gemerkt fuer ein paar Sekunden."""
     from cortex.system import strongest_models
 
-    if time.time() - float(_strong_cache["when"]) > STRONG_TTL:
+    purpose = "code" if purpose == "code" else "work"
+    eintrag = _strong_cache.setdefault(purpose, {"when": 0.0, "models": []})
+    if time.time() - float(eintrag["when"]) > STRONG_TTL:
         try:
-            _strong_cache["models"] = strongest_models(SESSION.settings(), limit=max(3, limit))
+            eintrag["models"] = strongest_models(
+                SESSION.settings(), limit=max(3, limit), purpose=purpose
+            )
         except Exception:
-            _strong_cache["models"] = []
-        _strong_cache["when"] = time.time()
-    return list(_strong_cache["models"])[:limit]
+            eintrag["models"] = []
+        eintrag["when"] = time.time()
+    return list(eintrag["models"])[:limit]
 
 
 def forget_strong_models() -> None:
     """Nach einer Aenderung an Modell oder Schluesseln neu nachsehen."""
-    _strong_cache["when"] = 0.0
+    _strong_cache.clear()
 
 #: Alles, was sich auch in `cortex setup` einstellen laesst.
 SETTING_KEYS: tuple[str, ...] = (
@@ -194,6 +202,8 @@ SETTING_KEYS: tuple[str, ...] = (
     "CORTEX_MAX_SUBAGENTS",
     "CORTEX_SUBAGENT_BUDGET",
     "CORTEX_SUBAGENT_PARALLEL",
+    "CORTEX_RPM",
+    "CORTEX_PARALLEL_CALLS",
     "CORTEX_MAX_TOOL_CALLS",
     "CORTEX_CONTEXT_TOKENS",
     "CORTEX_PLANNER_TIMEOUT",
@@ -219,6 +229,8 @@ NUMBERS: dict[str, tuple[int, int]] = {
     "CORTEX_MAX_SUBAGENTS": (1, 12),
     "CORTEX_SUBAGENT_BUDGET": (1, 40),
     "CORTEX_SUBAGENT_PARALLEL": (1, 12),
+    "CORTEX_RPM": (1, 100_000),
+    "CORTEX_PARALLEL_CALLS": (1, 64),
     "CORTEX_MAX_TOOL_CALLS": (1, 200),
     "CORTEX_CONTEXT_TOKENS": (2_000, 2_000_000),
     "CORTEX_PLANNER_TIMEOUT": (1, 600),
@@ -304,7 +316,7 @@ Start im Terminal steht &mdash; die mit <code>?token=</code> am Ende.</p>
 HELP_MARKDOWN = """### Befehle
 
 - `/location <ort>` — Ortsfilter fuer diese Sitzung (leer = aufheben)
-- `/model <name>` — Modell wechseln, z. B. `openai/gpt-4o`
+- `/model <name>` — Modell wechseln, z. B. `mistral/mistral-large-latest`
 - `/max <frage>` — im Pro-Modus mit voller Mannschaft recherchieren
 - `/image <pfad>` — Bild ansehen lassen und damit recherchieren (Datei oder Ordner)
 - `/export html|md|csv` — die letzten Recherchen speichern
@@ -940,6 +952,11 @@ def current_values() -> dict[str, str]:
         "CORTEX_MAX_SUBAGENTS": str(settings.max_subagents),
         "CORTEX_SUBAGENT_BUDGET": str(settings.subagent_budget),
         "CORTEX_SUBAGENT_PARALLEL": str(settings.subagent_parallel),
+        # Leer heisst: was der Anbieter im Freikontingent vertraegt. Der
+        # eingetragene Wert gilt dagegen fuer alle Anbieter -- deshalb steht
+        # er hier so, wie er in der .env steht, und nicht als Vorgabewert.
+        "CORTEX_RPM": os.environ.get("CORTEX_RPM", "").strip(),
+        "CORTEX_PARALLEL_CALLS": os.environ.get("CORTEX_PARALLEL_CALLS", "").strip(),
         "CORTEX_MAX_TOOL_CALLS": str(settings.max_tool_calls),
         "CORTEX_CONTEXT_TOKENS": str(settings.context_tokens),
         "CORTEX_PLANNER_TIMEOUT": str(int(settings.planner_timeout)),
@@ -1476,6 +1493,11 @@ class Handler(BaseHTTPRequestHandler):
                     # oben trotzdem das alte -- man sah also nicht, womit
                     # gerade gearbeitet wird.
                     "strong_model": (strong_models(1) or [{}])[0].get("id", ""),
+                    # Im Code-Modus ist "das staerkste" ein anderes: dort
+                    # zaehlt das Modell fuers Programmieren.
+                    "strong_code_model": (
+                        strong_models(1, purpose="code") or [{}]
+                    )[0].get("id", ""),
                     "google": google_state(settings),
                 }
             )
@@ -1548,11 +1570,14 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/models":
             from cortex.system import available_models
 
+            # ?purpose=code liefert unter "strong" die Modelle fuers
+            # Programmieren, sonst die Arbeitspferde fuer die Recherche.
+            zweck = (parse_qs(urlsplit(self.path).query).get("purpose") or [""])[0].strip()
             self._json(
                 {
                     "models": available_models(SESSION.settings()),
                     # Fuer den Code- und den Pro-Modus: nur die staerksten.
-                    "strong": strong_models(3),
+                    "strong": strong_models(3, purpose=zweck),
                 }
             )
         elif route == "/api/memory":

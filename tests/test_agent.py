@@ -1377,7 +1377,9 @@ def test_setting_the_handler_keeps_the_notes_in_the_prompt(tmp_path) -> None:
     from cortex.cache import Cache
     from cortex.config import Settings as S
 
-    settings = S(model="openai/gpt-4o", data_dir=tmp_path / "d", subagents_auto=False)
+    settings = S(
+        model="mistral/mistral-large-latest", data_dir=tmp_path / "d", subagents_auto=False
+    )
     cache = Cache(settings.db_path, settings.cache_ttl_hours)
     cache.add_note("Ich wohne in Bremen.")
     agent = Agent(settings, cache=cache)
@@ -2242,8 +2244,13 @@ def test_findings_count_as_useful_when_something_is_in_them() -> None:
 def test_the_effort_is_chosen_by_the_user(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
-    """Die Denktiefe steht oben in der Modellauswahl -- drei Stufen."""
+    """Die Denktiefe steht oben in der Modellauswahl -- drei Stufen.
+
+    Sie geht nur an Modelle, die ueberhaupt denken koennen; deshalb laeuft
+    dieser Test auf einem solchen.
+    """
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
+    settings.model = "nvidia_nim/deepseek-ai/deepseek-r1"
     agent = Agent(settings, cache=None, toolbox=toolbox)
 
     kwargs = agent._llm_kwargs()
@@ -2261,6 +2268,25 @@ def test_the_effort_is_chosen_by_the_user(
 
     agent.ask("Frage", stream=False)
     assert agent._llm_kwargs()["reasoning_effort"] == "medium", "leer laesst stehen"
+
+
+def test_a_model_that_cannot_think_is_not_asked_to(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Ein Llama oder Mistral kennt `reasoning_effort` nicht. Der Wunsch
+    bewirkt dort nichts -- und kostet im schlechten Fall einen Fehler samt
+    Wiederholung, also Sekunden bei jeder Frage."""
+    settings.model = "nvidia_nim/meta/llama-3.3-70b-instruct"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    kwargs = agent._llm_kwargs()
+    assert "reasoning_effort" not in kwargs
+    assert kwargs["timeout"] == 120.0, "aber ein Zeitlimit hat jeder Aufruf"
+
+    assert settings.thinks("nvidia_nim/deepseek-ai/deepseek-r1") is True
+    assert settings.thinks("mistral/magistral-medium-latest") is True
+    assert settings.thinks("ollama_chat/qwen3:8b") is True
+    assert settings.thinks("mistral/mistral-large-latest") is False
+    assert settings.thinks("nvidia_nim/meta/llama-3.3-70b-instruct") is False
 
 
 def test_thinking_stays_on_unless_someone_turns_it_off(
@@ -2578,12 +2604,15 @@ def test_code_mode_runs_on_the_strongest_model(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Beim Programmieren kostet ein schwaches Modell am meisten."""
-    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    monkeypatch.setattr(
+        "cortex.system.strongest_model",
+        lambda _s, purpose="work": "mistral/mistral-large-latest",
+    )
     agent = Agent(settings, cache=None, toolbox=toolbox)
     assert agent.active_model == settings.model
 
     agent._apply_mode("code")
-    assert agent.active_model == "anthropic/claude-opus-5"
+    assert agent.active_model == "mistral/mistral-large-latest"
 
     agent._apply_mode("normal")
     assert agent.active_model == settings.model
@@ -2593,9 +2622,35 @@ def test_a_hand_picked_code_model_wins(monkeypatch: pytest.MonkeyPatch, tmp_path
     """Wer selbst eins eintraegt, bekommt seins -- ohne Rangliste."""
     from cortex.system import strongest_model
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    settings = Settings(model="ollama_chat/llama3.1", code_model="openai/gpt-4o")
-    assert strongest_model(settings) == "openai/gpt-4o"
+    monkeypatch.setenv("MISTRAL_API_KEY", "sk-mist-test")
+    settings = Settings(model="ollama_chat/llama3.1", code_model="fremd/eigenes-modell")
+    assert strongest_model(settings) == "fremd/eigenes-modell"
+
+
+def test_code_mode_takes_the_coding_model_and_pro_the_workhorse(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """"Am stärksten" heißt beim Programmieren etwas anderes als bei einer
+    Recherche: Codestral schreibt Code, findet aber keine Öffnungszeiten."""
+    gefragt: list[str] = []
+
+    def fake(_s, purpose="work"):
+        gefragt.append(purpose)
+        return "mistral/codestral-latest" if purpose == "code" else "mistral/mistral-large-latest"
+
+    monkeypatch.setattr("cortex.system.strongest_model", fake)
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+
+    agent._apply_mode("code")
+    assert agent.active_model == "mistral/codestral-latest"
+
+    agent._apply_mode("pro")
+    assert agent.active_model == "mistral/mistral-large-latest"
+    assert gefragt == ["code", "work"], "je Zweck einmal gesucht, dann gemerkt"
+
+    agent._apply_mode("code")
+    assert agent.active_model == "mistral/codestral-latest"
+    assert gefragt == ["code", "work"], "gemerkt heißt gemerkt"
 
 
 def test_the_strongest_model_follows_the_available_providers(
@@ -2603,17 +2658,18 @@ def test_the_strongest_model_follows_the_available_providers(
 ) -> None:
     from cortex.system import strongest_model
 
-    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
+    for name in ("NVIDIA_NIM_API_KEY", "MISTRAL_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
     settings = Settings(model="ollama_chat/llama3.1")
     assert strongest_model(settings) == ""
 
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-    assert strongest_model(settings).startswith("deepseek/")
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-test")
+    assert strongest_model(settings).startswith("nvidia_nim/")
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    assert strongest_model(settings) == "anthropic/claude-opus-5"
+    # Mistral steht in der Rangfolge vorn -- es antwortet spürbar schneller.
+    monkeypatch.setenv("MISTRAL_API_KEY", "mistral-test")
+    assert strongest_model(settings).startswith("mistral/")
 
 
 def test_without_any_cloud_key_the_biggest_local_model_wins(
@@ -2844,12 +2900,15 @@ def test_the_pro_mode_runs_on_the_strongest_model(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Wer Pro waehlt, bittet um das Beste, was da ist."""
-    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    monkeypatch.setattr(
+        "cortex.system.strongest_model",
+        lambda _s, purpose="work": "mistral/mistral-large-latest",
+    )
     agent = Agent(settings, cache=None, toolbox=toolbox)
     assert agent.active_model == settings.model
 
     agent._apply_mode("pro")
-    assert agent.active_model == "anthropic/claude-opus-5"
+    assert agent.active_model == "mistral/mistral-large-latest"
 
     agent._apply_mode("normal")
     assert agent.active_model == settings.model
@@ -3156,7 +3215,10 @@ def test_the_master_hands_out_the_assignments(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     settings.subagents_auto = True
-    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    monkeypatch.setattr(
+        "cortex.system.strongest_model",
+        lambda _s, purpose="work": "mistral/mistral-large-latest",
+    )
     _master_llm(
         monkeypatch,
         {
@@ -3319,7 +3381,10 @@ def test_max_fills_the_crew_and_only_in_the_pro_mode(
 def test_the_strong_model_reaches_the_agents(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
-    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "anthropic/claude-opus-5")
+    monkeypatch.setattr(
+        "cortex.system.strongest_model",
+        lambda _s, purpose="work": "mistral/mistral-large-latest",
+    )
     gesehen: dict[str, Any] = {}
     monkeypatch.setattr(
         "cortex.subagents.run_subagents",
@@ -3329,11 +3394,11 @@ def test_the_strong_model_reaches_the_agents(
     agent._apply_mode("pro")
     assert agent.strong_count == 2
     agent._run_subagents(["a"])
-    assert gesehen["strong_model"] == "anthropic/claude-opus-5"
+    assert gesehen["strong_model"] == "mistral/mistral-large-latest"
 
     # Ohne starkes Modell gibt es auch keine starken Agenten.
-    monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "")
-    agent._code_model = None
+    monkeypatch.setattr("cortex.system.strongest_model", lambda _s, purpose="work": "")
+    agent._code_model.clear()
     assert agent.strong_count == 0
 
 
@@ -3346,10 +3411,8 @@ def test_the_three_strongest_are_offered(monkeypatch: pytest.MonkeyPatch) -> Non
     from cortex.config import Settings
     from cortex.system import strongest_model, strongest_models
 
-    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-x")
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-x")
+    monkeypatch.setenv("MISTRAL_API_KEY", "mistral-x")
     monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: ["gross:70b"])
     monkeypatch.setattr("cortex.local_model.model_size_gb", lambda *a, **k: 40.0)
 
@@ -3368,10 +3431,10 @@ def test_a_hand_picked_model_leads_the_list(monkeypatch: pytest.MonkeyPatch) -> 
     from cortex.config import Settings
     from cortex.system import strongest_models
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-    settings = Settings(model="ollama_chat/klein", code_model="openai/gpt-4o")
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-x")
+    settings = Settings(model="ollama_chat/klein", code_model="mistral/codestral-latest")
     liste = strongest_models(settings, limit=3)
-    assert liste[0]["id"] == "openai/gpt-4o"
+    assert liste[0]["id"] == "mistral/codestral-latest"
     assert "eingetragen" in liste[0]["note"]
 
 
@@ -3379,9 +3442,73 @@ def test_nothing_reachable_is_an_empty_list(monkeypatch: pytest.MonkeyPatch) -> 
     from cortex.config import Settings
     from cortex.system import strongest_model, strongest_models
 
-    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "NVIDIA_API_KEY"):
+    for name in ("NVIDIA_NIM_API_KEY", "MISTRAL_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
     settings = Settings(model="ollama_chat/klein")
     assert strongest_models(settings) == []
     assert strongest_model(settings) == ""
+
+
+# ---------------------------------------------------------------------------
+# Zwei Anbieter, drei Rollen je Anbieter
+# ---------------------------------------------------------------------------
+def test_the_provider_tables_cover_the_same_two_providers() -> None:
+    """Cortex ist auf NVIDIA NIM und Mistral spezialisiert -- überall gleich."""
+    from cortex import system
+
+    beide = {"nvidia_nim", "mistral"}
+    assert set(system.PROVIDER_MODELS) == beide
+    assert set(system.FAST_MODELS) == beide
+    assert set(system.CODING_MODELS) == beide
+    assert set(system.PROVIDER_KEYS) == beide
+    assert set(system.PROVIDER_LIMITS) == beide
+    assert set(system.CODING_ORDER) == beide
+    # Jedes Modell trägt das Präfix seines Anbieters -- sonst landet der
+    # Aufruf beim falschen Schlüssel.
+    for tabelle in (system.PROVIDER_MODELS, system.FAST_MODELS, system.CODING_MODELS):
+        for provider, model in tabelle.items():
+            assert model.startswith(provider + "/"), model
+
+
+def test_the_agents_run_on_the_small_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein 70B-Modell für "such die Öffnungszeiten" kostet Sekunden -- und die
+    summieren sich mit jedem der vierundvierzig Agenten."""
+    from cortex.config import Settings
+    from cortex.system import fast_model
+
+    settings = Settings(model="nvidia_nim/meta/llama-3.3-70b-instruct")
+    assert fast_model(settings) == "nvidia_nim/meta/llama-3.1-8b-instruct"
+    assert settings.effective_subagent_model == fast_model(settings)
+
+    settings = Settings(model="mistral/mistral-large-latest")
+    assert fast_model(settings) == "mistral/mistral-small-latest"
+
+    # Wer selbst eins einträgt, behält seins.
+    settings = Settings(model="mistral/mistral-large-latest", subagent_model="fremd/winzig")
+    assert settings.effective_subagent_model == "fremd/winzig"
+
+    # Und wo Cortex kein kleines Modell kennt, bleibt es beim Hauptmodell.
+    settings = Settings(model="ollama_chat/gemma4:12b")
+    assert fast_model(settings) == ""
+    assert settings.effective_subagent_model == "ollama_chat/gemma4:12b"
+
+
+def test_the_coding_models_are_offered_for_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codestral schreibt Code und findet keine Öffnungszeiten -- die Auswahl
+    im Code-Modus ist deshalb eine andere als die im Pro-Modus."""
+    from cortex.config import Settings
+    from cortex.system import strongest_models
+
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-x")
+    monkeypatch.setenv("MISTRAL_API_KEY", "mistral-x")
+    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
+    settings = Settings(model="ollama_chat/klein")
+
+    fuers_programmieren = [e["id"] for e in strongest_models(settings, purpose="code")]
+    assert fuers_programmieren == ["mistral/codestral-latest",
+                                   "nvidia_nim/qwen/qwen2.5-coder-32b-instruct"]
+
+    fuer_die_recherche = [e["id"] for e in strongest_models(settings, purpose="work")]
+    assert fuer_die_recherche == ["mistral/mistral-large-latest",
+                                  "nvidia_nim/meta/llama-3.3-70b-instruct"]

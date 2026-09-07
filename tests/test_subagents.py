@@ -270,9 +270,14 @@ def test_subagents_use_their_own_model(
     assert used == ["ollama_chat/qwen3:1.7b"]
 
 
-def test_without_its_own_model_the_main_one_is_used(
+def test_without_its_own_model_the_small_one_is_used(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
+    """Ohne eigene Angabe das schnelle kleine Modell des Anbieters.
+
+    Ein 70B-Modell für "such die Öffnungszeiten" kostet Sekunden, und die
+    summieren sich mit jedem der vierundvierzig Agenten.
+    """
     settings.subagent_model = ""
     used: list[str] = []
     monkeypatch.setattr(
@@ -280,7 +285,22 @@ def test_without_its_own_model_the_main_one_is_used(
         lambda **kwargs: used.append(kwargs["model"]) or _reply(content="fertig"),
     )
     run_subagents(["Teilfrage"], settings, parallel=1)
-    assert used == [settings.model]
+    assert used == ["mistral/mistral-small-latest"]
+
+
+def test_an_unknown_provider_keeps_the_main_model(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Kennt Cortex zum Anbieter kein kleines Modell, bleibt es beim großen."""
+    settings.subagent_model = ""
+    settings.model = "fremd/riesenmodell"
+    used: list[str] = []
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: used.append(kwargs["model"]) or _reply(content="fertig"),
+    )
+    run_subagents(["Teilfrage"], settings, parallel=1)
+    assert used == ["fremd/riesenmodell"]
 
 
 def test_overflowing_subagent_calls_still_get_answers(
@@ -363,8 +383,13 @@ def test_dead_subagent_model_falls_back_to_the_main_model(
 def test_dead_main_model_stays_dead(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    """Ohne eigenes Subagenten-Modell gibt es nichts zum Ausweichen."""
-    settings.subagent_model = ""
+    """Ist das Hauptmodell selbst tot, gibt es nichts zum Ausweichen.
+
+    Das kleine Modell darf einmal ausfallen -- dann übernimmt das große.
+    Fällt auch das aus, ist Schluss: ein drittes Mal fragen wäre dieselbe
+    Antwort und dieselbe Wartezeit noch einmal.
+    """
+    settings.subagent_model = settings.model
     calls = {"n": 0}
 
     def failing(**kwargs: Any):
@@ -375,6 +400,23 @@ def test_dead_main_model_stays_dead(
     results = run_subagents(["Teilfrage"], settings, parallel=1)
     assert results[0].error
     assert calls["n"] == 1
+
+
+def test_the_small_model_falls_back_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Auch das automatisch gewählte kleine Modell hat einen Ausweg."""
+    settings.subagent_model = ""
+    used: list[str] = []
+
+    def failing(**kwargs: Any):
+        used.append(kwargs["model"])
+        raise RuntimeError("weg")
+
+    monkeypatch.setattr("litellm.completion", failing)
+    results = run_subagents(["Teilfrage"], settings, parallel=1)
+    assert results[0].error
+    assert used == ["mistral/mistral-small-latest", settings.model]
 
 
 # ---------------------------------------------------------------------------

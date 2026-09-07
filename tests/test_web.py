@@ -86,7 +86,7 @@ class FakeAgent:
 @pytest.fixture
 def web_settings(tmp_path: Path) -> Settings:
     return Settings(
-        model="openai/gpt-4o",
+        model="mistral/mistral-large-latest",
         data_dir=tmp_path / "data",
         env_path=tmp_path / ".env",
         location="Bremen",
@@ -154,7 +154,7 @@ def sse_events(raw: bytes) -> list[dict[str, Any]]:
 def test_current_values_covers_every_setting_key(session: web.ChatSession) -> None:
     values = web.current_values()
     assert set(values) == set(web.SETTING_KEYS)
-    assert values["CORTEX_MODEL"] == "openai/gpt-4o"
+    assert values["CORTEX_MODEL"] == "mistral/mistral-large-latest"
     assert values["CORTEX_LOCATION"] == "Bremen"
     assert values["CORTEX_SUBAGENTS_AUTO"] == "false"
 
@@ -187,19 +187,22 @@ def test_api_key_is_stored_under_the_provider_name(
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     web.save_values(
-        {"CORTEX_MODEL": "anthropic/claude-sonnet-4", web.API_KEY_FIELD: "sk-ant-neu"}
+        {"CORTEX_MODEL": "nvidia_nim/meta/llama-3.3-70b-instruct",
+         web.API_KEY_FIELD: "nvapi-neu"}
     )
-    assert "ANTHROPIC_API_KEY=sk-ant-neu" in target.read_text()
+    assert "NVIDIA_NIM_API_KEY=nvapi-neu" in target.read_text()
 
 
 def test_empty_api_key_never_deletes_the_stored_one(
     session: web.ChatSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / ".env"
-    target.write_text("OPENAI_API_KEY=sk-alt\n")
+    target.write_text("MISTRAL_API_KEY=sk-alt\n")
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"CORTEX_MODEL": "openai/gpt-4o", web.API_KEY_FIELD: "   "})
-    assert "OPENAI_API_KEY=sk-alt" in target.read_text()
+    web.save_values(
+        {"CORTEX_MODEL": "mistral/mistral-large-latest", web.API_KEY_FIELD: "   "}
+    )
+    assert "MISTRAL_API_KEY=sk-alt" in target.read_text()
 
 
 def test_unknown_keys_are_ignored(
@@ -207,7 +210,7 @@ def test_unknown_keys_are_ignored(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"CORTEX_MODEL": "openai/gpt-4o", "PATH": "/boese"})
+    web.save_values({"CORTEX_MODEL": "mistral/mistral-large-latest", "PATH": "/boese"})
     assert "PATH=/boese" not in target.read_text()
 
 
@@ -225,7 +228,7 @@ def test_config_endpoint_reports_version_and_values(client) -> None:
     payload = json.loads(body)
     assert payload["version"] == web.__version__
     assert set(payload["values"]) == set(web.SETTING_KEYS)
-    assert payload["key_name"] == "OPENAI_API_KEY"
+    assert payload["key_name"] == "MISTRAL_API_KEY"
 
 
 def test_notes_and_history_endpoints(client) -> None:
@@ -360,12 +363,12 @@ def test_location_command_changes_the_filter(client, session: web.ChatSession) -
 def test_model_command_rejects_a_model_without_provider(client, session: web.ChatSession) -> None:
     _, body = client("POST", "/api/command", {"line": "/model nemotron-3"})
     text = json.loads(body)["text"]
-    assert "openai/gpt-4o" in text  # das bisherige Modell bleibt aktiv
+    assert "mistral/mistral-large-latest" in text  # das bisherige Modell bleibt aktiv
 
 
 def test_model_command_without_argument_reports_the_current_one(client) -> None:
     _, body = client("POST", "/api/command", {"line": "/model"})
-    assert "openai/gpt-4o" in json.loads(body)["text"]
+    assert "mistral/mistral-large-latest" in json.loads(body)["text"]
 
 
 def test_clear_command_empties_the_thread(client, session: web.ChatSession) -> None:
@@ -448,7 +451,7 @@ def test_saved_settings_take_effect_without_a_restart(
     from cortex.config import reset_settings_cache
 
     env = tmp_path / ".env"
-    env.write_text("CORTEX_MODEL=openai/gpt-4o\nCORTEX_LOCATION=Bremen\n")
+    env.write_text("CORTEX_MODEL=mistral/mistral-large-latest\nCORTEX_LOCATION=Bremen\n")
     monkeypatch.setattr("cortex.config.ENV_CANDIDATES", (env,))
     monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.delenv("CORTEX_LOCATION", raising=False)
@@ -459,7 +462,7 @@ def test_saved_settings_take_effect_without_a_restart(
     monkeypatch.setattr(web, "SESSION", fresh)
     assert fresh.settings().location == "Bremen"
 
-    web.save_values({"CORTEX_MODEL": "openai/gpt-4o", "CORTEX_LOCATION": "Hamburg"})
+    web.save_values({"CORTEX_MODEL": "mistral/mistral-large-latest", "CORTEX_LOCATION": "Hamburg"})
     assert fresh.settings().location == "Hamburg"
     reset_settings_cache()
 
@@ -1249,7 +1252,7 @@ def test_the_model_list_offers_what_actually_works(
     models = json.loads(body)["models"]
     ids = [item["id"] for item in models]
     assert "ollama_chat/gemma4:12b" in ids
-    assert "openai/gpt-4o" in ids
+    assert "mistral/mistral-large-latest" in ids
     # Ohne Schluessel keine Zeile -- sonst waehlt man etwas, das nicht laeuft.
     assert not any(item["id"].startswith("anthropic/") for item in models)
     assert all(item["note"] for item in models), "jede Zeile braucht eine Erklaerung"
@@ -1405,7 +1408,11 @@ def test_a_missing_provider_prefix_is_added() -> None:
 
 
 def test_a_complete_model_id_is_left_alone() -> None:
-    for model in ("openai/gpt-4o", "anthropic/claude-sonnet-4-6", "ollama_chat/gemma4:12b"):
+    for model in (
+        "mistral/mistral-large-latest",
+        "nvidia_nim/meta/llama-3.3-70b-instruct",
+        "ollama_chat/gemma4:12b",
+    ):
         assert web.fix_model_id(model) == model
 
 
@@ -1460,7 +1467,7 @@ def test_the_ui_shows_what_a_key_looks_like() -> None:
     """Wer den falschen Schluessel einfuegt, soll es sofort sehen."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "nvapi-" in html
-    assert "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in html
+    assert "nvidia_nim/meta/llama-3.3-70b-instruct" in html
 
 
 # -- Chats statt Einzelfragen ---------------------------------------------
@@ -1558,8 +1565,8 @@ def test_a_proxy_is_not_mistaken_for_ollama() -> None:
     from cortex.config import base_fits
 
     assert base_fits("http://192.168.1.9:4000", "nvidia_nim/meta/llama")
-    assert base_fits("http://localhost:4000", "openai/gpt-4o")
-    assert not base_fits("http://192.168.1.9:11434", "openai/gpt-4o")
+    assert base_fits("http://localhost:4000", "mistral/mistral-large-latest")
+    assert not base_fits("http://192.168.1.9:11434", "mistral/mistral-large-latest")
 
 
 # ---------------------------------------------------------------------------
@@ -1647,7 +1654,7 @@ def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.Mo
         "POST",
         "/api/probe",
         {
-            "CORTEX_MODEL": "openai/gpt-4o",
+            "CORTEX_MODEL": "mistral/mistral-large-latest",
             "CORTEX_SEARCH_BACKEND": "brave",
             web.API_KEY_FIELD: "sk-neu",
         },
@@ -1655,7 +1662,7 @@ def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.Mo
     assert status == 200
     data = json.loads(body)
     assert data["ok"] is True
-    assert seen == {"model": "openai/gpt-4o", "key": "sk-neu", "backend": "brave"}
+    assert seen == {"model": "mistral/mistral-large-latest", "key": "sk-neu", "backend": "brave"}
 
 
 def test_the_probe_reports_a_failure_without_crashing(
@@ -1663,7 +1670,7 @@ def test_the_probe_reports_a_failure_without_crashing(
 ) -> None:
     monkeypatch.setattr("cortex.probe.check_llm", lambda *a, **k: (False, "401 Unauthorized"))
     monkeypatch.setattr("cortex.probe.check_search", lambda *a, **k: (True, "3 Treffer"))
-    status, body = client("POST", "/api/probe", {"CORTEX_MODEL": "openai/gpt-4o"})
+    status, body = client("POST", "/api/probe", {"CORTEX_MODEL": "mistral/mistral-large-latest"})
     data = json.loads(body)
     assert status == 200
     assert data["ok"] is False
@@ -1684,7 +1691,7 @@ def test_a_leftover_ollama_base_is_ignored_in_the_probe(
     client(
         "POST",
         "/api/probe",
-        {"CORTEX_MODEL": "openai/gpt-4o", "CORTEX_API_BASE": "http://localhost:11434"},
+        {"CORTEX_MODEL": "mistral/mistral-large-latest", "CORTEX_API_BASE": "http://localhost:11434"},
     )
     assert seen["base"] == ""
 
@@ -2549,7 +2556,7 @@ def test_the_counter_can_be_read_and_reset(client, web_settings: Settings) -> No
     from cortex.usage import UsageLog
 
     log = UsageLog(web_settings.db_path)
-    log.record("openai/gpt-4o", 300, 30)
+    log.record("mistral/mistral-large-latest", 300, 30)
 
     status, data = client("GET", "/api/usage")
     assert status == 200
@@ -2928,6 +2935,23 @@ def test_a_number_outside_its_range_is_refused(client) -> None:
     status, data = client("POST", "/api/config", {"CORTEX_MAX_SUBAGENTS": "5000"})
     assert status == 400
     assert "ausserhalb" in json.loads(data)["error"]
+
+
+def test_the_request_rate_is_settable_and_checked(client) -> None:
+    """Wer einen größeren Vertrag hat, hebt die Grenze an -- aber mit Zahlen."""
+    assert "CORTEX_RPM" in web.SETTING_KEYS
+    assert "CORTEX_PARALLEL_CALLS" in web.SETTING_KEYS
+
+    status, data = client("POST", "/api/config", {"CORTEX_RPM": "viele"})
+    assert status == 400
+    assert "keine Zahl" in json.loads(data)["error"]
+
+    status, data = client("POST", "/api/config", {"CORTEX_PARALLEL_CALLS": "500"})
+    assert status == 400
+    assert "ausserhalb" in json.loads(data)["error"]
+
+    # Leer heißt "was der Anbieter verträgt" -- und ist erlaubt.
+    assert client("POST", "/api/config", {"CORTEX_RPM": ""})[0] == 200
 
 
 def test_an_invented_choice_is_refused(client) -> None:

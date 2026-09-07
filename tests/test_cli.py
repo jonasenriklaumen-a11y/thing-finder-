@@ -21,8 +21,8 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cli, "ENV_CANDIDATES", (), raising=False)
     monkeypatch.setattr("cortex.config.ENV_CANDIDATES", ())
     monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("CORTEX_MODEL", "openai/gpt-4o")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("CORTEX_MODEL", "mistral/mistral-large-latest")
+    monkeypatch.setenv("MISTRAL_API_KEY", "sk-test")
     monkeypatch.setenv("CORTEX_SUBAGENTS_AUTO", "false")
     monkeypatch.delenv("CORTEX_LOCATION", raising=False)
     from cortex.config import reset_settings_cache
@@ -43,12 +43,12 @@ def test_config_reports_complete_setup() -> None:
 
 
 def test_config_reports_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.delenv("MISTRAL_API_KEY")
     from cortex.config import reset_settings_cache
 
     reset_settings_cache()
     result = runner.invoke(cli.app, ["config"])
-    assert "OPENAI_API_KEY fehlt" in result.output
+    assert "MISTRAL_API_KEY fehlt" in result.output
 
 
 def test_search_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,7 +151,7 @@ def test_one_shot_question(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_chat_aborts_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.delenv("MISTRAL_API_KEY")
     from cortex.config import reset_settings_cache
 
     reset_settings_cache()
@@ -171,10 +171,10 @@ def test_slash_help_and_quit(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_slash_location_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("litellm.completion", _llm())
     result = runner.invoke(
-        cli.app, ["chat"], input="/location Köln\n/model openai/gpt-4o-mini\n/quit\n"
+        cli.app, ["chat"], input="/location Köln\n/model mistral/mistral-small-latest\n/quit\n"
     )
     assert "Ortsfilter: Köln" in result.output
-    assert "Modell: openai/gpt-4o-mini" in result.output
+    assert "Modell: mistral/mistral-small-latest" in result.output
 
 
 def test_slash_clear_and_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -545,7 +545,7 @@ def test_vision_only_leaves_the_text_model_alone(
     state = _fake_ollama(monkeypatch)
     monkeypatch.setattr(lm, "verify_vision", lambda *a, **k: (True, "Testbild erkannt"))
     target = tmp_path / ".env"
-    target.write_text("CORTEX_MODEL=anthropic/claude-sonnet-4-6\n", encoding="utf-8")
+    target.write_text("CORTEX_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct\n", encoding="utf-8")
     result = runner.invoke(
         cli.app,
         ["install-model", "--vision-only", "--vision-model", "llava:7b", "--env-file", str(target)],
@@ -555,7 +555,7 @@ def test_vision_only_leaves_the_text_model_alone(
     content = target.read_text(encoding="utf-8")
     assert "CORTEX_VISION_MODEL=ollama_chat/llava:7b" in content
     # Das bestehende Hauptmodell bleibt unangetastet.
-    assert "CORTEX_MODEL=anthropic/claude-sonnet-4-6" in content
+    assert "CORTEX_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct" in content
 
 
 def test_blind_vision_model_is_not_written(

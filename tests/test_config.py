@@ -29,9 +29,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def test_provider_and_key_name() -> None:
-    assert config.provider_of("anthropic/claude-sonnet-4-6") == "anthropic"
-    assert config.api_key_name_for("anthropic/claude-sonnet-4-6") == "ANTHROPIC_API_KEY"
-    assert config.api_key_name_for("openai/gpt-4o") == "OPENAI_API_KEY"
+    assert config.provider_of("mistral/mistral-large-latest") == "mistral"
+    assert config.api_key_name_for("mistral/mistral-large-latest") == "MISTRAL_API_KEY"
     assert config.api_key_name_for("ollama/llama3.1") == ""
 
 
@@ -46,20 +45,20 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 def test_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setenv("CORTEX_MODEL", "openai/gpt-4o")
+    monkeypatch.setenv("CORTEX_MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
     monkeypatch.setenv("CORTEX_MAX_TOOL_CALLS", "5")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-1234")
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-test-1234")
     settings = config.get_settings()
-    assert settings.model == "openai/gpt-4o"
+    assert settings.model == "nvidia_nim/meta/llama-3.3-70b-instruct"
     assert settings.max_tool_calls == 5
-    assert settings.api_key == "sk-test-1234"
+    assert settings.api_key == "nvapi-test-1234"
     assert settings.missing_requirements() == []
 
 
 def test_missing_requirements_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
     settings = config.get_settings()
-    assert any("ANTHROPIC_API_KEY" in problem for problem in settings.missing_requirements())
+    assert any("MISTRAL_API_KEY" in problem for problem in settings.missing_requirements())
 
 
 def test_write_env_file_preserves_comments(tmp_path: Path) -> None:
@@ -112,10 +111,10 @@ def test_nvidia_without_key_is_reported(
 @pytest.mark.parametrize(
     ("model", "key_name"),
     [
-        ("xai/grok-2", "XAI_API_KEY"),
-        ("together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo", "TOGETHER_API_KEY"),
-        ("cerebras/llama-3.3-70b", "CEREBRAS_API_KEY"),
-        ("perplexity/sonar", "PERPLEXITYAI_API_KEY"),
+        ("mistral/mistral-small-latest", "MISTRAL_API_KEY"),
+        ("nvidia_nim/qwen/qwen2.5-coder-32b-instruct", "NVIDIA_NIM_API_KEY"),
+        ("ollama_chat/qwen2.5:7b", ""),
+        ("lm_studio/irgendwas", ""),
     ],
 )
 def test_further_providers(model: str, key_name: str) -> None:
@@ -135,7 +134,7 @@ def test_generic_key_does_not_override_known_providers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("CORTEX_API_KEY", "geheim")
-    assert config.api_key_name_for("anthropic/claude-sonnet-4-6") == "ANTHROPIC_API_KEY"
+    assert config.api_key_name_for("mistral/mistral-large-latest") == "MISTRAL_API_KEY"
     # Ollama braucht weiterhin keinen Key.
     assert config.api_key_name_for("ollama/llama3.1") == ""
 
@@ -237,9 +236,9 @@ def test_ollama_models_get_a_real_context_window() -> None:
 
 
 def test_cloud_models_never_get_num_ctx(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fremde Anbieter kennen den Parameter nicht -- er darf nie mitgehen."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-    for model in ("anthropic/claude-sonnet-4-6", "openai/gpt-4o", "nvidia_nim/meta/llama-3.3"):
+    """Anbieter in der Cloud kennen den Parameter nicht -- er darf nie mitgehen."""
+    monkeypatch.setenv("MISTRAL_API_KEY", "sk-mist-x")
+    for model in ("mistral/mistral-large-latest", "nvidia_nim/meta/llama-3.3"):
         settings = config.Settings(model=model)
         assert "num_ctx" not in settings.llm_kwargs(), model
 
@@ -268,23 +267,40 @@ def test_local_models_run_two_subagents() -> None:
 
 
 def test_cloud_models_use_the_full_subagent_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """In der Cloud kostet Warten nur Zeit, kein RAM -- also alle auf einmal."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-    settings = config.Settings(model="anthropic/claude-sonnet-4-6", max_subagents=12)
+    """In der Cloud kostet Warten nur Zeit, kein RAM -- also alle auf einmal.
+
+    Gilt nur, solange der Anbieter keine eigene Grenze nennt; fuer die
+    beiden bekannten tut er das (siehe unten).
+    """
+    settings = config.Settings(model="fremd/riesenmodell", max_subagents=12)
     assert settings.effective_parallel == 12
 
 
-def test_parallelism_never_drops_below_one(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-    settings = config.Settings(model="anthropic/claude-sonnet-4-6", max_subagents=0)
+def test_the_provider_limit_caps_the_parallelism() -> None:
+    """Vierundvierzig gleichzeitige Anfragen an NVIDIA bringen nur 429er."""
+    settings = config.Settings(
+        model="nvidia_nim/meta/llama-3.3-70b-instruct",
+        subagent_model="nvidia_nim/meta/llama-3.1-8b-instruct",
+        max_subagents=44,
+    )
+    assert settings.parallel_for(44) == 4
+    settings = config.Settings(
+        model="mistral/mistral-large-latest",
+        subagent_model="mistral/mistral-small-latest",
+        max_subagents=44,
+    )
+    assert settings.parallel_for(44) == 8
+
+
+def test_parallelism_never_drops_below_one() -> None:
+    settings = config.Settings(model="fremd/riesenmodell", max_subagents=0)
     assert settings.effective_parallel == 1
 
 
-def test_parallelism_follows_the_subagent_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parallelism_follows_the_subagent_model() -> None:
     """Entscheidend ist, wo die Subagenten laufen -- nicht das Hauptmodell."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
     settings = config.Settings(
-        model="anthropic/claude-sonnet-4-6", subagent_model="ollama_chat/qwen3:1.7b"
+        model="fremd/riesenmodell", subagent_model="ollama_chat/qwen3:1.7b"
     )
     assert settings.effective_parallel == 2
 
@@ -294,11 +310,10 @@ def test_explicit_parallelism_wins() -> None:
     assert settings.effective_parallel == 6
 
 
-def test_the_parallelism_follows_the_number_of_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_parallelism_follows_the_number_of_agents() -> None:
     """Der Pro-Modus schiebt die Zahl hoch -- sonst liefen 24 Teilfragen in
     zwei Wellen und die Breite kostete das Doppelte an Wartezeit."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
-    settings = config.Settings(model="anthropic/claude-sonnet-4-6", max_subagents=12)
+    settings = config.Settings(model="fremd/riesenmodell", max_subagents=12)
     assert settings.parallel_for(24) == 24
     assert settings.parallel_for(12) == 12
     assert settings.parallel_for(0) == 1

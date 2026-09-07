@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from cortex.config import Settings
+from cortex.pace import paced
 from cortex.subagents import Task, as_task
 
 #: Hoechstens so viele Nachrunden. Zwei sind das Mass: nach der zweiten liegt
@@ -185,17 +186,18 @@ def _json_call(
 
     litellm.suppress_debug_info = True
     try:
-        response = litellm.completion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens,
-            timeout=max(10.0, settings.planner_timeout * 3),
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": name, "schema": schema},
-            },
-            **settings.fast_kwargs_for(model),
-        )
+        with paced(model):
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                timeout=max(10.0, settings.planner_timeout * 3),
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": name, "schema": schema},
+                },
+                **settings.fast_kwargs_for(model),
+            )
         raw = (response.choices[0].message.content or "").strip()
     except Exception:
         return {}

@@ -19,103 +19,93 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-#: Kurzbeschreibungen der Anbieter. Was das Modell kann, in einem Halbsatz --
-#: mehr passt nicht neben eine Auswahlliste.
+#: Cortex ist auf zwei Anbieter spezialisiert: **NVIDIA NIM** und **Mistral**.
+#:
+#: Das ist eine Entscheidung, keine Sparmassnahme. Eine Liste mit dreizehn
+#: Anbietern sieht grosszuegig aus, bedeutet aber dreizehnmal "irgendein
+#: Standardmodell, ungetestet, mit unbekannten Grenzen". Zwei Anbieter kann
+#: man kennen: welches Modell wofuer, wie schnell es antwortet, wie viele
+#: Anfragen pro Minute es vertraegt -- und genau danach richtet sich Cortex
+#: dann auch (siehe PROVIDER_LIMITS und `cortex/pace.py`).
+#:
+#: Lokale Modelle ueber Ollama bleiben davon unberuehrt: sie sind kein
+#: Anbieter, sondern der Weg, ganz ohne einen auszukommen.
+#:
 #: Diese Texte liest der Nutzer -- hier gehoeren echte Umlaute hin, anders
 #: als in Kommentaren und Codenamen.
 PROVIDER_NOTES: dict[str, str] = {
-    "anthropic": "Versteht lange Texte gut, stark bei ausführlichen Recherchen",
-    "openai": "Breit einsetzbar, schnell, erkennt auch Bilder",
-    "gemini": "Sehr großes Kontextfenster, günstig",
-    "nvidia_nim": "Offene Modelle bei NVIDIA, großzügiges Freikontingent",
-    "xai": "Grok-Modelle, kennt aktuelle Ereignisse",
-    "groq": "Antwortet außergewöhnlich schnell",
-    "deepseek": "Günstig und stark beim Schlussfolgern",
-    "together_ai": "Viele offene Modelle unter einem Schlüssel",
-    "fireworks_ai": "Offene Modelle, schnelle Antworten",
-    "cerebras": "Schreibt die Antwort extrem schnell",
-    "perplexity": "Sucht von sich aus im Web mit",
-    "openrouter": "Ein Schlüssel für viele Anbieter",
-    "mistral": "Europäischer Anbieter",
+    "nvidia_nim": "Offene Modelle bei NVIDIA, großzügiges Freikontingent (40 Anfragen/Minute)",
+    "mistral": "Europäischer Anbieter, antwortet schnell, Server in der EU",
     "ollama_chat": "Läuft auf deinem Rechner: keine Kosten, nichts verlässt das Haus",
 }
 
 #: Wie ein Anbieter in der Auswahl heisst. "ollama_chat" sagt niemandem etwas.
 PROVIDER_LABELS: dict[str, str] = {
+    "nvidia_nim": "NVIDIA",
+    "mistral": "Mistral",
     "ollama_chat": "lokal",
     "ollama": "lokal",
-    "nvidia_nim": "NVIDIA",
-    "together_ai": "Together",
-    "fireworks_ai": "Fireworks",
-    "openai": "OpenAI",
-    "anthropic": "Anthropic",
-    "gemini": "Google",
-    "xai": "xAI",
-    "groq": "Groq",
-    "deepseek": "DeepSeek",
-    "mistral": "Mistral",
-    "perplexity": "Perplexity",
-    "openrouter": "OpenRouter",
-    "cerebras": "Cerebras",
 }
 
-#: Ein uebliches Modell je Anbieter, damit die Auswahl nicht leer bleibt.
+#: Das Arbeitspferd je Anbieter: gut genug fuer alles, was Cortex den ganzen
+#: Tag tut -- recherchieren, lesen, zusammenfassen.
 PROVIDER_MODELS: dict[str, str] = {
-    "anthropic": "anthropic/claude-sonnet-5",
-    "openai": "openai/gpt-4o",
-    "gemini": "gemini/gemini-2.0-flash",
     "nvidia_nim": "nvidia_nim/meta/llama-3.3-70b-instruct",
-    "xai": "xai/grok-2-latest",
-    "groq": "groq/llama-3.3-70b-versatile",
-    "deepseek": "deepseek/deepseek-chat",
-    "together_ai": "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "fireworks_ai": "fireworks_ai/accounts/fireworks/models/llama-v3p3-70b-instruct",
-    "cerebras": "cerebras/llama3.3-70b",
-    "perplexity": "perplexity/sonar",
-    "openrouter": "openrouter/meta-llama/llama-3.3-70b-instruct",
     "mistral": "mistral/mistral-large-latest",
 }
 
-#: Anbieter, deren Schluessel unter diesem Namen in der Umgebung steht.
-#: Fuers Programmieren das jeweils staerkste Modell eines Anbieters -- dort,
-#: wo es ein anderes ist als das Standardmodell aus PROVIDER_MODELS.
-CODING_MODELS: dict[str, str] = {
-    "anthropic": "anthropic/claude-opus-5",
+#: Das schnelle kleine Modell je Anbieter. Es macht die Arbeit, bei der es
+#: auf Tempo ankommt und nicht auf Tiefe: die Vorpruefung vor jeder Frage,
+#: die Planung -- und vor allem die Rechercheagenten, von denen es viele
+#: gleichzeitig gibt. Ein 70B-Modell fuer "such mir die Oeffnungszeiten"
+#: kostet Sekunden, die sich mit jedem Agenten summieren.
+FAST_MODELS: dict[str, str] = {
+    "nvidia_nim": "nvidia_nim/meta/llama-3.1-8b-instruct",
+    "mistral": "mistral/mistral-small-latest",
 }
 
-#: Grobe Rangfolge fuers Programmieren. Sie entscheidet nur, welcher der
-#: eingerichteten Anbieter im Code-Modus zum Zug kommt -- wer eine andere
-#: Meinung hat, traegt unter CORTEX_CODE_MODEL sein Modell selbst ein.
-CODING_ORDER: tuple[str, ...] = (
-    "anthropic",
-    "openai",
-    "deepseek",
-    "gemini",
-    "mistral",
-    "xai",
-    "groq",
-    "cerebras",
-    "together_ai",
-    "fireworks_ai",
-    "openrouter",
-    "perplexity",
-)
+#: Fuers Programmieren das jeweils staerkste Modell eines Anbieters -- dort,
+#: wo es ein anderes ist als das Arbeitspferd.
+CODING_MODELS: dict[str, str] = {
+    "nvidia_nim": "nvidia_nim/qwen/qwen2.5-coder-32b-instruct",
+    "mistral": "mistral/codestral-latest",
+}
+
+#: Grobe Rangfolge. Sie entscheidet, welcher der eingerichteten Anbieter im
+#: Code- und im Pro-Modus zum Zug kommt. Mistral steht vorn, weil es
+#: spuerbar schneller antwortet; wer es anders sieht, traegt unter
+#: CORTEX_CODE_MODEL sein Modell selbst ein.
+CODING_ORDER: tuple[str, ...] = ("mistral", "nvidia_nim")
 
 PROVIDER_KEYS: dict[str, str] = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "gemini": "GEMINI_API_KEY",
     "nvidia_nim": "NVIDIA_NIM_API_KEY",
-    "xai": "XAI_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "together_ai": "TOGETHER_API_KEY",
-    "fireworks_ai": "FIREWORKS_API_KEY",
-    "cerebras": "CEREBRAS_API_KEY",
-    "perplexity": "PERPLEXITYAI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
     "mistral": "MISTRAL_API_KEY",
 }
+
+#: Was der Anbieter vertraegt: (Anfragen je Minute, gleichzeitige Anfragen).
+#:
+#: Die vierzig Anfragen pro Minute bei NVIDIA sind der Grund, warum Cortex
+#: dort "sehr sehr lange" gebraucht hat: vierundvierzig Agenten schicken
+#: ihre Anfragen auf einmal los, die Haelfte kommt als 429 zurueck, jede
+#: davon wird wiederholt -- und aus einer Recherche werden Minuten Wartezeit,
+#: in denen nichts passiert. Cortex haelt das Mass jetzt selbst ein (siehe
+#: `cortex/pace.py`): gleichmaessig verteilt statt in Wellen gegen die Wand.
+#:
+#: Wer einen groesseren Vertrag hat, hebt es mit CORTEX_RPM und
+#: CORTEX_PARALLEL_CALLS an.
+PROVIDER_LIMITS: dict[str, tuple[int, int]] = {
+    "nvidia_nim": (40, 4),
+    "mistral": (240, 8),
+}
+
+
+def provider_limits(provider: str) -> tuple[int, int]:
+    """(Anfragen je Minute, gleichzeitige Anfragen) fuer einen Anbieter.
+
+    Unbekannt heisst unbegrenzt: lokale Modelle und alles, was jemand von
+    Hand eintraegt, drosselt Cortex nicht.
+    """
+    return PROVIDER_LIMITS.get(provider or "", (0, 0))
 
 
 # ---------------------------------------------------------------------------
@@ -232,14 +222,21 @@ def snapshot(data_dir: Path | str | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Auswahl der Modelle
 # ---------------------------------------------------------------------------
-def strongest_models(settings: Any, limit: int = 3) -> list[dict[str, str]]:
+def strongest_models(
+    settings: Any, limit: int = 3, purpose: str = "work"
+) -> list[dict[str, str]]:
     """Die staerksten erreichbaren Modelle -- das beste zuerst.
 
-    Dieselbe Rangfolge wie eh und je, nur nicht mehr auf einen Treffer
-    verkuerzt: ein von Hand eingetragenes Code-Modell schlaegt alles, dann
-    kommen die eingerichteten Cloud-Anbieter nach `CODING_ORDER`, danach die
-    lokal installierten Modelle, das groesste zuerst -- bei Ollama ist die
-    Groesse der beste Anhaltspunkt, den es ohne Messung gibt.
+    Args:
+        purpose: "code" nimmt je Anbieter das Modell fuers Programmieren
+            (Codestral, Qwen-Coder), "work" das Arbeitspferd. Der Unterschied
+            zaehlt: ein Code-Modell auf eine Recherchefrage anzusetzen ist
+            genauso verkehrt wie umgekehrt.
+
+    Die Rangfolge: ein von Hand eingetragenes Code-Modell schlaegt alles, dann
+    kommen die eingerichteten Anbieter nach `CODING_ORDER`, danach die lokal
+    installierten Modelle, das groesste zuerst -- bei Ollama ist die Groesse
+    der beste Anhaltspunkt, den es ohne Messung gibt.
 
     Gebraucht wird die Liste im Code- und im Pro-Modus: dort soll man nicht
     aus allem waehlen koennen, sondern aus den staerksten. Ein schwaches
@@ -271,10 +268,15 @@ def strongest_models(settings: Any, limit: int = 3) -> list[dict[str, str]]:
         key_name = PROVIDER_KEYS.get(provider, "")
         if not key_name or not os.environ.get(key_name, "").strip():
             continue
+        stark = (
+            CODING_MODELS.get(provider) if purpose == "code" else ""
+        ) or PROVIDER_MODELS.get(provider, "")
         dazu(
-            CODING_MODELS.get(provider) or PROVIDER_MODELS.get(provider, ""),
+            stark,
             PROVIDER_LABELS.get(provider, provider),
-            PROVIDER_NOTES.get(provider, "Über die Schnittstelle des Anbieters"),
+            "Fürs Programmieren"
+            if purpose == "code" and CODING_MODELS.get(provider) == stark
+            else PROVIDER_NOTES.get(provider, "Über die Schnittstelle des Anbieters"),
         )
 
     base = getattr(settings, "api_base", "") or DEFAULT_OLLAMA_URL
@@ -295,15 +297,31 @@ def strongest_models(settings: Any, limit: int = 3) -> list[dict[str, str]]:
     return ranked[: max(1, int(limit))]
 
 
-def strongest_model(settings: Any) -> str:
+def strongest_model(settings: Any, purpose: str = "work") -> str:
     """Das staerkste Modell, das gerade erreichbar ist.
 
     Returns:
         Eine Modell-Kennung, oder "" wenn nichts Besseres zu finden war als
         das ohnehin eingestellte Modell.
     """
-    beste = strongest_models(settings, limit=1)
+    beste = strongest_models(settings, limit=1, purpose=purpose)
     return beste[0]["id"] if beste else ""
+
+
+def fast_model(settings: Any) -> str:
+    """Das schnelle kleine Modell -- fuer Vorpruefung, Planung und Agenten.
+
+    Es richtet sich nach dem HAUPTmodell: wer bei NVIDIA arbeitet, soll seine
+    Agenten nicht bei Mistral laufen lassen (zwei Schluessel, zwei Grenzen,
+    zwei Rechnungen). Gibt es zum Anbieter kein kleines Modell -- oder laeuft
+    das Hauptmodell lokal --, bleibt es beim Hauptmodell.
+    """
+    from cortex.config import provider_of
+
+    eigen = str(getattr(settings, "subagent_model", "") or "").strip()
+    if eigen:
+        return eigen
+    return FAST_MODELS.get(provider_of(str(getattr(settings, "model", "") or "")), "")
 
 
 def available_models(settings: Any) -> list[dict[str, str]]:
@@ -347,6 +365,19 @@ def available_models(settings: Any) -> list[dict[str, str]]:
                 "note": PROVIDER_NOTES.get(provider, "Über die Schnittstelle des Anbieters"),
             }
         )
+        # Dazu das schnelle kleine Modell desselben Anbieters. Nicht jede
+        # Frage braucht das Arbeitspferd -- wer vor allem Tempo will, waehlt
+        # hier, und niemand muss dafuer eine Modell-ID von Hand eintippen.
+        schnell = FAST_MODELS.get(provider, "")
+        if schnell and schnell != model_id:
+            found.append(
+                {
+                    "id": schnell,
+                    "label": schnell.split("/", 1)[-1],
+                    "kind": PROVIDER_LABELS.get(provider, provider),
+                    "note": "Klein und schnell: kurze Antworten in Sekunden",
+                }
+            )
 
     # Das laufende Modell gehoert in die Liste, auch wenn es sonst nirgends
     # auftaucht -- sonst steht die Auswahl auf nichts.

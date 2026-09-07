@@ -1187,12 +1187,13 @@ input:focus,select:focus{border-color:var(--accent)}
     </div>
     <form id="settings">
       <fieldset><legend>Modell</legend>
-        <label><span class="lbl">Hauptmodell <span class="why">Anbieter und Name, z.B. openai/gpt-4o</span></span>
+        <label><span class="lbl">Hauptmodell <span class="why">Anbieter und Name, z.B. mistral/mistral-large-latest</span></span>
           <input type="text" name="CORTEX_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
         <div class="row">
           <label><span class="lbl">Vision-Modell (leer = Hauptmodell)</span>
             <input type="text" name="CORTEX_VISION_MODEL"></label>
-          <label><span class="lbl">Subagenten-Modell (leer = Hauptmodell)</span>
+          <label><span class="lbl">Subagenten-Modell
+            <span class="why">Leer = das schnelle kleine Modell des Anbieters</span></span>
             <input type="text" name="CORTEX_SUBAGENT_MODEL"></label>
         </div>
         <div class="row">
@@ -1499,6 +1500,12 @@ input:focus,select:focus{border-color:var(--accent)}
             <input type="text" name="CORTEX_PLANNER_TIMEOUT"></label>
           <label><span class="lbl">Gleichzeitig <span class="why">Wie viele Helfer parallel laufen. 0 überlässt es Cortex AI</span></span>
             <input type="text" name="CORTEX_SUBAGENT_PARALLEL"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Anfragen pro Minute <span class="why">Was dein Anbieter verträgt. Leer = das Freikontingent (NVIDIA 40, Mistral 240)</span></span>
+            <input type="text" name="CORTEX_RPM" placeholder="leer = Freikontingent"></label>
+          <label><span class="lbl">Gleichzeitige Anfragen <span class="why">Mehr offene Verbindungen machen jede einzelne Antwort langsamer. Leer = NVIDIA 4, Mistral 8</span></span>
+            <input type="text" name="CORTEX_PARALLEL_CALLS" placeholder="leer = Freikontingent"></label>
         </div>
         <div class="check">
           <input type="checkbox" role="switch" class="schalter" id="pw" name="CORTEX_ENABLE_PLAYWRIGHT">
@@ -3010,11 +3017,15 @@ async function openPicker(){
   const nurStarke = mode === "code" || mode === "pro";
   let models = [];
   try {
-    const daten = await (await api("/api/models")).json();
+    // Was "am staerksten" heisst, haengt am Modus: im Code-Modus sind das
+    // die Modelle fuers Programmieren, im Pro-Modus die fuer die Recherche.
+    const zweck = mode === "code" ? "?purpose=code" : "";
+    const daten = await (await api("/api/models" + zweck)).json();
     models = (nurStarke ? daten.strong : daten.models) || [];
   } catch { /* Server weg -- die Liste bleibt leer, der Hinweis unten steht */ }
-  $("#picker-head").textContent = nurStarke
-    ? "Stärkstes Modell wählen" : "Modell wählen";
+  $("#picker-head").textContent = mode === "code"
+    ? "Stärkstes Code-Modell wählen"
+    : nurStarke ? "Stärkstes Modell wählen" : "Modell wählen";
 
   if (!models.length){
     list.innerHTML = '<div class="picker-foot">Kein Modell gefunden. '
@@ -3506,25 +3517,20 @@ $("#job-add").addEventListener("click", async () => {
 // ohne die Modell-ID auswendig zu koennen.
 // Anbieter, Schluesselname, Beispielmodell und wie der Schluessel aussieht.
 // Das Aussehen hilft beim Erkennen: ein NVIDIA-Schluessel faengt mit nvapi-
-// an, ein OpenAI-Schluessel mit sk-. Wer den falschen einfuegt, sieht es
-// sofort, statt erst beim ersten Fehlschlag.
+// an. Wer den falschen einfuegt, sieht es sofort, statt erst beim ersten
+// Fehlschlag.
+//
+// Zwei Anbieter, nicht dreizehn. Eine lange Liste sieht grosszuegig aus,
+// bedeutet aber dreizehnmal "irgendein Standardmodell, ungetestet, mit
+// unbekannten Grenzen". Zwei kann man kennen: welches Modell wofuer, wie
+// schnell es antwortet, wie viele Anfragen pro Minute es vertraegt -- und
+// danach richtet sich Cortex dann auch. Ollama ist kein Anbieter, sondern
+// der Weg, ganz ohne einen auszukommen.
 const PROVIDERS = [
-  ["anthropic",   "Anthropic (Claude)", "ANTHROPIC_API_KEY",  "anthropic/claude-sonnet-4-6",
-   "sk-ant-…"],
-  ["openai",      "OpenAI (GPT)",       "OPENAI_API_KEY",     "openai/gpt-4o",
-   "sk-…"],
-  ["gemini",      "Google Gemini",      "GEMINI_API_KEY",     "gemini/gemini-2.0-flash",
-   "AIza…"],
   ["nvidia_nim",  "NVIDIA NIM",         "NVIDIA_NIM_API_KEY",
-   "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b", "nvapi-…"],
-  ["groq",        "Groq",               "GROQ_API_KEY",       "groq/llama-3.3-70b-versatile",
-   "gsk_…"],
-  ["deepseek",    "DeepSeek",           "DEEPSEEK_API_KEY",   "deepseek/deepseek-chat",
-   "sk-…"],
+   "nvidia_nim/meta/llama-3.3-70b-instruct", "nvapi-…"],
   ["mistral",     "Mistral",            "MISTRAL_API_KEY",    "mistral/mistral-large-latest",
    ""],
-  ["openrouter",  "OpenRouter",         "OPENROUTER_API_KEY",
-   "openrouter/meta-llama/llama-3.3-70b-instruct", "sk-or-…"],
   ["ollama_chat", "Ollama (lokal)",     "",                   "ollama_chat/gemma4:12b", ""],
 ];
 
@@ -3913,9 +3919,11 @@ async function kopfNeuZeichnen(){
     // Pro-Modus das staerkste erreichbare Modell, sonst das eingestellte.
     // Frueher stand dort immer das eingestellte -- und man sah nicht, dass
     // gerade ein anderes antwortet.
-    currentModel = (mode === "code" || mode === "pro")
-      ? (cfg.strong_model || cfg.values.CORTEX_MODEL || "")
-      : (cfg.values.CORTEX_MODEL || "");
+    currentModel = mode === "code"
+      ? (cfg.strong_code_model || cfg.strong_model || cfg.values.CORTEX_MODEL || "")
+      : mode === "pro"
+        ? (cfg.strong_model || cfg.values.CORTEX_MODEL || "")
+        : (cfg.values.CORTEX_MODEL || "");
     flash($("#model-name"), currentModel.split("/").pop() || "Modell wählen");
     // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
     // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.

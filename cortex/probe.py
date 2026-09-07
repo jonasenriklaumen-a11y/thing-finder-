@@ -29,13 +29,16 @@ def check_llm(model: str, api_key: str = "", api_base: str = "") -> tuple[bool, 
             kwargs["api_key"] = api_key
         if api_base:
             kwargs["api_base"] = api_base
-        response = litellm.completion(
-            model=model,
-            messages=[{"role": "user", "content": PROBE_QUESTION}],
-            max_tokens=PROBE_TOKENS,
-            timeout=PROBE_TIMEOUT,
-            **kwargs,
-        )
+        from cortex.pace import paced
+
+        with paced(model):
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": PROBE_QUESTION}],
+                max_tokens=PROBE_TOKENS,
+                timeout=PROBE_TIMEOUT,
+                **kwargs,
+            )
         text = (response.choices[0].message.content or "").strip()
         return True, text or "(leere Antwort, aber Verbindung steht)"
     except Exception as exc:

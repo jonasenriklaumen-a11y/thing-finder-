@@ -97,7 +97,7 @@ class FakeAgent:
         text = message.lower()
 
         if mode in ("code", "pro"):
-            self.on_event("code_model", {"model": "anthropic/claude-opus-5"})
+            self.on_event("code_model", {"model": "mistral/mistral-large-latest"})
         if sandbox and mode == "code":
             self.on_event("vm_start", {"runtime": "Docker (gehaertet)"})
             self.on_event("vm_write", {"path": "/work/loesung.py"})
@@ -220,7 +220,7 @@ def freier_port() -> int:
 def starte_server(agent: FakeAgent) -> int:
     """Startet die Oberflaeche mit dem gestellten Agenten."""
     os.environ.setdefault("CORTEX_DATA_DIR", tempfile.mkdtemp(prefix="rundgang-"))
-    os.environ.setdefault("CORTEX_MODEL", "anthropic/claude-sonnet-5")
+    os.environ.setdefault("CORTEX_MODEL", "mistral/mistral-large-latest")
     os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-rundgang")
     from cortex import web
 
@@ -404,6 +404,18 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.wait_for_timeout(500)
         log.pruefe(pg.inner_text("#picker-head").lower().startswith("stärkstes"),
                    f"im Pro-Modus nur die stärksten ({pg.inner_text('#picker-head')!r})")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(300)
+
+        # Im Code-Modus ist "am staerksten" ein anderes Modell: eines fuers
+        # Programmieren. Das soll auch dranstehen.
+        pg.click('#modes .mode[data-mode="code"]')
+        pg.wait_for_timeout(700)
+        pg.click("#btn-model")
+        pg.wait_for_selector("#picker-models", state="visible")
+        pg.wait_for_timeout(500)
+        log.pruefe("code" in pg.inner_text("#picker-head").lower(),
+                   f"im Code-Modus die Code-Modelle ({pg.inner_text('#picker-head')!r})")
         pg.keyboard.press("Escape")
         pg.wait_for_timeout(300)
         pg.click('#modes .mode[data-mode="normal"]')

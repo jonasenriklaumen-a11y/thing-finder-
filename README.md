@@ -76,7 +76,7 @@ Durchlauf reicht:
    deinem Home-Verzeichnis nach `~/.cortex` und den Ordner unter `~/.config` nach
    `~/.config/cortex`.
 3. **Die `.env` anpassen**: alle Schlüssel, die früher mit dem alten Namen begannen,
-   heißen jetzt `CORTEX_…`. Die Namen der Anbieter-Schlüssel (`ANTHROPIC_API_KEY`,
+   heißen jetzt `CORTEX_…`. Die Namen der Anbieter-Schlüssel (`MISTRAL_API_KEY`,
    `NVIDIA_NIM_API_KEY`, `GOOGLE_CLIENT_ID` …) bleiben unverändert.
 
 Wenn dir das zu fummelig ist: `cortex setup` legt eine frische `.env` an und fragt
@@ -113,7 +113,7 @@ Unterschiede zu Linux und macOS:
 
 | Was | Wo bekommt man es | Pflicht? |
 |---|---|---|
-| LLM-Anbieter + Key | [Anthropic](https://console.anthropic.com/settings/keys) · [OpenAI](https://platform.openai.com/api-keys) · [Google](https://aistudio.google.com/app/apikey) · oder lokal per [Ollama](https://ollama.com) ganz ohne Key | ja |
+| LLM-Anbieter + Key | [Mistral](https://console.mistral.ai/api-keys/) · [NVIDIA NIM](https://build.nvidia.com/) · oder lokal per [Ollama](https://ollama.com) ganz ohne Key | ja |
 | Suchmaschine | **Nichts.** Die offene Metasuche ist Standard und braucht weder Key noch Konto. | nein |
 
 Beide werden direkt mit einem Probe-Request getestet, bevor die `.env` geschrieben wird
@@ -131,8 +131,8 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 9.2.1                                      │
-│ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
+│ Cortex AI 9.2.2                                      │
+│ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
 
@@ -333,7 +333,7 @@ Hauptmodell in den Speicher passt. `cortex install-model` fragt danach; Stand Au
 | `qwen3:4b` | 2,5 GB | 5 GB |
 
 ```bash
-CORTEX_SUBAGENT_MODEL=ollama_chat/qwen3:1.7b   # leer = Hauptmodell
+CORTEX_SUBAGENT_MODEL=ollama_chat/qwen3:1.7b   # leer = das kleine des Anbieters
 ```
 
 Wichtig ist hier nur eines: Das Modell muss zuverlässig Werkzeuge aufrufen. Klug sein
@@ -766,7 +766,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 9.2.1                                                   │
+│ Cortex AI 9.2.2                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -812,7 +812,7 @@ ohne eine solche Freigabe — genau dafür ist es da.
 |---|---|
 | `/max <frage>` | im Pro-Modus mit voller Mannschaft recherchieren |
 | `/location <ort>` | Ortsfilter setzen (ohne Argument: aufheben) |
-| `/model <name>` | Modell wechseln, z. B. `openai/gpt-4o` |
+| `/model <name>` | Modell wechseln, z. B. `mistral/mistral-large-latest` |
 | `/export html\|md\|csv` | Recherche dieser Sitzung speichern |
 | `/image <pfad>` | Bild beschreiben lassen, danach damit recherchieren |
 | `/history` | frühere Recherchen anzeigen |
@@ -835,7 +835,7 @@ schreibt sie in die Antwort.
 
 ```bash
 cortex --location "Mönchengladbach" --lang de   # Ortsfilter vorgeben
-cortex --model openai/gpt-4o                    # Modell für diese Sitzung
+cortex --model mistral/mistral-large-latest     # Modell für diese Sitzung
 cortex --image foto.jpg                         # Bild als Ausgangspunkt
 cortex --max-calls 30                           # Werkzeug-Budget ändern
 cortex --no-stream                              # Antwort am Stück statt gestreamt
@@ -1660,7 +1660,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 
 | Variable | Bedeutung | Default |
 |---|---|---|
-| `CORTEX_MODEL` | LiteLLM-Modell-ID | `anthropic/claude-sonnet-4-6` |
+| `CORTEX_MODEL` | LiteLLM-Modell-ID | `mistral/mistral-large-latest` |
 | `CORTEX_VISION_MODEL` | Modell für `--image` | wie `CORTEX_MODEL` |
 | `CORTEX_API_BASE` | eigene Basis-URL (Ollama, eigene NIM, Proxy) | — |
 | `CORTEX_API_KEY` | Key für Anbieter ohne eigenen Eintrag | — |
@@ -1676,9 +1676,11 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `CORTEX_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
 | `CORTEX_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
 | `CORTEX_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
-| `CORTEX_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | Hauptmodell |
+| `CORTEX_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | das schnelle kleine des Anbieters |
 | `CORTEX_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
 | `CORTEX_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud: alle |
+| `CORTEX_RPM` | Anfragen je Minute an den Anbieter | NVIDIA `40`, Mistral `240` |
+| `CORTEX_PARALLEL_CALLS` | gleichzeitig offene Anfragen | NVIDIA `4`, Mistral `8` |
 | `CORTEX_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
 | `CORTEX_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
 | `CORTEX_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |
@@ -1815,25 +1817,64 @@ Aufruf geht noch an einen fremden Dienst.
 Da LiteLLM als LLM-Schicht dient, ist der Anbieter austauschbar:
 
 ```bash
-cortex --model openai/gpt-4o
+cortex --model mistral/mistral-large-latest             # Mistral
 cortex --model nvidia_nim/meta/llama-3.3-70b-instruct   # NVIDIA NIM
 cortex --model ollama_chat/qwen2.5:7b                   # lokal, siehe oben
 ```
 
-| Anbieter | Modell-Präfix | Key |
+Cortex ist auf **zwei** Anbieter eingerichtet: [Mistral](https://console.mistral.ai/api-keys/)
+und [NVIDIA NIM](https://build.nvidia.com/). Das ist eine Entscheidung, keine
+Sparmaßnahme. Eine Liste mit dreizehn Anbietern sieht großzügig aus, bedeutet aber
+dreizehnmal „irgendein Standardmodell, ungetestet, mit unbekannten Grenzen". Zwei
+Anbieter kann man kennen — und danach richtet sich Cortex dann auch: welches Modell
+wofür, wie schnell es antwortet, wie viele Anfragen pro Minute es verträgt.
+
+| Anbieter | Modell-Präfix | Key | Freikontingent |
+|---|---|---|---|
+| [Mistral](https://console.mistral.ai/api-keys/) | `mistral/` | `MISTRAL_API_KEY` | Server in der EU, antwortet schnell |
+| [NVIDIA NIM](https://build.nvidia.com/) | `nvidia_nim/` | `NVIDIA_NIM_API_KEY` | offene Modelle, 40 Anfragen/Minute |
+| Ollama (lokal) | `ollama_chat/` | — | kostet nichts, verlässt den Rechner nicht |
+
+Je Anbieter kennt Cortex **drei Rollen**, und wählt selbst die passende:
+
+| Rolle | Wofür | Mistral | NVIDIA NIM |
+|---|---|---|---|
+| Arbeitspferd | Recherche, Lesen, Zusammenfassen, der Master im Pro-Modus | `mistral-large-latest` | `meta/llama-3.3-70b-instruct` |
+| das schnelle kleine | Planung, Vorprüfung und die vielen Rechercheagenten | `mistral-small-latest` | `meta/llama-3.1-8b-instruct` |
+| fürs Programmieren | Code-Modus | `codestral-latest` | `qwen/qwen2.5-coder-32b-instruct` |
+
+Ein 70B-Modell für „such mir die Öffnungszeiten" kostet Sekunden, und die summieren
+sich mit jedem der vierundvierzig Agenten — deshalb laufen die Agenten auf dem kleinen
+Modell und nur die Antwort auf dem großen. Wer es anders will, trägt unter
+`CORTEX_SUBAGENT_MODEL` bzw. `CORTEX_CODE_MODEL` sein eigenes ein.
+
+#### Tempo: Takt halten statt gegen die Wand laufen
+
+NVIDIA erlaubt im Freikontingent **40 Anfragen pro Minute**. Ohne Bremse passiert
+Folgendes: die ersten vierzig kommen durch, alles Weitere bekommt ein 429 zurück, jede
+abgelehnte Anfrage wird wiederholt, die Wiederholungen laufen wieder in dieselbe Grenze
+— und aus einer Recherche werden Minuten, in denen sichtbar nichts passiert.
+
+Cortex hält das Maß deshalb selbst ein (`cortex/pace.py`): zwischen zwei Aufrufen an
+denselben Anbieter liegen mindestens `60 / rpm` Sekunden, und mehr als eine Handvoll
+Anfragen sind nie gleichzeitig offen. Prozessweit, denn die Grenze gilt für den
+Schlüssel, nicht für den einzelnen Agenten. Lokale Modelle und selbst eingetragene
+Anbieter werden nicht gebremst.
+
+| Variable | Bedeutung | Default |
 |---|---|---|
-| Anthropic | `anthropic/` | `ANTHROPIC_API_KEY` |
-| OpenAI | `openai/` | `OPENAI_API_KEY` |
-| Google | `gemini/` | `GEMINI_API_KEY` |
-| [NVIDIA NIM](https://build.nvidia.com/) | `nvidia_nim/` | `NVIDIA_NIM_API_KEY` |
-| xAI · Together · Cerebras · Perplexity · Groq · DeepSeek · OpenRouter | siehe `.env.example` | jeweils eigener |
-| Ollama (lokal) | `ollama_chat/` | — |
+| `CORTEX_RPM` | Anfragen pro Minute, für alle Anbieter | NVIDIA 40, Mistral 240 |
+| `CORTEX_PARALLEL_CALLS` | gleichzeitig offene Anfragen | NVIDIA 4, Mistral 8 |
+
+Wer einen größeren Vertrag hat, hebt beides an.
 
 **Wichtig: Das Modell muss Tool-Calling (Function Calling) beherrschen.** Ohne das kann
 der Agent weder suchen noch Seiten lesen — er antwortet dann aus dem Gedächtnis statt aus
 dem Web, was genau das ist, was cortex vermeiden soll.
 
-Jeden weiteren LiteLLM-Anbieter nutzt du über den Notausgang `CORTEX_API_KEY`:
+Jeden weiteren LiteLLM-Anbieter nutzt du über den Notausgang `CORTEX_API_KEY` — die
+Rollen und Grenzen oben gelten dann nicht, Cortex kennt sie für ein fremdes Modell ja
+nicht:
 
 ```bash
 CORTEX_MODEL=irgendein_anbieter/modell
@@ -1863,7 +1904,7 @@ erreichst du über `CORTEX_API_BASE=http://dein-host:8000/v1`.
 ### Wenn nach dem Anbieterwechsel „404 page not found" kommt
 
 Der Klassiker: In der `.env` steht noch `CORTEX_API_BASE=http://localhost:11434` vom
-lokalen Modell, das Modell zeigt aber längst zu NVIDIA oder Anthropic. Die Anfrage geht
+lokalen Modell, das Modell zeigt aber längst zu NVIDIA oder Mistral. Die Anfrage geht
 dann an Ollama statt an den Anbieter, und Ollama antwortet mit genau diesem Satz.
 
 cortex lässt eine Basis-URL auf dem Ollama-Port (11434) deshalb weg, sobald das Modell

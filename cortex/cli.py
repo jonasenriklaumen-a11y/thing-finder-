@@ -41,16 +41,17 @@ app = typer.Typer(
 )
 console = Console()
 
+#: Cortex ist auf zwei Anbieter spezialisiert -- mehr dazu in
+#: `cortex/system.py`. Lokal bleibt lokal: Ollama ist kein Anbieter, sondern
+#: der Weg, ganz ohne einen auszukommen.
 MODEL_PRESETS: list[tuple[str, str]] = [
-    ("anthropic/claude-sonnet-4-6", "Anthropic Claude Sonnet 4.6 (Default)"),
-    ("openai/gpt-4o", "OpenAI GPT-4o"),
-    ("gemini/gemini-2.0-flash", "Google Gemini 2.0 Flash"),
-    ("nvidia_nim/meta/llama-3.3-70b-instruct", "NVIDIA NIM (build.nvidia.com)"),
+    ("mistral/mistral-large-latest", "Mistral Large -- schnell, Server in der EU"),
+    ("nvidia_nim/meta/llama-3.3-70b-instruct", "NVIDIA NIM -- grosszuegiges Freikontingent"),
     ("ollama_chat/qwen2.5:7b", "Lokal via Ollama -- kein API-Key noetig"),
 ]
 
 #: Position des lokalen Modells in MODEL_PRESETS (1-basiert).
-LOCAL_CHOICE = 5
+LOCAL_CHOICE = 3
 
 #: Modelle ohne Tool-Calling koennen den Agenten nicht fahren -- darauf
 #: weisen wir bei der Einrichtung hin.
@@ -276,17 +277,8 @@ def setup_command(
 
 def _key_hint(key_name: str) -> str:
     return {
-        "ANTHROPIC_API_KEY": "https://console.anthropic.com/settings/keys",
-        "OPENAI_API_KEY": "https://platform.openai.com/api-keys",
-        "GEMINI_API_KEY": "https://aistudio.google.com/app/apikey",
-        "GROQ_API_KEY": "https://console.groq.com/keys",
         "MISTRAL_API_KEY": "https://console.mistral.ai/api-keys/",
-        "OPENROUTER_API_KEY": "https://openrouter.ai/keys",
         "NVIDIA_NIM_API_KEY": "https://build.nvidia.com/ -- Modell waehlen, dann 'Get API Key'",
-        "XAI_API_KEY": "https://console.x.ai/",
-        "TOGETHER_API_KEY": "https://api.together.ai/settings/api-keys",
-        "CEREBRAS_API_KEY": "https://cloud.cerebras.ai/",
-        "PERPLEXITYAI_API_KEY": "https://www.perplexity.ai/settings/api",
         "BRAVE_API_KEY": "https://brave.com/search/api/",
         "TAVILY_API_KEY": "https://app.tavily.com/home",
     }.get(key_name, "siehe Doku des Anbieters")
@@ -1308,7 +1300,7 @@ def install_model_command(
 HELP_TEXT = """\
 [bold]Slash-Befehle[/bold]
   [cyan]/location <ort>[/cyan]      Ortsfilter setzen (leer = aufheben)
-  [cyan]/model <name>[/cyan]        Modell wechseln, z.B. openai/gpt-4o
+  [cyan]/model <name>[/cyan]        Modell wechseln, z.B. mistral/mistral-large-latest
   [cyan]/max <frage>[/cyan]         mit voller Mannschaft recherchieren (Pro-Modus)
   [cyan]/export html|md|csv[/cyan]  Recherche dieser Sitzung speichern
   [cyan]/image <pfad>[/cyan]        Bild beschreiben lassen und danach recherchieren

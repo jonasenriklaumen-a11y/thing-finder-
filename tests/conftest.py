@@ -25,7 +25,7 @@ def settings(tmp_path: Path):
     from cortex.config import Settings
 
     return Settings(
-        model="openai/gpt-4o",
+        model="mistral/mistral-large-latest",
         data_dir=tmp_path / "data",
         request_delay_seconds=0.0,
         fetch_timeout=5.0,

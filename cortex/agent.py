@@ -20,6 +20,7 @@ from typing import Any
 from cortex.cache import Cache
 from cortex.config import Settings
 from cortex.models import Product
+from cortex.pace import paced
 from cortex.storage import normalize_access as storage_access
 from cortex.tools import (
     ASK_SCHEMA,
@@ -912,10 +913,11 @@ class Agent:
         #: Der Zaehler. Er haengt an derselben Datenbank wie der Cache; ohne
         #: Datenverzeichnis (Tests) wird schlicht nichts mitgeschrieben.
         self._usage: Any = None
-        #: Im Code-Modus das staerkste erreichbare Modell. Einmal ermittelt,
-        #: dann gemerkt -- die Suche danach fragt bei Ollama nach und soll
-        #: nicht vor jeder Frage neu laufen. "" heisst "nichts gefunden".
-        self._code_model: str | None = None
+        #: Das staerkste erreichbare Modell, je Zweck: "code" fuers
+        #: Programmieren, "work" fuer alles andere. Einmal ermittelt, dann
+        #: gemerkt -- die Suche danach fragt bei Ollama nach und soll nicht
+        #: vor jeder Frage neu laufen. "" heisst "nichts gefunden".
+        self._code_model: dict[str, str] = {}
         #: Gibt es ueberhaupt Agenten? Steht vor dem Werkzeugkasten, weil der
         #: Systemtext es wissen muss -- und der wird gleich darunter gebaut.
         self.use_subagents = settings.max_subagents > 0
@@ -1308,7 +1310,7 @@ class Agent:
             limit=self.agent_limit,
             checkers=self.checker_count,
             budget=self.subagent_budget,
-            strong_model=self._strongest_model() if self.strong_count else "",
+            strong_model=self._strongest_model("work") if self.strong_count else "",
             stop=self._stop,
         )
         for result in results:
@@ -1408,12 +1410,20 @@ class Agent:
 
         Die Denktiefe waehlt der Nutzer oben in der Modellauswahl -- sie ist
         der eine Regler, der Tempo und Gruendlichkeit gegeneinander stellt.
-        Anbieter, die `reasoning_effort` nicht kennen, lassen es dank
-        `drop_params` einfach weg; der Aufruf scheitert deswegen nie.
+        Sie geht aber nur an Modelle, die davon etwas haben: ein Llama oder
+        Mistral kennt `reasoning_effort` nicht, und der Wunsch kostet dort im
+        schlechten Fall einen Fehler samt Wiederholung -- also Sekunden, bei
+        jeder Frage.
+
+        Dazu ein Zeitlimit. Ohne eines wartet LiteLLM zehn Minuten auf eine
+        Antwort, die nie kommt; mit einem faellt der Aufruf nach zwei Minuten
+        durch und der Wiederholungsversuch kann es richten.
         """
         kwargs = dict(self.settings.llm_kwargs_for(self.active_model))
-        kwargs.setdefault("reasoning_effort", clean_effort(self.effort))
+        if self.settings.thinks(self.active_model):
+            kwargs.setdefault("reasoning_effort", clean_effort(self.effort))
         kwargs["drop_params"] = True
+        kwargs.setdefault("timeout", 120.0)
         return kwargs
 
     @property
@@ -1496,18 +1506,25 @@ class Agent:
         """
         return bool(self.recheck) and not self.pro_mode
 
-    def _strongest_model(self) -> str:
-        """Sucht einmal je Sitzung, was das staerkste erreichbare Modell ist."""
-        if self._code_model is None:
+    def _strongest_model(self, purpose: str = "") -> str:
+        """Sucht einmal je Sitzung, was das staerkste erreichbare Modell ist.
+
+        Was "am staerksten" heisst, haengt an der Aufgabe: im Code-Modus ist
+        das Codestral oder Qwen-Coder, im Pro-Modus das Arbeitspferd. Ein
+        Code-Modell auf eine Recherchefrage anzusetzen waere genauso verkehrt
+        wie umgekehrt -- also wird je Zweck getrennt gesucht und gemerkt.
+        """
+        zweck = purpose or ("code" if clean_mode(self.mode) == "code" else "work")
+        if zweck not in self._code_model:
             from cortex.system import strongest_model
 
             try:
-                self._code_model = strongest_model(self.settings)
+                self._code_model[zweck] = strongest_model(self.settings, purpose=zweck)
             except Exception:
                 # Die Suche darf nie eine Antwort verhindern -- notfalls
                 # bleibt es beim eingestellten Modell.
-                self._code_model = ""
-        return self._code_model
+                self._code_model[zweck] = ""
+        return self._code_model[zweck]
 
     def _apply_mode(self, mode: str) -> None:
         """Tauscht den Antwortteil des Systemprompts fuer diesen Turn.
@@ -1636,7 +1653,7 @@ class Agent:
 
     def set_model(self, model: str) -> None:
         self.settings.model = model.strip()
-        self._code_model = None
+        self._code_model.clear()
 
     def set_ask_handler(self, handler: Any) -> None:
         """Meldet an, dass jemand da ist, der Rueckfragen beantworten kann.
@@ -1703,14 +1720,17 @@ class Agent:
         import litellm
 
         litellm.suppress_debug_info = True
-        response = litellm.completion(
-            model=self.active_model,
-            messages=messages,
-            tools=self.tools,
-            tool_choice="auto",
-            stream=stream,
-            **self._llm_kwargs(),
-        )
+        # Durch den Taktgeber: der Anbieter hat ein Mass, und das haelt Cortex
+        # ein, statt es auszureizen und die Fehler zu wiederholen.
+        with paced(self.active_model):
+            response = litellm.completion(
+                model=self.active_model,
+                messages=messages,
+                tools=self.tools,
+                tool_choice="auto",
+                stream=stream,
+                **self._llm_kwargs(),
+            )
         if not stream:
             message = response.choices[0].message
             content = message.content or ""
@@ -1883,6 +1903,17 @@ class Agent:
             # es braucht oder der Nutzer es verlangt. Das ist die schnellste
             # Betriebsart, die es hier gibt: eine Runde zum Modell.
             self._emit("triage", decision="chat", source="standard")
+        elif self.pro_mode and self.online and self._auto_subagents_wanted():
+            # Im Pro-Modus entscheidet der Master, nicht die Vorpruefung: er
+            # liest die Frage ohnehin, um die Auftraege zu vergeben. Ein
+            # eigener Aufruf davor waere eine Wartezeit fuer eine Auskunft,
+            # die gleich noch einmal eingeholt wird. Die Heuristik bleibt --
+            # ein "hallo" kostet auch hier nichts.
+            if SMALL_TALK_RE.match(question) or not question:
+                self._emit("triage", decision="chat", source="heuristik")
+            else:
+                self._planned_tasks = None
+                used += self._auto_research(question, budget)
         elif self.online and self._auto_subagents_wanted() and self._needs_research(question):
             used += self._auto_research(question, budget)
 
@@ -2240,12 +2271,13 @@ class Agent:
         # Sicherheitsnetz gegen kaputte Tool-Argumente gehoert auch hierher.
         sanitize_history(self.messages)
         try:
-            response = litellm.completion(
-                model=self.active_model,
-                messages=self.messages,
-                stream=stream,
-                **self._llm_kwargs(),
-            )
+            with paced(self.active_model):
+                response = litellm.completion(
+                    model=self.active_model,
+                    messages=self.messages,
+                    stream=stream,
+                    **self._llm_kwargs(),
+                )
         except Exception as exc:
             self._emit("error", message=f"{type(exc).__name__}: {exc}")
             return ""
@@ -2345,23 +2377,24 @@ class Agent:
 
         kwargs = self.settings.llm_kwargs_for(self.settings.effective_vision_model)
         try:
-            response = litellm.completion(
-                model=self.settings.effective_vision_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": IMAGE_PROMPT},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:{mime};base64,{encoded}"},
-                            },
-                        ],
-                    }
-                ],
-                max_tokens=400,
-                **kwargs,
-            )
+            with paced(self.settings.effective_vision_model):
+                response = litellm.completion(
+                    model=self.settings.effective_vision_model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": IMAGE_PROMPT},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:{mime};base64,{encoded}"},
+                                },
+                            ],
+                        }
+                    ],
+                    max_tokens=400,
+                    **kwargs,
+                )
         except Exception as exc:
             raise RuntimeError(f"Bildbeschreibung fehlgeschlagen: {exc}") from exc
         description = (response.choices[0].message.content or "").strip()
@@ -2375,17 +2408,18 @@ class Agent:
 
         litellm.suppress_debug_info = True
         try:
-            response = litellm.completion(
-                model=self.active_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": SPEC_PROMPT % {"url": url, "text": text[:8000]},
-                    }
-                ],
-                max_tokens=700,
-                **self._llm_kwargs(),
-            )
+            with paced(self.active_model):
+                response = litellm.completion(
+                    model=self.active_model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": SPEC_PROMPT % {"url": url, "text": text[:8000]},
+                        }
+                    ],
+                    max_tokens=700,
+                    **self._llm_kwargs(),
+                )
             raw = (response.choices[0].message.content or "").strip()
         except Exception:
             return {}
