@@ -173,14 +173,80 @@ NUR mit JSON.
 1. Braucht die Nachricht eine Web-Recherche? Blosse Konversation (Gruss, Dank, \
 Meinung, Frage an dich selbst) braucht keine. Nachfragen zu einer laufenden \
 Recherche brauchen eine.
-2. Wenn ja: zerlege sie in hoechstens %(limit)d eigenstaendige Teilfragen. Jede muss \
-FUER SICH verstaendlich sein -- Ort, Produkt, Zeitraum und Kriterium gehoeren hinein. \
-Laesst sich nichts sinnvoll teilen, gib genau eine zurueck.
+2. Wenn ja: zerlege sie in %(limit)d eigenstaendige Teilfragen -- so viele, nicht \
+weniger. Fuer jede arbeitet ein eigener Agent auf eigenen Seiten; eine Teilfrage \
+weniger ist eine Seite weniger, die jemand liest.
+
+So kommst du auf %(limit)d, ohne dich zu wiederholen: die Sache selbst, dann ihre \
+Seiten -- Preise und Kosten, Erfahrungen und Kritik, aktuelle Aenderungen, \
+offizielle Angaben, Alternativen, Tests, Bedingungen und Einschraenkungen, \
+Oeffnungszeiten und Erreichbarkeit -- und bei mehreren Kandidaten, Orten oder \
+Zeitraeumen je einer davon.
+
+Jede Teilfrage muss FUER SICH verstaendlich sein: Ort, Produkt, Zeitraum und \
+Kriterium gehoeren hinein. Steht oben ein Ortsfilter, gehoert der Ort in JEDE \
+Teilfrage. Und keine zwei Teilfragen duerfen dasselbe fragen -- zwei gleiche \
+Auftraege lesen dieselben Seiten.
 
 Format: {"recherche": true, "teilfragen": ["...", "..."]}
 Bei blosser Konversation: {"recherche": false, "teilfragen": []}
 
 %(context)sNachricht: %(question)s"""
+
+#: Blickwinkel zum Auffuellen. Kommt der Planer mit weniger Teilfragen zurueck
+#: als Agenten bereitstehen, wird der Rest daraus gebildet: dieselbe Frage,
+#: anderer Blickwinkel. Das ist keine Verlegenheitsloesung -- genau diese
+#: Seiten fehlen sonst in der Antwort, weil niemand danach gesucht hat. Die
+#: Formulierungen sind so gewaehlt, dass `role_for` ihnen von selbst die
+#: passende Rolle gibt: Preise werden zu Zahlen, Kritik zu Gegenstimmen.
+ANGLES = (
+    "Preise, Kosten und Gebuehren",
+    "Erfahrungen, Kritik und bekannte Probleme",
+    "aktuelle Aenderungen und Neuigkeiten",
+    "offizielle Angaben der Anbieter oder Behoerden",
+    "Alternativen und womit man vergleichen sollte",
+    "Tests, Bewertungen und Vergleiche",
+    "Oeffnungszeiten, Anfahrt und Erreichbarkeit",
+    "Voraussetzungen, Bedingungen und Einschraenkungen",
+    "Ausstattung, Umfang und technische Daten",
+    "wer es anbietet und wo es das gibt",
+    "haeufige Fragen und Missverstaendnisse",
+    "Fristen, Termine und Zeitraeume",
+    "Foerderungen, Rabatte und Zuschuesse",
+    "Erfahrungsberichte aus Foren und Gruppen",
+)
+
+
+def spread_tasks(question: str, tasks: list[str], limit: int) -> list[str]:
+    """Fuellt die Teilfragen auf *limit* auf.
+
+    Der Planer liefert oft drei oder vier Teilfragen, auch wenn zwoelf oder
+    vierundzwanzig Agenten bereitstehen -- und dann suchen zwoelf Agenten
+    nicht, sondern vier. Hier kommen die fehlenden dazu: erst die Frage unter
+    einem anderen Blickwinkel, dann die Blickwinkel auf den Teilfragen selbst.
+    Doppeltes faellt raus; mehr als sich sinnvoll bilden laesst, wird nicht
+    erfunden.
+    """
+    limit = max(1, int(limit))
+    out = _distinct(tasks)[:limit]
+    kern = " ".join((question or "").split())[:200]
+    if len(out) >= limit or not kern:
+        return out
+    for angle in ANGLES:
+        if len(out) >= limit:
+            return out
+        out.append(f"{kern} -- {angle}")
+    # Immer noch Platz: dieselben Blickwinkel auf die Teilfragen des Planers.
+    for angle in ANGLES:
+        for task in _distinct(tasks):
+            if len(out) >= limit:
+                break
+            if task.lower() == kern.lower():
+                continue
+            out.append(f"{task} -- {angle}")
+        if len(out) >= limit:
+            break
+    return _distinct(out)[:limit]
 
 #: Ein knappes Schema haelt kleine Modelle bei der Sache und beendet die
 #: Ausgabe frueher -- das ist der Loewenanteil der Wartezeit.
@@ -235,9 +301,22 @@ def plan_request(
         )
         raw = (response.choices[0].message.content or "").strip()
     except Exception:
-        return True, [question.strip()]
+        return True, _located([question.strip()], settings.location)
 
-    return _parse_plan(raw, question, limit)
+    needs, tasks = _parse_plan(raw, question, limit)
+    return needs, _located(tasks, settings.location)
+
+
+def _located(tasks: list[str], location: str) -> list[str]:
+    """Setzt den Ort in jede Teilfrage, die ihn nicht schon nennt.
+
+    Der Subagent sieht das Gespraech nicht und den Ortsfilter erst recht
+    nicht -- fuer ihn ist die Teilfrage alles, was es gibt. Steht der Ort
+    nicht drin, sucht er im ganzen Sprachraum.
+    """
+    from cortex.queries import with_place
+
+    return [with_place(task, location) for task in tasks]
 
 
 def _parse_plan(raw: str, question: str, limit: int) -> tuple[bool, list[str]]:

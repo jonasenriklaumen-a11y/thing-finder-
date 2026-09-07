@@ -16,7 +16,7 @@ from cortex.config import Settings
 from cortex.extract import extract_product, has_spec_heading
 from cortex.fetch import Fetcher, load_rules
 from cortex.models import PageResult, Product, SearchResult, domain_of
-from cortex.queries import MAX_VARIANTS, variants
+from cortex.queries import MAX_VARIANTS, keywords, mentions_place, variants, with_place
 from cortex.search import (
     OPEN_BACKEND_NAMES,
     SearchError,
@@ -58,7 +58,10 @@ SUBAGENT_SCHEMA: dict[str, Any] = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Zwei bis vier eigenstaendige Teilfragen, jeweils ein ganzer Satz."
+                        "So viele eigenstaendige Teilfragen, wie Assistenten bereitstehen "
+                        "-- die Zahl steht im Systemtext. Jede ein ganzer Satz, jede fuer "
+                        "sich verstaendlich (Ort, Produkt, Zeitraum, Kriterium), keine "
+                        "zwei zum selben Feld."
                     ),
                 }
             },
@@ -966,7 +969,23 @@ class Toolbox:
             for candidate in variants(wanted[0], extra=limit - len(wanted)):
                 if candidate.lower() not in {q.lower() for q in wanted}:
                     wanted.append(candidate)
-        return wanted[:limit]
+        wanted = wanted[:limit]
+
+        # Und dann der Ortsfilter. Bisher war er eine Bitte im Systemtext --
+        # das Hauptmodell hielt sich meistens daran, die Subagenten sahen ihn
+        # nie, und bei "Cafes mit WLAN" kamen Treffer aus dem ganzen
+        # Sprachraum zurueck. Jetzt kommt eine Fassung MIT Ort dazu, sofern
+        # nicht ohnehin schon einer dasteht. Sie ersetzt keine der anderen
+        # Anfragen, sondern tritt daneben: beim Mischen (RRF) gewinnt, was
+        # mehrere Listen uebereinstimmend oben haben -- bei einer oertlichen
+        # Frage also das Oertliche, bei einer allgemeinen bleibt es beim
+        # Bisherigen.
+        ort = (self.settings.location or "").strip()
+        if ort and not any(mentions_place(anfrage, ort) for anfrage in wanted):
+            mit_ort = with_place(keywords(wanted[0]) or wanted[0], ort)
+            if mit_ort.lower() not in {anfrage.lower() for anfrage in wanted}:
+                wanted.append(mit_ort)
+        return wanted
 
     def web_search(
         self,
@@ -1807,7 +1826,9 @@ class Toolbox:
     # -- Werkzeug 3: News -------------------------------------------------
     def search_news(self, query: str, count: int = 0) -> dict[str, Any]:
         """News-Suche; faellt bei Ausfall auf die normale Websuche zurueck."""
-        query = (query or "").strip()
+        # Auch hier gilt der Ortsfilter: "Baustellen" ohne Ort ist eine
+        # andere Frage als "Baustellen Bremen".
+        query = with_place((query or "").strip(), self.settings.location)
         count = int(count or self.settings.max_results_default)
         self.stats.news_searches.append(query)
         self._emit("search", query=f"News: {query}", count=count)

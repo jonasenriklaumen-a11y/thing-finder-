@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 9.1.0                                      │
+│ Cortex AI 9.2.0                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -255,8 +255,24 @@ bearbeiten, bevor der Hauptagent übernimmt:
   ...
 ```
 
+**Es sind immer alle.** Ein Planer, der drei Teilfragen liefert, während zwölf Agenten
+bereitstehen, lässt zwölf Agenten zu dritt suchen — und die Antwort ist so dünn wie die
+Zerlegung. Deshalb wird die Liste auf die volle Zahl **aufgefüllt**: erst fragt der Planer
+nach genau so vielen Teilfragen, wie Agenten da sind (12 im Standardmodus, 24 im
+Pro-Modus), und was dann noch fehlt, entsteht aus derselben Frage unter einem anderen
+Blickwinkel — Preise und Kosten, Erfahrungen und Kritik, aktuelle Änderungen, offizielle
+Angaben, Alternativen, Tests, Bedingungen, Anfahrt und Öffnungszeiten. Das ist keine
+Verlegenheitslösung: genau diese Seiten fehlen sonst in der Antwort, weil niemand danach
+gesucht hat. Und weil die Blickwinkel so formuliert sind, wie die Rollenerkennung sie
+liest, bekommt der Preis-Agent von selbst die Zahlen-Rolle und der Kritik-Agent die
+Gegenstimmen-Rolle. Doppeltes fällt vorher raus; mehr als sich sinnvoll bilden lässt, wird
+nicht erfunden.
+
+Ob überhaupt recherchiert wird, entscheidet weiterhin die Vorprüfung: ein „hallo" kostet
+keinen Agenten, und im Standardmodus braucht es dafür den Schalter *Strukturieren*.
+
 Jeder Subagent hat dieselben zwei Werkzeuge, ein eigenes kleines Budget (Default 6
-Aufrufe) und liefert eine knappe Zusammenfassung mit Quellen zurück. Seine Anweisung
+Aufrufe, im Pro-Modus 8) und liefert eine knappe Zusammenfassung mit Quellen zurück. Seine Anweisung
 ist, die Suche gleich **dreifach zu stellen** — eine Anfrage, dazu zwei andere
 Formulierungen über `queries`. Die drei laufen nebeneinander, die Trefferlisten werden
 gemischt (RRF), und es kostet trotzdem nur *einen* Aufruf von seinem knappen Budget.
@@ -467,13 +483,11 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   gibt es im Pro-Modus nicht mehr — das wäre dieselbe Arbeit noch einmal, nur
   nacheinander statt nebeneinander.
 
-  „Bis zu 24" heißt nicht „immer 24": im Systemtext steht, wonach sich die Zahl
-  richtet — eine einzelne Angabe sucht Cortex selbst, ein Vergleich bekommt zwei
-  bis vier Agenten, und erst eine wirklich breite Frage (viele Kandidaten,
-  mehrere Orte, mehrere Kriterien) rechtfertigt zehn und mehr. Die Staffelung
-  folgt dem, was Anthropic für sein Research-System beschrieben hat; wer immer
-  die Obergrenze nimmt, zahlt ein Vielfaches an Zeit und Token für Agenten, die
-  einander dasselbe zurückmelden. Damit die Breite etwas bringt, gilt außerdem:
+  **Es sind immer 24** — nicht „bis zu". Ein Modell, das von sich aus drei
+  Teilfragen abgibt, lässt 24 Agenten zu dritt suchen; deshalb steht die Zahl im
+  Systemtext, der Planer wird nach genau so vielen gefragt, und was fehlt, wird
+  aus Blickwinkeln aufgefüllt (siehe *Subagenten*). Damit die Breite etwas
+  bringt, gilt außerdem:
   ein Auftrag pro Sachgebiet (doppelte Aufträge werden vor dem Start
   aussortiert), alle in einem Zug statt in Wellen — die Nebenläufigkeit wächst
   bei Cloud-Modellen mit der Zahl mit, lokale Modelle bleiben bei zwei, weil
@@ -696,7 +710,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 9.1.0                                                   │
+│ Cortex AI 9.2.0                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1140,9 +1154,24 @@ statt dich rätseln zu lassen.
 
 ## Ortsfilter
 
-Nennt man eine Stadt, Region oder ein Land, baut der Agent das in die Suchanfragen ein
-**und** setzt zusätzlich die Länder- und Sprachparameter der Such-API. Treffer, die
-offensichtlich außerhalb liegen, sortiert er aus. Zusätzlich vorgebbar per Flag oder
+Der Ortsfilter war lange eine **Bitte im Systemtext** („baue den Ort in die Suchanfragen
+ein"). Das Hauptmodell hielt sich meistens daran — die Subagenten sahen ihn nie, denn für
+sie ist ihre Teilfrage alles, was es gibt. Bei „Cafés mit WLAN" kamen dann Treffer aus dem
+ganzen Sprachraum zurück. Jetzt passiert es **mechanisch**, an den Stellen, durch die jede
+Suche geht:
+
+* **Jede Suchanfrage** bekommt eine zusätzliche Fassung *mit* Ort, sofern nicht ohnehin
+  schon einer darinsteht. Sie ersetzt die eigene Anfrage nicht, sie tritt daneben: beim
+  Mischen (RRF) gewinnt, was mehrere Listen übereinstimmend oben haben — bei einer
+  örtlichen Frage also das Örtliche, bei „Python sortieren" bleibt es beim Bisherigen.
+  Gilt für den Hauptagenten, jeden Subagenten, jeden Prüfer und die Nachrichtensuche.
+* **Jede Teilfrage** bekommt den Ort mit, bevor sie an einen Agenten geht.
+* Aus `Bremen, Deutschland` oder `28195 Bremen` wird dabei `Bremen`: in eine Suchanfrage
+  gehört der Name, nicht die Adresse. Steht der Ort schon da, wird nichts angehängt —
+  „Bremen Bremen" sucht schlechter.
+
+Dazu wie bisher die Länder- und Sprachparameter der Such-API, und Treffer, die
+offensichtlich außerhalb liegen, sortiert der Agent aus. Vorgebbar per Flag oder
 Slash-Befehl:
 
 ```bash

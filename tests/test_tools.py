@@ -1240,3 +1240,76 @@ def test_the_dispatch_knows_the_writing_tools(settings: Settings) -> None:
     box.call("calendar_edit", {"event_id": "ev-1", "summary": "Y"})
     box.call("mail_draft", {"subject": "B", "body": "T", "to": "wer@example.com"})
     assert [name for name, _ in fake.calls] == ["create_event", "update_event", "create_draft"]
+
+
+# ---------------------------------------------------------------------------
+# Der Ortsfilter kommt bei der Suche an
+# ---------------------------------------------------------------------------
+def test_the_location_filter_reaches_the_search(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Er war eine Bitte im Systemtext: "baue den Ort ein". Das Hauptmodell
+    hielt sich meistens daran, die Subagenten sahen ihn nie -- und bei
+    "Cafés mit WLAN" kamen Treffer aus dem ganzen Sprachraum zurück."""
+    gestellt: list[str] = []
+
+    def fake_search(query, **kwargs):
+        gestellt.append(query)
+        return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    settings.location = "Bremen"
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.web_search("Cafés mit WLAN")
+    assert any("Bremen" in anfrage for anfrage in gestellt), gestellt
+    # Die eigene Anfrage bleibt daneben stehen -- sie wird nicht ersetzt.
+    assert any("Cafés mit WLAN" in anfrage for anfrage in gestellt)
+
+
+def test_a_place_that_is_already_there_is_not_repeated(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    gestellt: list[str] = []
+
+    def fake_search(query, **kwargs):
+        gestellt.append(query)
+        return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    settings.location = "Bremen"
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.web_search("Cafés mit WLAN in Bremen")
+    assert not any(anfrage.count("Bremen") > 1 for anfrage in gestellt), gestellt
+
+
+def test_without_a_location_nothing_changes(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    gestellt: list[str] = []
+
+    def fake_search(query, **kwargs):
+        gestellt.append(query)
+        return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    settings.location = ""
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.web_search("Cafés mit WLAN")
+    assert all("Cafés" in anfrage or "cafés" in anfrage.lower() for anfrage in gestellt)
+
+
+def test_the_news_search_knows_the_place_too(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """"Baustellen" ohne Ort ist eine andere Frage als "Baustellen Bremen"."""
+    gestellt: list[str] = []
+
+    def fake_news(query, **kwargs):
+        gestellt.append(query)
+        return [SearchResult(title="T", url="https://a.de/", snippet="S", rank=1)]
+
+    monkeypatch.setattr("cortex.tools.search_news", fake_news)
+    settings.location = "Bremen"
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.search_news("Baustellen")
+    assert gestellt == ["Baustellen Bremen"]

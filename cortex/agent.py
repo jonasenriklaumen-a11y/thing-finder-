@@ -255,49 +255,62 @@ veraltete Schnittstelle).
 Kein "Gerne!", keine Vorrede, keine Zusammenfassung der Frage, kein Fazit.
 """
 
-#: Der Pro-Modus. Kein eigenes Antwortformat -- er schreibt wie der
-#: Standardmodus. Was er aendert, ist die Leistung: das staerkste erreichbare
-#: Modell und ein weites Feld an Agenten. Und weil "bis zu 24" ohne Anleitung
-#: heisst "immer 24", steht hier, wonach sich die Zahl richtet. Die Staffelung
-#: folgt dem, was Anthropic fuer sein Research-System beschrieben hat: ein
-#: einzelner Fakt braucht keinen Agenten, ein Vergleich zwei bis vier, und
-#: erst eine wirklich breite Frage rechtfertigt zehn und mehr. Wer immer die
-#: Obergrenze nimmt, zahlt ein Vielfaches an Zeit und Token fuer Agenten, die
-#: einander dasselbe zurueckmelden.
-PRO_PROMPT = """
+#: Wie viele Assistenten bereitstehen -- und wie man auf die Zahl kommt.
+#: Steht ueberall dort, wo es Agenten wirklich gibt (Strukturieren an, Web an),
+#: im Standardmodus wie im Pro-Modus; nur die Zahl ist eine andere.
+#:
+#: Der Grund fuer diesen Text: Modelle geben von sich aus drei oder vier
+#: Teilfragen ab, egal wie viele Agenten bereitstehen. Dann suchen zwoelf
+#: Agenten zu viert, und die Antwort ist so duenn wie die Zerlegung. Was
+#: fehlt, ist keine Erlaubnis, sondern eine Anleitung, WIE man eine Frage in
+#: zwoelf verschiedene Felder zerlegt, ohne sich zu wiederholen.
+AGENTS_PROMPT = """
 
-Pro-Modus. Du laeufst auf dem staerksten Modell, das hier erreichbar ist, und \
-darfst bis zu %(agents)d Rechercheassistenten gleichzeitig losschicken. Das ist eine \
-Obergrenze, keine Vorgabe -- wie viele es werden, entscheidest du an der Frage:
+Deine Assistenten. Fuer Recherchen stehen %(agents)d Rechercheassistenten bereit \
+(`research_subtasks`). Gibst du Teilfragen ab, dann so viele -- nicht drei. Fuer \
+jede arbeitet ein eigener Agent auf eigenen Seiten; eine Teilfrage weniger ist \
+eine Seite weniger, die jemand gelesen hat.
 
-- Eine einzelne Angabe (ein Preis, ein Datum, ein Name): gar kein Agent. Das \
-suchst du selbst, das ist schneller als jede Uebergabe.
-- Ein Vergleich oder eine Frage mit zwei bis vier klar getrennten Teilen: zwei \
-bis vier Agenten, je einer pro Teil.
-- Eine wirklich breite Frage -- viele Kandidaten, mehrere Orte, mehrere \
-Kriterien, ein Marktueberblick: zehn und mehr, bis hin zu allen %(agents)d. Nur dann.
+So kommst du auf %(agents)d, ohne dich zu wiederholen: die Sache selbst, dann ihre \
+Seiten -- Preise und Kosten, Erfahrungen und Kritik, aktuelle Aenderungen, \
+offizielle Angaben, Alternativen, Tests und Bewertungen, Bedingungen und \
+Einschraenkungen, Anfahrt und Oeffnungszeiten -- und bei mehreren Kandidaten, \
+Orten oder Zeitraeumen je einer davon.
 
-Damit die Breite etwas bringt:
 - Ein Auftrag, ein Feld. Zwei Agenten auf derselben Teilfrage kosten doppelt und \
-bringen dasselbe zurueck. Ueberschneiden sich zwei Auftraege, streich einen.
+bringen dasselbe zurueck. Ueberschneiden sich zwei Auftraege, schaerf einen nach.
 - Jeder Auftrag muss FUER SICH verstaendlich sein: Ort, Produkt, Zeitraum und \
-Kriterium gehoeren hinein. Der Assistent sieht das Gespraech nicht.
-- Schick alle Auftraege in EINEM Aufruf los, nicht nacheinander. Sie laufen \
-parallel; hintereinander wartest du fuer jeden einzeln.
+Kriterium gehoeren hinein. Der Assistent sieht das Gespraech nicht -- und einen \
+Ortsfilter sieht er erst recht nicht, der Ort gehoert also in JEDEN Auftrag.
 - Zerlege nach Sachgebieten, nicht nach Formulierungen. "Cafe A", "Cafe B", \
 "Cafe C" sind drei Felder; "gute Cafes", "schoene Cafes", "nette Cafes" ist \
 dreimal dasselbe.
+- Schick alle Auftraege in EINEM Aufruf los, nicht nacheinander. Sie laufen \
+parallel; hintereinander wartest du fuer jeden einzeln.
 - Die Assistenten arbeiten auf getrennten Seiten -- was einer gelesen hat, ist \
 fuer die anderen verbraucht. Deine Aufgabe ist danach das Zusammenfuehren: aus \
 den Rueckmeldungen EINE Antwort schreiben, mit Quellen, ohne noch einmal zu \
 suchen, was dort schon steht.
-- Manche Rueckmeldungen tragen einen Pruefvermerk: ein Kollege hat sie auf \
-anderen Seiten gegengelesen. "BESTAETIGT" heisst, du kannst die Angabe \
-verwenden. "ABWEICHUNG" heisst, dass zwei Quellen etwas Verschiedenes sagen -- \
-dann nennst du BEIDE Angaben mit ihrer Quelle, statt dich fuer eine zu \
-entscheiden. "UNKLAR" heisst nur, dass sich nichts finden liess; das macht die \
-urspruengliche Angabe nicht falsch, du schreibst dann aber dazu, dass sie an \
-einer einzigen Quelle haengt.
+"""
+
+#: Der Pro-Modus. Kein eigenes Antwortformat -- er schreibt wie der
+#: Standardmodus. Was er aendert, ist die Leistung: das staerkste erreichbare
+#: Modell und das grosse Feld an Agenten. Wie man das Feld fuellt, steht schon
+#: im AGENTS_PROMPT; hier steht, was nur hier gilt.
+PRO_PROMPT = """
+
+Pro-Modus. Du laeufst auf dem staerksten Modell, das hier erreichbar ist, und hast \
+das grosse Feld von %(agents)d Assistenten. Nutz es aus: hier wird breit gesucht, \
+nicht sparsam. Wer den Pro-Modus waehlt, hat sich fuer Gruendlichkeit \
+entschieden und nimmt die Wartezeit in Kauf.
+
+Manche Rueckmeldungen tragen einen Pruefvermerk: ein Kollege hat sie auf anderen \
+Seiten gegengelesen. "BESTAETIGT" heisst, du kannst die Angabe verwenden. \
+"ABWEICHUNG" heisst, dass zwei Quellen etwas Verschiedenes sagen -- dann nennst \
+du BEIDE Angaben mit ihrer Quelle, statt dich fuer eine zu entscheiden. "UNKLAR" \
+heisst nur, dass sich nichts finden liess; das macht die urspruengliche Angabe \
+nicht falsch, du schreibst dann aber dazu, dass sie an einer einzigen Quelle \
+haengt.
 """
 
 #: Die Gegenprobe holt zuerst selbst frische Treffer -- dieser Text erklaert
@@ -854,6 +867,9 @@ class Agent:
         #: dann gemerkt -- die Suche danach fragt bei Ollama nach und soll
         #: nicht vor jeder Frage neu laufen. "" heisst "nichts gefunden".
         self._code_model: str | None = None
+        #: Gibt es ueberhaupt Agenten? Steht vor dem Werkzeugkasten, weil der
+        #: Systemtext es wissen muss -- und der wird gleich darunter gebaut.
+        self.use_subagents = settings.max_subagents > 0
         self.toolbox = toolbox or Toolbox(
             settings,
             cache=cache,
@@ -867,7 +883,6 @@ class Agent:
         ]
         #: Subagenten sind nur fuer den Hauptagenten da -- sonst koennte sich
         #: die Kette endlos fortsetzen.
-        self.use_subagents = settings.max_subagents > 0
         if self.use_subagents:
             self.toolbox.subagent_runner = self._run_subagents
         self.last_result: AgentResult | None = None
@@ -1016,7 +1031,7 @@ class Agent:
         Returns:
             Wie viele Werkzeug-Aufrufe das gekostet hat.
         """
-        from cortex.subagents import plan_subtasks
+        from cortex.subagents import plan_subtasks, spread_tasks
 
         # Wie viele Teilfragen hoechstens entstehen duerfen -- im Pro-Modus
         # mehr. Wie viele davon GLEICHZEITIG laufen, entscheidet
@@ -1038,6 +1053,13 @@ class Agent:
                 # Scheitert die Planung, macht der Hauptagent es eben selbst.
                 self._emit("error", message=f"Planung fehlgeschlagen: {exc}")
                 return 0
+
+        # Der Planer liefert oft drei oder vier Teilfragen, auch wenn zwoelf
+        # oder vierundzwanzig Agenten bereitstehen -- dann suchen zwoelf
+        # Agenten nicht, sondern vier. Die fehlenden kommen hier dazu:
+        # dieselbe Frage unter einem anderen Blickwinkel. Genau die Seiten
+        # fehlen sonst in der Antwort, weil niemand danach gesucht hat.
+        tasks = spread_tasks(question, tasks, limit)
 
         if self.stopped:
             return 0
@@ -1350,8 +1372,10 @@ class Agent:
         # Web bekommt das Modell das Werkzeug gar nicht erst angeboten, und
         # eine Anleitung zum Verteilen von Auftraegen waere dann eine
         # Aufforderung zu etwas, das nicht geht.
-        if self.pro_mode and self.use_subagents and self.structured and self.online:
-            text += PRO_PROMPT % {"agents": self.agent_limit}
+        if self.use_subagents and self.structured and self.online:
+            text += AGENTS_PROMPT % {"agents": self.agent_limit}
+            if self.pro_mode:
+                text += PRO_PROMPT % {"agents": self.agent_limit}
         text += ASK_PROMPT if self.toolbox.ask_handler is not None else NO_ASK_PROMPT
         if self.workshop_on:
             text += VM_PROMPT

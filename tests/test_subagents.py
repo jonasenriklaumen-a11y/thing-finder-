@@ -787,3 +787,75 @@ def test_never_more_checkers_than_searchers(
     settings.max_subagents = 8
     run_subagents([f"Frage {n}" for n in range(6)], settings, parallel=2, checkers=4)
     assert gleichzeitig["hoechstens"] <= 4, "zwei Suchende und hoechstens zwei Pruefer"
+
+
+# ---------------------------------------------------------------------------
+# Immer die volle Zahl an Agenten
+# ---------------------------------------------------------------------------
+def test_the_tasks_are_filled_up_to_the_number_of_agents() -> None:
+    """Der Planer liefert drei Teilfragen, obwohl zwölf Agenten bereitstehen --
+    dann suchen zwölf Agenten zu dritt."""
+    from cortex.subagents import spread_tasks
+
+    aufgefuellt = spread_tasks(
+        "Gute Cafés mit WLAN in Bremen",
+        ["Cafés mit WLAN Bremen Mitte", "Cafés mit Steckdosen Bremen"],
+        12,
+    )
+    assert len(aufgefuellt) == 12
+    assert aufgefuellt[:2] == ["Cafés mit WLAN Bremen Mitte", "Cafés mit Steckdosen Bremen"]
+    assert len(set(aufgefuellt)) == 12, "keine zwei gleichen Aufträge"
+    # Die Blickwinkel sind so gewählt, dass die Rollen von selbst passen.
+    from cortex.subagents import role_for
+
+    rollen = {role_for(task) for task in aufgefuellt}
+    assert {"zahlen", "gegenstimmen", "frisch"} <= rollen
+
+
+def test_more_tasks_than_agents_are_cut() -> None:
+    from cortex.subagents import spread_tasks
+
+    assert len(spread_tasks("Frage", [f"Teil {n}" for n in range(20)], 12)) == 12
+
+
+def test_nothing_is_invented_out_of_nothing() -> None:
+    from cortex.subagents import spread_tasks
+
+    assert spread_tasks("", [], 12) == []
+    assert spread_tasks("", ["Teil A"], 12) == ["Teil A"]
+
+
+def test_the_planner_is_asked_for_the_full_number(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from cortex.subagents import plan_request
+
+    gesehen: list[str] = []
+
+    def completion(**kwargs: Any):
+        gesehen.append(kwargs["messages"][0]["content"])
+        return _reply(content='{"recherche": true, "teilfragen": ["A", "B"]}')
+
+    monkeypatch.setattr("litellm.completion", completion)
+    plan_request("Frage", settings, limit=24)
+    assert "in 24 eigenstaendige Teilfragen" in gesehen[0]
+    assert "nicht weniger" in gesehen[0]
+    assert "gehoert der Ort in JEDE" in gesehen[0]
+
+
+def test_the_place_lands_in_every_subtask(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Der Subagent sieht das Gespräch nicht und den Ortsfilter erst recht
+    nicht -- für ihn ist die Teilfrage alles, was es gibt."""
+    from cortex.subagents import plan_request
+
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: _reply(
+            content='{"recherche": true, "teilfragen": ["Cafés mit WLAN", "Cafés in Bremen"]}'
+        ),
+    )
+    settings.location = "Bremen"
+    _, tasks = plan_request("Wo kann ich arbeiten?", settings)
+    assert tasks == ["Cafés mit WLAN Bremen", "Cafés in Bremen"]

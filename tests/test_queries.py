@@ -133,3 +133,37 @@ def test_fusing_nothing_gives_nothing() -> None:
 def test_the_count_is_respected(count: int) -> None:
     lists = [[hit(f"https://a{i}.de/1") for i in range(6)]]
     assert len(queries.fuse(lists, count=count)) == count
+
+
+# ---------------------------------------------------------------------------
+# Der Ortsfilter in der Anfrage
+# ---------------------------------------------------------------------------
+def test_the_place_is_the_name_not_the_address() -> None:
+    from cortex.queries import place_of
+
+    assert place_of("Bremen") == "Bremen"
+    assert place_of("Bremen, Deutschland") == "Bremen"
+    assert place_of("28195 Bremen") == "Bremen"
+    assert place_of("  Mönchengladbach ") == "Mönchengladbach"
+    assert place_of("") == ""
+
+
+def test_the_place_is_added_only_when_it_is_missing() -> None:
+    from cortex.queries import with_place
+
+    assert with_place("Gute Cafés mit WLAN", "Bremen") == "Gute Cafés mit WLAN Bremen"
+    # Steht er schon drin, wird nichts angehängt -- "Bremen Bremen" sucht schlechter.
+    assert with_place("Cafés in Bremen", "Bremen") == "Cafés in Bremen"
+    assert with_place("Cafés in Bremen Nord", "Bremen Nord") == "Cafés in Bremen Nord"
+    # Ohne Ortsfilter bleibt alles, wie es war.
+    assert with_place("Python sortieren", "") == "Python sortieren"
+    assert with_place("", "Bremen") == ""
+
+
+def test_a_place_is_recognised_by_a_part_of_its_name() -> None:
+    from cortex.queries import mentions_place
+
+    assert mentions_place("Cafés in bremen", "Bremen") is True
+    assert mentions_place("Cafés in Bremen", "Bremen Nord") is True
+    assert mentions_place("Cafés mit WLAN", "Bremen") is False
+    assert mentions_place("egal", "") is True, "kein Filter, nichts zu ergänzen"

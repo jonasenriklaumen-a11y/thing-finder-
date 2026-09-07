@@ -110,6 +110,48 @@ def quoted_phrase(query: str) -> str:
     return ""
 
 
+def place_of(location: str) -> str:
+    """Der Ortsname allein -- ohne Land, Postleitzahl und Beiwerk.
+
+    Aus "Bremen, Deutschland" wird "Bremen", aus "28195 Bremen" ebenfalls.
+    Was in eine Suchanfrage gehoert, ist der Name, nicht die Adresse.
+    """
+    text = " ".join((location or "").replace(";", ",").split())
+    if not text:
+        return ""
+    erster = text.split(",")[0].strip()
+    woerter = [wort for wort in erster.split() if not wort.isdigit()]
+    return " ".join(woerter[:3])
+
+
+def mentions_place(query: str, location: str) -> bool:
+    """Steht der Ort schon in der Anfrage?"""
+    ort = place_of(location).lower()
+    if not ort:
+        return True  # kein Ort gesetzt: nichts zu ergaenzen
+    text = (query or "").lower()
+    if ort in text:
+        return True
+    # Auch ein Teil reicht: wer "Bremen Nord" als Ort hat, hat mit "Bremen"
+    # in der Anfrage schon gesagt, worum es geht.
+    return any(len(teil) > 3 and teil in text for teil in ort.split())
+
+
+def with_place(query: str, location: str) -> str:
+    """Die Anfrage mit dem Ort dahinter -- oder unveraendert.
+
+    Der Ortsfilter war bisher eine Bitte im Systemtext: "baue den Ort in die
+    Suchanfragen ein". Modelle tun das mal und mal nicht, und Subagenten sahen
+    den Filter ueberhaupt nie. Hier passiert es mechanisch, an der einzigen
+    Stelle, durch die jede Suche geht.
+    """
+    ort = place_of(location)
+    query = " ".join((query or "").split())
+    if not ort or not query or mentions_place(query, location):
+        return query
+    return f"{query} {ort}"
+
+
 def variants(query: str, extra: int = 2) -> list[str]:
     """Die Anfrage plus bis zu *extra* andere Formulierungen.
 

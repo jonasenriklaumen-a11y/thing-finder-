@@ -553,7 +553,10 @@ def test_every_question_is_split_automatically(
     agent = Agent(settings, cache=None, toolbox=toolbox)
     result = agent.ask("Zusammengesetzte Frage", stream=False)
 
-    assert seen == [["Teil A", "Teil B"]]
+    # Die Teilfragen des Planers stehen vorn -- der Rest wird auf die Zahl der
+    # Agenten aufgefuellt, damit nicht zwoelf Agenten zu zweit suchen.
+    assert seen[0][:2] == ["Teil A", "Teil B"]
+    assert len(seen[0]) == settings.max_subagents
     assert result.answer == "Endantwort"
     # Die Vorrecherche steht dem Hauptagenten zur Verfuegung -- als Text,
     # nicht als JSON.
@@ -1032,7 +1035,8 @@ def test_one_call_covers_triage_and_planning(
         lambda self, tasks: seen.append(tasks) or [{"task": t, "summary": "ok"} for t in tasks],
     )
     Agent(settings, cache=None, toolbox=toolbox).ask("Zusammengesetzte Frage", stream=False)
-    assert seen == [["Teil A", "Teil B"]]
+    assert seen[0][:2] == ["Teil A", "Teil B"]
+    assert len(seen[0]) == settings.max_subagents
     assert planner_calls["n"] == 1, "kein zweiter Planungsaufruf"
 
 
@@ -2893,20 +2897,22 @@ def test_the_pro_mode_never_rechecks(settings: Settings, toolbox: Toolbox) -> No
     assert agent.recheck_on is True
 
 
-def test_the_pro_mode_says_how_many_agents_are_sensible(
-    settings: Settings, toolbox: Toolbox
-) -> None:
-    """"Bis zu 24" ohne Anleitung heisst "immer 24" -- und das waere teuer."""
+def test_the_agents_are_counted_in_the_prompt(settings: Settings, toolbox: Toolbox) -> None:
+    """Von selbst geben Modelle drei Teilfragen ab, egal wie viele Agenten
+    bereitstehen. Es fehlt keine Erlaubnis, sondern die Anleitung, wie man
+    eine Frage in zwoelf Felder zerlegt."""
     settings.max_subagents = 12
     agent = Agent(settings, cache=None, toolbox=toolbox)
-    assert "Pro-Modus" not in agent.messages[0]["content"]
+    prompt = agent.messages[0]["content"]
+    assert "12 Rechercheassistenten" in prompt
+    assert "nicht drei" in prompt
+    assert "Pro-Modus" not in prompt
 
     agent._apply_mode("pro")
     prompt = agent.messages[0]["content"]
+    assert "24 Rechercheassistenten" in prompt, "im Pro-Modus sind es alle 24"
     assert "Pro-Modus" in prompt
-    assert "bis zu 24" in prompt, "die eigene Obergrenze, nicht irgendeine"
-    assert "Obergrenze, keine Vorgabe" in prompt
-    assert "gar kein Agent" in prompt, "die kleinste Stufe gehoert dazu"
+    assert "breit gesucht" in prompt
 
 
 def test_the_pro_mode_writes_like_the_standard_mode(
@@ -2926,7 +2932,10 @@ def test_the_pro_mode_writes_like_the_standard_mode(
 
     zusatz = PRO_PROMPT % {"agents": agent.agent_limit}
     assert zusatz in pro
-    assert pro.replace(zusatz, "", 1) == normal
+    # Der Rest unterscheidet sich nur in der Zahl der Assistenten: zwoelf im
+    # Standardmodus, vierundzwanzig hier.
+    ohne = pro.replace(zusatz, "", 1).replace("24 Rechercheassistenten", "12 Rechercheassistenten")
+    assert ohne.replace("auf 24, ohne", "auf 12, ohne") == normal
 
 
 def test_without_structuring_the_pro_mode_promises_no_agents(
