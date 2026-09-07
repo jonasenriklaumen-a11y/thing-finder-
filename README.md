@@ -259,7 +259,8 @@ bearbeiten, bevor der Hauptagent übernimmt:
 bereitstehen, lässt zwölf Agenten zu dritt suchen — und die Antwort ist so dünn wie die
 Zerlegung. Deshalb wird die Liste auf die volle Zahl **aufgefüllt**: erst fragt der Planer
 nach genau so vielen Teilfragen, wie Agenten da sind (12 im Standardmodus; im Pro-Modus
-entscheidet der **Master** die Zahl, bis zu 44, und `/max` macht daraus alle), und was
+entscheidet der **Master** die Zahl, bis zu 44 bei Mistral, bis zu 12 bei
+NVIDIA, und `/max` macht daraus alle), und was
 dann noch fehlt, entsteht aus derselben Frage unter einem anderen
 Blickwinkel — Preise und Kosten, Erfahrungen und Kritik, aktuelle Änderungen, offizielle
 Angaben, Alternativen, Tests, Bedingungen, Anfahrt und Öffnungszeiten. Das ist keine
@@ -503,7 +504,10 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   verstehen wie der, der sie beantwortet. Er macht drei Dinge:
 
   1. **Beauftragen.** Er entscheidet, wie viele Agenten die Frage braucht —
-     bis zu **44** —, und gibt jedem einen eigenen Auftrag *und* eine eigene
+     bis zu **44** bei Mistral, bis zu **12** bei NVIDIA (dessen
+     Freikontingent nur 40 Anfragen pro Minute erlaubt — mehr Agenten würden
+     dort nur länger warten, nicht mehr finden) —, und gibt jedem einen
+     eigenen Auftrag *und* eine eigene
      Rolle, in seinen Worten („sucht Betreiberseiten statt Portale", „achtet
      auf Preise und deren Stand"). Zwei Aufträge darf er als schwer markieren;
      die gehen an die **zwei starken Agenten**, die auf dem starken Modell und
@@ -525,11 +529,13 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
 
   **`/max`.** Ohne den Befehl entscheidet der Master die Zahl. Mit ihm sind es
   alle: `/max Welche Fahrradläden in Bremen reparieren Lastenräder?` stellt die
-  volle Mannschaft auf — 44 Agenten, die beiden starken dazu und, wenn
-  *Gegenprüfen* an ist, die vier Prüfer. Bleibt der Master unter der Zahl, wird
-  mit Blickwinkeln aufgefüllt. `/max` allein getippt erklärt sich selbst.
+  volle Mannschaft auf — 44 Agenten bei Mistral (12 bei NVIDIA), die beiden
+  starken dazu und, wenn *Gegenprüfen* an ist, die vier Prüfer. Bleibt der
+  Master unter der Zahl, wird mit Blickwinkeln aufgefüllt. `/max` allein
+  getippt erklärt sich selbst.
 
-  **Gegenprüfen heißt hier: vier Prüfer** (44 + 2 + 4 = 50). Sie recherchieren
+  **Gegenprüfen heißt hier: vier Prüfer** (44 + 2 + 4 = 50 bei Mistral,
+  12 + 2 + 4 = 18 bei NVIDIA). Sie recherchieren
   nicht, sie kontrollieren: jedes fertige Teilergebnis wird auf **anderen
   Seiten** gegengelesen — und zwar *während* die übrigen Agenten noch suchen,
   nicht danach. Ist die Recherche durch, helfen die frei gewordenen Agenten
@@ -1671,7 +1677,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `CORTEX_LOCATION` | Standard-Ortsfilter | — |
 | `CORTEX_LANG` / `CORTEX_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
 | `CORTEX_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
-| `CORTEX_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus; im Pro-Modus bis 44) | `12` |
+| `CORTEX_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus; im Pro-Modus bis 44 bei Mistral, bis 12 bei NVIDIA) | `12` |
 | `CORTEX_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
 | `CORTEX_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
 | `CORTEX_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |

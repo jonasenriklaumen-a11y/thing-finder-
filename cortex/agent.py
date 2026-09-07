@@ -152,6 +152,13 @@ MODES = ("normal", "code", "pro")
 #: losziehen, entscheidet der Master an der Frage -- ausser bei `/max`.
 PRO_SUBAGENTS = 44
 
+#: Dieselbe Obergrenze, aber fuer NVIDIA. Das Freikontingent dort erlaubt nur
+#: vierzig Anfragen pro Minute (siehe `cortex/pace.py`); selbst getaktet
+#: braucht eine Runde mit vierundvierzig Agenten dort spuerbar lange, weil
+#: jeder von ihnen mehrere Aufrufe macht. Zwoelf bleiben zuegig, ohne dass
+#: die Recherche in Wartezeit ertrinkt.
+PRO_SUBAGENTS_NVIDIA = 12
+
 #: Zwei Agenten laufen auf dem starken Modell, mit groesserem Budget. Sie
 #: bekommen vom Master das, was am schwersten zu finden ist -- nicht das
 #: Wichtigste: fuer das Wichtigste reicht ein gewoehnlicher Agent, fuer den
@@ -1454,16 +1461,30 @@ class Agent:
     def agent_limit(self) -> int:
         """Wie viele Agenten dieser Turn hoechstens einsetzen darf.
 
-        Im Alltag die Einstellung des Nutzers. Im Pro-Modus mindestens
-        PRO_SUBAGENTS -- das ist die Obergrenze, nicht die Vorgabe: wie viele
-        es wirklich werden, entscheidet der Planer an der Frage. Hat jemand
-        die Agenten ganz abgeschaltet (0), bleibt es dabei; ein Modus soll
-        keine Einstellung ueberstimmen, die "nein" heisst.
+        Im Alltag die Einstellung des Nutzers. Im Pro-Modus mindestens die
+        Obergrenze des Anbieters -- das ist die Obergrenze, nicht die
+        Vorgabe: wie viele es wirklich werden, entscheidet der Planer an der
+        Frage. Hat jemand die Agenten ganz abgeschaltet (0), bleibt es dabei;
+        ein Modus soll keine Einstellung ueberstimmen, die "nein" heisst.
         """
         base = max(0, int(self.settings.max_subagents))
         if not (base and self.pro_mode):
             return base
-        return max(base, PRO_SUBAGENTS)
+        return max(base, self._pro_subagent_cap())
+
+    def _pro_subagent_cap(self) -> int:
+        """Die Obergrenze fuer Agenten im Pro-Modus -- je nach Anbieter.
+
+        NVIDIA vertraegt im Freikontingent nur vierzig Anfragen pro Minute;
+        vierundvierzig Agenten dort waeren getaktet, aber trotzdem langsam.
+        Bei NVIDIA bleibt Cortex deshalb bei PRO_SUBAGENTS_NVIDIA, bei jedem
+        anderen Anbieter (Mistral) bei PRO_SUBAGENTS.
+        """
+        from cortex.config import provider_of
+
+        if provider_of(self.active_model) == "nvidia_nim":
+            return PRO_SUBAGENTS_NVIDIA
+        return PRO_SUBAGENTS
 
     @property
     def strong_count(self) -> int:

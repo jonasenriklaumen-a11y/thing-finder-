@@ -2929,6 +2929,27 @@ def test_the_pro_mode_may_send_more_agents(settings: Settings, toolbox: Toolbox)
     assert agent.agent_limit == 12
 
 
+def test_nvidia_gets_a_smaller_pro_squad(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """NVIDIA vertraegt im Freikontingent nur vierzig Anfragen pro Minute --
+    vierundvierzig Agenten waeren dort getaktet, aber trotzdem langsam."""
+    from cortex.agent import PRO_SUBAGENTS_NVIDIA
+
+    monkeypatch.setattr(
+        "cortex.system.strongest_model",
+        lambda _s, purpose="work": "nvidia_nim/meta/llama-3.3-70b-instruct",
+    )
+    settings.model = "nvidia_nim/meta/llama-3.3-70b-instruct"
+    settings.max_subagents = 12
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._apply_mode("pro")
+    assert agent.agent_limit == PRO_SUBAGENTS_NVIDIA == 12
+    # Die beiden starken Agenten bleiben unangetastet -- nur die breite
+    # Masse wird kleiner, nicht die beste Recherche.
+    assert agent.strong_count == 2
+
+
 def test_a_high_setting_survives_the_pro_mode(settings: Settings, toolbox: Toolbox) -> None:
     """Wer selbst mehr eingestellt hat, verliert sie im Pro-Modus nicht."""
     settings.max_subagents = 60
