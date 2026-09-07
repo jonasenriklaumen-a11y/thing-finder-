@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from cortex import jobs as auftraege
-from cortex.jobs import MAX_JOBS, Job, JobStore, Scheduler, next_time
+from aquaticy import jobs as auftraege
+from aquaticy.jobs import MAX_JOBS, Job, JobStore, Scheduler, next_time
 
 
 def test_stuendlich_nimmt_die_naechste_volle_minute() -> None:
@@ -125,8 +125,8 @@ def test_ein_lauf_baut_seinen_eigenen_agenten(monkeypatch: pytest.MonkeyPatch) -
         def close(self) -> None:
             geschlossen.append(True)
 
-    monkeypatch.setattr("cortex.agent.Agent", FakeAgent)
-    monkeypatch.setattr("cortex.cache.Cache", lambda *a, **k: None)
+    monkeypatch.setattr("aquaticy.agent.Agent", FakeAgent)
+    monkeypatch.setattr("aquaticy.cache.Cache", lambda *a, **k: None)
 
     job = Job(
         id=1, question="Was ist neu?", rhythm="daily", hour=8, minute=0, weekday=0,
@@ -152,8 +152,8 @@ def test_ein_fehler_im_lauf_bleibt_im_lauf(monkeypatch: pytest.MonkeyPatch) -> N
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("cortex.agent.Agent", KaputterAgent)
-    monkeypatch.setattr("cortex.cache.Cache", lambda *a, **k: None)
+    monkeypatch.setattr("aquaticy.agent.Agent", KaputterAgent)
+    monkeypatch.setattr("aquaticy.cache.Cache", lambda *a, **k: None)
     job = Job(
         id=1, question="Frage", rhythm="daily", hour=8, minute=0, weekday=0,
         enabled=True, structured=True, created_at=0.0, next_run=0.0, last_run=0.0,
@@ -216,8 +216,8 @@ def test_die_antwort_eines_auftrags_leuchtet(monkeypatch: pytest.MonkeyPatch) ->
         def mark_unread(self, session_id: str, reason: str = "") -> None:
             gemerkt.append((session_id, reason))
 
-    monkeypatch.setattr("cortex.agent.Agent", FakeAgent)
-    monkeypatch.setattr("cortex.cache.Cache", FakeCache)
+    monkeypatch.setattr("aquaticy.agent.Agent", FakeAgent)
+    monkeypatch.setattr("aquaticy.cache.Cache", FakeCache)
 
     job = Job(
         id=1, question="Was ist neu?", rhythm="daily", hour=8, minute=0, weekday=0,
@@ -248,8 +248,8 @@ def test_ohne_antwort_leuchtet_nichts(monkeypatch: pytest.MonkeyPatch) -> None:
         def mark_unread(self, session_id: str, reason: str = "") -> None:
             gemerkt.append(session_id)
 
-    monkeypatch.setattr("cortex.agent.Agent", LeererAgent)
-    monkeypatch.setattr("cortex.cache.Cache", FakeCache)
+    monkeypatch.setattr("aquaticy.agent.Agent", LeererAgent)
+    monkeypatch.setattr("aquaticy.cache.Cache", FakeCache)
     job = Job(
         id=1, question="Frage", rhythm="daily", hour=8, minute=0, weekday=0,
         enabled=True, structured=False, created_at=0.0, next_run=0.0, last_run=0.0,

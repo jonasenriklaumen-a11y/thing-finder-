@@ -1,12 +1,12 @@
-# Minimale SearXNG-Konfiguration fuer cortex.
+# Minimale SearXNG-Konfiguration fuer aquaticy.
 #
 # Entscheidend ist der Eintrag `json` unter `search.formats` -- ohne den
-# antwortet SearXNG nur mit HTML und cortex kann nichts damit anfangen.
+# antwortet SearXNG nur mit HTML und aquaticy kann nichts damit anfangen.
 
 use_default_settings: true
 
 general:
-  instance_name: "cortex"
+  instance_name: "aquaticy"
   # Keine Nutzungsstatistik nach draussen.
   donation_url: false
   contact_url: false

@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from cortex.config import Settings
-from cortex.master import (
+from aquaticy.config import Settings
+from aquaticy.master import (
     MAX_RETRY,
     MAX_ROUNDS,
     Review,

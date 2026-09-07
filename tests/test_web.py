@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
-from cortex import web
-from cortex.agent import AgentResult
-from cortex.cache import Cache
-from cortex.config import Settings
+from aquaticy import web
+from aquaticy.agent import AgentResult
+from aquaticy.cache import Cache
+from aquaticy.config import Settings
 
 
 class FakeToolbox:
@@ -154,9 +154,9 @@ def sse_events(raw: bytes) -> list[dict[str, Any]]:
 def test_current_values_covers_every_setting_key(session: web.ChatSession) -> None:
     values = web.current_values()
     assert set(values) == set(web.SETTING_KEYS)
-    assert values["CORTEX_MODEL"] == "mistral/mistral-large-latest"
-    assert values["CORTEX_LOCATION"] == "Bremen"
-    assert values["CORTEX_SUBAGENTS_AUTO"] == "false"
+    assert values["AQUATICY_MODEL"] == "mistral/mistral-large-latest"
+    assert values["AQUATICY_LOCATION"] == "Bremen"
+    assert values["AQUATICY_SUBAGENTS_AUTO"] == "false"
 
 
 def test_current_values_are_all_strings(session: web.ChatSession) -> None:
@@ -170,12 +170,12 @@ def test_save_values_writes_env_and_reloads(
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     written = web.save_values(
-        {"CORTEX_MODEL": "anthropic/claude-sonnet-4", "CORTEX_LOCATION": "Hamburg"}
+        {"AQUATICY_MODEL": "anthropic/claude-sonnet-4", "AQUATICY_LOCATION": "Hamburg"}
     )
     assert written == target
     text = target.read_text()
-    assert "CORTEX_MODEL=anthropic/claude-sonnet-4" in text
-    assert "CORTEX_LOCATION=Hamburg" in text
+    assert "AQUATICY_MODEL=anthropic/claude-sonnet-4" in text
+    assert "AQUATICY_LOCATION=Hamburg" in text
     # reload() wirft Agent und Einstellungen weg, damit die neuen greifen.
     assert session._settings is None
     assert session._agent is None
@@ -187,7 +187,7 @@ def test_api_key_is_stored_under_the_provider_name(
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     web.save_values(
-        {"CORTEX_MODEL": "nvidia_nim/meta/llama-3.3-70b-instruct",
+        {"AQUATICY_MODEL": "nvidia_nim/meta/llama-3.3-70b-instruct",
          web.API_KEY_FIELD: "nvapi-neu"}
     )
     assert "NVIDIA_NIM_API_KEY=nvapi-neu" in target.read_text()
@@ -200,7 +200,7 @@ def test_empty_api_key_never_deletes_the_stored_one(
     target.write_text("MISTRAL_API_KEY=sk-alt\n")
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     web.save_values(
-        {"CORTEX_MODEL": "mistral/mistral-large-latest", web.API_KEY_FIELD: "   "}
+        {"AQUATICY_MODEL": "mistral/mistral-large-latest", web.API_KEY_FIELD: "   "}
     )
     assert "MISTRAL_API_KEY=sk-alt" in target.read_text()
 
@@ -210,7 +210,7 @@ def test_unknown_keys_are_ignored(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"CORTEX_MODEL": "mistral/mistral-large-latest", "PATH": "/boese"})
+    web.save_values({"AQUATICY_MODEL": "mistral/mistral-large-latest", "PATH": "/boese"})
     assert "PATH=/boese" not in target.read_text()
 
 
@@ -218,7 +218,7 @@ def test_unknown_keys_are_ignored(
 def test_index_serves_the_ui(client) -> None:
     status, body = client("GET", "/")
     assert status == 200
-    assert b"cortex" in body
+    assert b"aquaticy" in body
     assert b"id=\"version\"" in body
 
 
@@ -314,10 +314,10 @@ def test_config_post_saves_and_answers(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    status, body = client("POST", "/api/config", {"CORTEX_LOCATION": "Kiel"})
+    status, body = client("POST", "/api/config", {"AQUATICY_LOCATION": "Kiel"})
     assert status == 200
     assert json.loads(body)["ok"] is True
-    assert "CORTEX_LOCATION=Kiel" in target.read_text()
+    assert "AQUATICY_LOCATION=Kiel" in target.read_text()
 
 
 def test_config_post_reports_failures(
@@ -327,7 +327,7 @@ def test_config_post_reports_failures(
         raise OSError("Platte voll")
 
     monkeypatch.setattr(web, "write_env_file", boom)
-    status, body = client("POST", "/api/config", {"CORTEX_LOCATION": "Kiel"})
+    status, body = client("POST", "/api/config", {"AQUATICY_LOCATION": "Kiel"})
     assert status == 500
     assert "Platte voll" in json.loads(body)["error"]
 
@@ -357,7 +357,7 @@ def test_location_command_changes_the_filter(client, session: web.ChatSession) -
     status, body = client("POST", "/api/command", {"line": "/location Kiel"})
     assert status == 200
     assert json.loads(body)["reload"] is True
-    assert web.current_values()["CORTEX_LOCATION"] == "Kiel"
+    assert web.current_values()["AQUATICY_LOCATION"] == "Kiel"
 
 
 def test_model_command_rejects_a_model_without_provider(client, session: web.ChatSession) -> None:
@@ -448,21 +448,23 @@ def test_saved_settings_take_effect_without_a_restart(
     Ohne override laege die neue Einstellung nur in der Datei -- die
     Oberflaeche meldet aber "sofort aktiv".
     """
-    from cortex.config import reset_settings_cache
+    from aquaticy.config import reset_settings_cache
 
     env = tmp_path / ".env"
-    env.write_text("CORTEX_MODEL=mistral/mistral-large-latest\nCORTEX_LOCATION=Bremen\n")
-    monkeypatch.setattr("cortex.config.ENV_CANDIDATES", (env,))
-    monkeypatch.setenv("CORTEX_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.delenv("CORTEX_LOCATION", raising=False)
-    monkeypatch.delenv("CORTEX_MODEL", raising=False)
+    env.write_text("AQUATICY_MODEL=mistral/mistral-large-latest\nAQUATICY_LOCATION=Bremen\n")
+    monkeypatch.setattr("aquaticy.config.ENV_CANDIDATES", (env,))
+    monkeypatch.setenv("AQUATICY_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("AQUATICY_LOCATION", raising=False)
+    monkeypatch.delenv("AQUATICY_MODEL", raising=False)
     reset_settings_cache()
 
     fresh = web.ChatSession()
     monkeypatch.setattr(web, "SESSION", fresh)
     assert fresh.settings().location == "Bremen"
 
-    web.save_values({"CORTEX_MODEL": "mistral/mistral-large-latest", "CORTEX_LOCATION": "Hamburg"})
+    web.save_values(
+        {"AQUATICY_MODEL": "mistral/mistral-large-latest", "AQUATICY_LOCATION": "Hamburg"}
+    )
     assert fresh.settings().location == "Hamburg"
     reset_settings_cache()
 
@@ -470,7 +472,7 @@ def test_saved_settings_take_effect_without_a_restart(
 # -- Netzbetrieb ----------------------------------------------------------
 @pytest.fixture
 def guarded(monkeypatch: pytest.MonkeyPatch) -> str:
-    """Setzt ein Zugangswort, wie es `cortex web --lan` tut."""
+    """Setzt ein Zugangswort, wie es `aquaticy web --lan` tut."""
     monkeypatch.setattr(web, "TOKEN", "geheim123")
     return "geheim123"
 
@@ -520,13 +522,13 @@ def test_token_in_the_address_opens_the_door(port: int, guarded: str) -> None:
 def test_token_as_cookie_or_header_works(port: int, guarded: str) -> None:
     assert raw_request(port, "GET", "/api/config",
                        {"Cookie": f"{web.TOKEN_COOKIE}={guarded}"})[0] == 200
-    assert raw_request(port, "GET", "/api/config", {"X-Cortex-Token": guarded})[0] == 200
+    assert raw_request(port, "GET", "/api/config", {"X-Aquaticy-Token": guarded})[0] == 200
 
 
 def test_a_wrong_token_is_refused(port: int, guarded: str) -> None:
     assert raw_request(port, "GET", f"/?token={guarded}x")[0] == 401
-    assert raw_request(port, "GET", "/api/config", {"X-Cortex-Token": "falsch"})[0] == 401
-    assert raw_request(port, "POST", "/api/chat", {"X-Cortex-Token": ""})[0] == 401
+    assert raw_request(port, "GET", "/api/config", {"X-Aquaticy-Token": "falsch"})[0] == 401
+    assert raw_request(port, "POST", "/api/chat", {"X-Aquaticy-Token": ""})[0] == 401
 
 
 def test_query_string_does_not_break_routing(port: int) -> None:
@@ -649,7 +651,7 @@ def test_every_request_carries_the_token() -> None:
     """Keine rohen fetch-Aufrufe -- die kaemen im Netzbetrieb ohne Zugangswort."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'fetch("/api' not in html
-    assert 'X-Cortex-Token' in html
+    assert 'X-Aquaticy-Token' in html
 
 
 # -- Zugangswort mit Sonderzeichen ---------------------------------------
@@ -670,8 +672,8 @@ def test_a_non_ascii_token_never_crashes_the_server(port: int,
                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(web, "TOKEN", "grün")
     assert raw_request(port, "GET", "/")[0] == 401
-    assert raw_request(port, "GET", "/", {"X-Cortex-Token": "falsch"})[0] == 401
-    assert raw_request(port, "GET", "/", {"X-Cortex-Token": "grün"})[0] == 200
+    assert raw_request(port, "GET", "/", {"X-Aquaticy-Token": "falsch"})[0] == 401
+    assert raw_request(port, "GET", "/", {"X-Aquaticy-Token": "grün"})[0] == 200
 
 
 def test_token_problem_names_the_bad_character() -> None:
@@ -823,7 +825,7 @@ def tiny_pdf(text: str) -> bytes:
 
 
 def tiny_png() -> bytes:
-    from cortex.local_model import solid_png
+    from aquaticy.local_model import solid_png
 
     return solid_png()
 
@@ -1002,12 +1004,12 @@ def test_the_token_never_goes_to_the_browser(client, session: web.ChatSession) -
     payload = json.loads(body)
     assert payload["ha_connected"] is True
     assert "streng-geheim" not in body.decode()
-    assert "CORTEX_HA_URL" in payload["values"]
+    assert "AQUATICY_HA_URL" in payload["values"]
     assert not any("geheim" in str(value) for value in payload["values"].values())
 
 
 def test_ha_discovery_reports_what_it_found(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cortex.homeassistant.discover", lambda: ["http://192.168.1.5:8123"])
+    monkeypatch.setattr("aquaticy.homeassistant.discover", lambda: ["http://192.168.1.5:8123"])
     status, body = client("POST", "/api/ha", {"action": "discover"})
     assert status == 200
     assert json.loads(body) == {"ok": True, "found": ["http://192.168.1.5:8123"]}
@@ -1020,9 +1022,9 @@ def test_ha_test_needs_both_pieces(client) -> None:
 
 
 def test_ha_test_reports_success(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cortex.homeassistant.HomeAssistant.ping", lambda self: "Zuhause 2026.8")
+    monkeypatch.setattr("aquaticy.homeassistant.HomeAssistant.ping", lambda self: "Zuhause 2026.8")
     monkeypatch.setattr(
-        "cortex.homeassistant.HomeAssistant.domains", lambda self: {"light": 4, "sensor": 9}
+        "aquaticy.homeassistant.HomeAssistant.domains", lambda self: {"light": 4, "sensor": 9}
     )
     _, body = client("POST", "/api/ha", {"url": "192.168.1.5", "token": "t"})
     payload = json.loads(body)
@@ -1033,12 +1035,12 @@ def test_ha_test_reports_success(client, monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_ha_test_passes_the_error_through(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    from cortex.homeassistant import HomeAssistantError
+    from aquaticy.homeassistant import HomeAssistantError
 
     def boom(self):
         raise HomeAssistantError("Token abgelehnt")
 
-    monkeypatch.setattr("cortex.homeassistant.HomeAssistant.ping", boom)
+    monkeypatch.setattr("aquaticy.homeassistant.HomeAssistant.ping", boom)
     _, body = client("POST", "/api/ha", {"url": "192.168.1.5", "token": "falsch"})
     assert json.loads(body) == {"ok": False, "error": "Token abgelehnt"}
 
@@ -1049,7 +1051,7 @@ def test_an_empty_ha_token_keeps_the_stored_one(
     target = tmp_path / ".env"
     target.write_text("HA_TOKEN=alt-und-gut\n")
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"CORTEX_HA_URL": "http://192.168.1.5:8123", web.HA_TOKEN_FIELD: "   "})
+    web.save_values({"AQUATICY_HA_URL": "http://192.168.1.5:8123", web.HA_TOKEN_FIELD: "   "})
     assert "HA_TOKEN=alt-und-gut" in target.read_text()
 
 
@@ -1192,7 +1194,7 @@ def test_the_appearance_window_offers_modes_and_palettes() -> None:
         assert f'data-tmode="{mode}"' in html
     # Das Schema liegt beim Server, nicht im Browser -- sonst waere es auf
     # dem Handy ein anderes als am Rechner.
-    assert "cortex-palette" not in html
+    assert "aquaticy-palette" not in html
     assert "merkeZustand({ palette })" in html
     assert "prefers-color-scheme" in html    # "wie das System" folgt dem System
 
@@ -1244,7 +1246,7 @@ def test_the_model_list_offers_what_actually_works(
     client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Eine Auswahl, die beim Anklicken scheitert, hilft niemandem."""
-    monkeypatch.setattr("cortex.local_model.installed_models", lambda base: ["gemma4:12b"])
+    monkeypatch.setattr("aquaticy.local_model.installed_models", lambda base: ["gemma4:12b"])
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     status, body = client("GET", "/api/models")
@@ -1261,7 +1263,7 @@ def test_the_model_list_offers_what_actually_works(
 def test_every_model_says_where_it_runs(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("cortex.local_model.installed_models", lambda base: ["qwen3:8b"])
+    monkeypatch.setattr("aquaticy.local_model.installed_models", lambda base: ["qwen3:8b"])
     _, body = client("GET", "/api/models")
     local = [m for m in json.loads(body)["models"] if m["id"].startswith("ollama_chat/")]
     assert local and local[0]["kind"] == "lokal"
@@ -1365,7 +1367,7 @@ def test_the_ui_offers_the_model_picker_and_load_button() -> None:
     assert "/api/models" in html
     assert 'id="showload"' in html and "/api/system" in html
     assert 'id="provider"' in html, "Anbieter zum Auswaehlen"
-    assert 'name="CORTEX_MEMORY"' in html
+    assert 'name="AQUATICY_MEMORY"' in html
 
 
 def test_the_ui_offers_reading_along() -> None:
@@ -1427,8 +1429,8 @@ def test_saving_corrects_the_model_id(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"CORTEX_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
-    assert "CORTEX_MODEL=nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in target.read_text()
+    web.save_values({"AQUATICY_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
+    assert "AQUATICY_MODEL=nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b" in target.read_text()
 
 
 def test_the_key_lands_under_the_corrected_provider(
@@ -1439,7 +1441,7 @@ def test_the_key_lands_under_the_corrected_provider(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     web.save_values(
         {
-            "CORTEX_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
+            "AQUATICY_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
             web.API_KEY_FIELD: "nvapi-Spf8beispiel",
         }
     )
@@ -1451,8 +1453,8 @@ def test_vision_and_helper_models_are_corrected_too(
 ) -> None:
     target = tmp_path / ".env"
     monkeypatch.setattr(web, "find_env_file", lambda: target)
-    web.save_values({"CORTEX_VISION_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
-    assert "CORTEX_VISION_MODEL=nvidia_nim/nvidia/" in target.read_text()
+    web.save_values({"AQUATICY_VISION_MODEL": "nvidia/nemotron-3-ultra-550b-a55b"})
+    assert "AQUATICY_VISION_MODEL=nvidia_nim/nvidia/" in target.read_text()
 
 
 def test_the_ui_has_its_own_save_button_for_the_model() -> None:
@@ -1509,7 +1511,7 @@ def test_opening_a_chat_restores_the_context(session: web.ChatSession) -> None:
                       meta={})
     session._agent = FakeAgent()
 
-    from cortex.agent import Agent
+    from aquaticy.agent import Agent
 
     real = Agent(session.settings())
     session._agent = real
@@ -1533,7 +1535,7 @@ def test_opening_needs_a_chat_id(client) -> None:
 
 def test_a_new_chat_starts_a_new_entry(client, session: web.ChatSession) -> None:
     """Neuer Chat heisst: die naechste Frage benennt einen neuen Eintrag."""
-    from cortex.agent import Agent
+    from aquaticy.agent import Agent
 
     session._agent = Agent(session.settings())
     before = session.chat_id()
@@ -1546,7 +1548,7 @@ def test_a_new_chat_starts_a_new_entry(client, session: web.ChatSession) -> None
 def test_an_ollama_address_never_reaches_the_cloud() -> None:
     """Ollama antwortet mit "404 page not found" -- das sieht aus wie ein
     Fehler des Anbieters, ist aber nur die falsche Adresse."""
-    from cortex.config import Settings as S
+    from aquaticy.config import Settings as S
 
     settings = S(model="nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b",
                  api_base="http://localhost:11434")
@@ -1554,7 +1556,7 @@ def test_an_ollama_address_never_reaches_the_cloud() -> None:
 
 
 def test_a_local_model_keeps_its_address() -> None:
-    from cortex.config import Settings as S
+    from aquaticy.config import Settings as S
 
     settings = S(model="ollama_chat/gemma4:12b", api_base="http://localhost:11434")
     assert settings.llm_kwargs_for(settings.model)["api_base"] == "http://localhost:11434"
@@ -1562,7 +1564,7 @@ def test_a_local_model_keeps_its_address() -> None:
 
 def test_a_proxy_is_not_mistaken_for_ollama() -> None:
     """Ein LiteLLM-Proxy im Heimnetz ist ein berechtigter Weg zur Cloud."""
-    from cortex.config import base_fits
+    from aquaticy.config import base_fits
 
     assert base_fits("http://192.168.1.9:4000", "nvidia_nim/meta/llama")
     assert base_fits("http://localhost:4000", "mistral/mistral-large-latest")
@@ -1573,7 +1575,7 @@ def test_a_proxy_is_not_mistaken_for_ollama() -> None:
 # Terminal-Setup und Web-Einstellungen zeigen dasselbe
 # ---------------------------------------------------------------------------
 def test_everything_setup_asks_for_is_in_the_web_form() -> None:
-    """Was `cortex setup` fragt, muss auch im Browser einstellbar sein.
+    """Was `aquaticy setup` fragt, muss auch im Browser einstellbar sein.
 
     Der Test liest die Schluessel direkt aus dem Setup-Quelltext -- kommt dort
     eine Frage dazu, faellt er auf, bis das Formular nachzieht.
@@ -1581,10 +1583,10 @@ def test_everything_setup_asks_for_is_in_the_web_form() -> None:
     import inspect
     import re
 
-    from cortex import cli
+    from aquaticy import cli
 
     source = inspect.getsource(cli.setup_command)
-    asked = set(re.findall(r'"(CORTEX_[A-Z_]+)"', source))
+    asked = set(re.findall(r'"(AQUATICY_[A-Z_]+)"', source))
     html = web.UI_FILE.read_text(encoding="utf-8")
     for key in asked:
         assert f'name="{key}"' in html, f"{key} wird im Terminal gefragt, fehlt aber im Formular"
@@ -1604,7 +1606,7 @@ def test_saving_stores_the_search_key_under_the_right_name(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     monkeypatch.setattr(web.SESSION, "reload", lambda: None)
 
-    web.save_values({"CORTEX_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "bsa-xyz"})
+    web.save_values({"AQUATICY_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "bsa-xyz"})
     assert "BRAVE_API_KEY=bsa-xyz" in target.read_text(encoding="utf-8")
 
 
@@ -1616,7 +1618,7 @@ def test_an_empty_search_key_means_unchanged(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     monkeypatch.setattr(web.SESSION, "reload", lambda: None)
 
-    web.save_values({"CORTEX_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "   "})
+    web.save_values({"AQUATICY_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "   "})
     assert "BRAVE_API_KEY=alt" in target.read_text(encoding="utf-8")
 
 
@@ -1629,7 +1631,7 @@ def test_the_open_metasearch_needs_no_key(
     monkeypatch.setattr(web, "find_env_file", lambda: target)
     monkeypatch.setattr(web.SESSION, "reload", lambda: None)
 
-    web.save_values({"CORTEX_SEARCH_BACKEND": "duckduckgo", web.SEARCH_KEY_FIELD: "egal"})
+    web.save_values({"AQUATICY_SEARCH_BACKEND": "duckduckgo", web.SEARCH_KEY_FIELD: "egal"})
     content = target.read_text(encoding="utf-8")
     assert "egal" not in content
 
@@ -1647,15 +1649,15 @@ def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.Mo
         seen["backend"] = backend
         return True, "3 Treffer"
 
-    monkeypatch.setattr("cortex.probe.check_llm", fake_llm)
-    monkeypatch.setattr("cortex.probe.check_search", fake_search)
+    monkeypatch.setattr("aquaticy.probe.check_llm", fake_llm)
+    monkeypatch.setattr("aquaticy.probe.check_search", fake_search)
 
     status, body = client(
         "POST",
         "/api/probe",
         {
-            "CORTEX_MODEL": "mistral/mistral-large-latest",
-            "CORTEX_SEARCH_BACKEND": "brave",
+            "AQUATICY_MODEL": "mistral/mistral-large-latest",
+            "AQUATICY_SEARCH_BACKEND": "brave",
             web.API_KEY_FIELD: "sk-neu",
         },
     )
@@ -1668,9 +1670,9 @@ def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.Mo
 def test_the_probe_reports_a_failure_without_crashing(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("cortex.probe.check_llm", lambda *a, **k: (False, "401 Unauthorized"))
-    monkeypatch.setattr("cortex.probe.check_search", lambda *a, **k: (True, "3 Treffer"))
-    status, body = client("POST", "/api/probe", {"CORTEX_MODEL": "mistral/mistral-large-latest"})
+    monkeypatch.setattr("aquaticy.probe.check_llm", lambda *a, **k: (False, "401 Unauthorized"))
+    monkeypatch.setattr("aquaticy.probe.check_search", lambda *a, **k: (True, "3 Treffer"))
+    status, body = client("POST", "/api/probe", {"AQUATICY_MODEL": "mistral/mistral-large-latest"})
     data = json.loads(body)
     assert status == 200
     assert data["ok"] is False
@@ -1684,14 +1686,14 @@ def test_a_leftover_ollama_base_is_ignored_in_the_probe(
     """Sonst testet man Ollama und bekommt gruenes Licht fuer NVIDIA."""
     seen: dict[str, Any] = {}
     monkeypatch.setattr(
-        "cortex.probe.check_llm",
+        "aquaticy.probe.check_llm",
         lambda model, api_key="", api_base="": (seen.update(base=api_base), (True, "ok"))[1],
     )
-    monkeypatch.setattr("cortex.probe.check_search", lambda *a, **k: (True, "ok"))
+    monkeypatch.setattr("aquaticy.probe.check_search", lambda *a, **k: (True, "ok"))
     client(
         "POST",
         "/api/probe",
-        {"CORTEX_MODEL": "mistral/mistral-large-latest", "CORTEX_API_BASE": "http://localhost:11434"},
+        {"AQUATICY_MODEL": "mistral/mistral-large-latest", "AQUATICY_API_BASE": "http://localhost:11434"},
     )
     assert seen["base"] == ""
 
@@ -1702,7 +1704,7 @@ def test_a_leftover_ollama_base_is_ignored_in_the_probe(
 def test_the_settings_have_their_own_google_section() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "Gmail &amp; Kalender" in html, "eigene Sparte"
-    assert 'name="CORTEX_GOOGLE"' in html, "an- und ausschaltbar"
+    assert 'name="AQUATICY_GOOGLE"' in html, "an- und ausschaltbar"
     assert f'name="{web.GOOGLE_ID_FIELD}"' in html
     assert f'name="{web.GOOGLE_SECRET_FIELD}"' in html
     assert "console.cloud.google.com" in html, "die Anleitung steht dabei"
@@ -1734,7 +1736,7 @@ def test_saving_stores_the_google_credentials(
 
     web.save_values(
         {
-            "CORTEX_GOOGLE": "true",
+            "AQUATICY_GOOGLE": "true",
             web.GOOGLE_ID_FIELD: "id-1.apps.googleusercontent.com",
             web.GOOGLE_SECRET_FIELD: "s3cret",
         }
@@ -1742,7 +1744,7 @@ def test_saving_stores_the_google_credentials(
     content = target.read_text(encoding="utf-8")
     assert "GOOGLE_CLIENT_ID=id-1.apps.googleusercontent.com" in content
     assert "GOOGLE_CLIENT_SECRET=s3cret" in content
-    assert "CORTEX_GOOGLE=true" in content
+    assert "AQUATICY_GOOGLE=true" in content
 
 
 def test_an_empty_google_secret_means_unchanged(
@@ -1793,16 +1795,16 @@ def test_the_return_from_google_finishes_the_connection(
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "s3cret")
     web.SESSION.reload()
 
-    from cortex.google import Tokens
+    from aquaticy.google import Tokens
 
     monkeypatch.setattr(
-        "cortex.google.exchange_code",
+        "aquaticy.google.exchange_code",
         lambda cid, secret, code, redirect: Tokens(
             access_token="at", refresh_token="rt", expires_at=time.time() + 3600
         ),
     )
-    monkeypatch.setattr("cortex.google.Google.remember", lambda self, tokens: None)
-    monkeypatch.setattr("cortex.google.Google.account", lambda self: "jemand@example.com")
+    monkeypatch.setattr("aquaticy.google.Google.remember", lambda self, tokens: None)
+    monkeypatch.setattr("aquaticy.google.Google.account", lambda self: "jemand@example.com")
 
     status, body = client("GET", "/google?code=4/0AX")
     assert status == 200
@@ -1880,7 +1882,7 @@ def test_a_broken_stream_is_explained_in_plain_words() -> None:
     """"TypeError: network error" ist keine Auskunft, mit der jemand etwas anfangen kann."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "Die Verbindung ist mittendrin abgerissen" in html
-    assert "Keine Verbindung zu Cortex" in html
+    assert "Keine Verbindung zu Aquaticy" in html
     assert "err instanceof TypeError" in html
 
 
@@ -1963,8 +1965,8 @@ def test_stopping_cancels_the_running_agent(
 # ---------------------------------------------------------------------------
 def test_the_storage_is_set_up_in_the_network_section() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'name="CORTEX_STORAGE_URL"' in html
-    assert 'name="CORTEX_STORAGE_ACCESS"' in html
+    assert 'name="AQUATICY_STORAGE_URL"' in html
+    assert 'name="AQUATICY_STORAGE_ACCESS"' in html
     for level in ('value="off"', 'value="read"', 'value="write"'):
         assert level in html, level
     assert 'id="storage-find"' in html and 'id="storage-test"' in html
@@ -1998,7 +2000,7 @@ def test_the_storage_probe_reports_what_it_found(
         def close(self):
             pass
 
-    monkeypatch.setattr("cortex.storage.Storage", Fake)
+    monkeypatch.setattr("aquaticy.storage.Storage", Fake)
     status, body = client("POST", "/api/storage", {"url": "192.168.1.5:3000"})
     data = json.loads(body)
     assert status == 200 and data["ok"] is True
@@ -2024,7 +2026,7 @@ def test_the_storage_probe_only_reads(client, monkeypatch: pytest.MonkeyPatch) -
         def close(self):
             pass
 
-    monkeypatch.setattr("cortex.storage.Storage", Fake)
+    monkeypatch.setattr("aquaticy.storage.Storage", Fake)
     client("POST", "/api/storage", {"url": "192.168.1.5:3000"})
     assert seen["access"] == "read"
 
@@ -2032,7 +2034,7 @@ def test_the_storage_probe_only_reads(client, monkeypatch: pytest.MonkeyPatch) -
 def test_searching_the_network_says_so_when_nothing_answers(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("cortex.storage.discover", lambda subnet: [])
+    monkeypatch.setattr("aquaticy.storage.discover", lambda subnet: [])
     _, body = client("POST", "/api/storage", {})
     data = json.loads(body)
     assert data["ok"] is False
@@ -2423,7 +2425,7 @@ def test_the_standard_mode_starts_no_agents_in_the_ui() -> None:
 
 
 def test_the_picker_offers_the_web_switch() -> None:
-    """Ohne Web bleibt Cortex bei seinem Wissen und den eigenen Dateien."""
+    """Ohne Web bleibt Aquaticy bei seinem Wissen und den eigenen Dateien."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     picker = html[html.index('id="picker-models"') :]
     picker = picker[: picker.index("picker-foot")]
@@ -2553,7 +2555,7 @@ def test_a_running_recheck_is_visible() -> None:
 # Nutzung, Speicher, Chats durchsuchen, Export, Auftraege
 # ---------------------------------------------------------------------------
 def test_the_counter_can_be_read_and_reset(client, web_settings: Settings) -> None:
-    from cortex.usage import UsageLog
+    from aquaticy.usage import UsageLog
 
     log = UsageLog(web_settings.db_path)
     log.record("mistral/mistral-large-latest", 300, 30)
@@ -2660,10 +2662,10 @@ def test_the_workshop_answers_even_when_it_is_not_running(client) -> None:
 
 
 def test_a_workshop_file_is_never_served_as_html(client) -> None:
-    """Sonst liefe eine Datei aus der Werkstatt unter der Adresse von Cortex."""
+    """Sonst liefe eine Datei aus der Werkstatt unter der Adresse von Aquaticy."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert "/api/werkstatt/datei" in html
-    quelle = Path("cortex/web.py").read_text(encoding="utf-8")
+    quelle = Path("aquaticy/web.py").read_text(encoding="utf-8")
     stelle = quelle[quelle.index("def _workshop_file") :]
     stelle = stelle[: stelle.index("\n    def ", 10)]
     assert 'attachment; filename=' in stelle
@@ -2684,7 +2686,7 @@ def test_the_settings_show_the_token_counter() -> None:
 def test_the_memory_window_exists_with_a_delete_per_entry() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'id="membox"' in html
-    assert "Was Cortex über dich weiß" in html
+    assert "Was Aquaticy über dich weiß" in html
     assert 'id="btn-memory"' in html
     assert "/api/memory?id=" in html
 
@@ -2718,7 +2720,7 @@ def test_the_settings_offer_scheduled_jobs() -> None:
 
 def test_the_google_section_has_its_own_write_switch() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'name="CORTEX_GOOGLE_WRITE"' in html
+    assert 'name="AQUATICY_GOOGLE_WRITE"' in html
     assert "Ändern erlaubt" in html
     assert "Verschickt wird nie eine Mail" in html
 
@@ -2878,7 +2880,7 @@ def test_a_new_chat_after_a_reload_is_still_new(session: web.ChatSession) -> Non
 def test_saving_settings_keeps_the_chat(client, session: web.ChatSession) -> None:
     """Derselbe Weg wie in der Oberfläche: speichern und weiterreden."""
     vorher = json.loads(client("GET", "/api/chats")[1])["current"]
-    status, _ = client("POST", "/api/config", {"CORTEX_LOCATION": "Bremen"})
+    status, _ = client("POST", "/api/config", {"AQUATICY_LOCATION": "Bremen"})
     assert status == 200
     nachher = json.loads(client("GET", "/api/chats")[1])["current"]
     assert nachher == vorher, "das Speichern hat den Chat gewechselt"
@@ -2923,45 +2925,45 @@ def test_switching_to_the_same_mode_changes_nothing() -> None:
 # ---------------------------------------------------------------------------
 def test_a_number_field_with_letters_is_refused(client) -> None:
     """Sonst meldet das Formular „gespeichert" und die Einstellung tut nichts."""
-    status, data = client("POST", "/api/config", {"CORTEX_CONTEXT_TOKENS": "achtundzwanzig"})
+    status, data = client("POST", "/api/config", {"AQUATICY_CONTEXT_TOKENS": "achtundzwanzig"})
     assert status == 400
     antwort = json.loads(data)
     assert antwort["ok"] is False
-    assert "CORTEX_CONTEXT_TOKENS" in antwort["error"]
+    assert "AQUATICY_CONTEXT_TOKENS" in antwort["error"]
     assert "keine Zahl" in antwort["error"]
 
 
 def test_a_number_outside_its_range_is_refused(client) -> None:
-    status, data = client("POST", "/api/config", {"CORTEX_MAX_SUBAGENTS": "5000"})
+    status, data = client("POST", "/api/config", {"AQUATICY_MAX_SUBAGENTS": "5000"})
     assert status == 400
     assert "ausserhalb" in json.loads(data)["error"]
 
 
 def test_the_request_rate_is_settable_and_checked(client) -> None:
     """Wer einen größeren Vertrag hat, hebt die Grenze an -- aber mit Zahlen."""
-    assert "CORTEX_RPM" in web.SETTING_KEYS
-    assert "CORTEX_PARALLEL_CALLS" in web.SETTING_KEYS
+    assert "AQUATICY_RPM" in web.SETTING_KEYS
+    assert "AQUATICY_PARALLEL_CALLS" in web.SETTING_KEYS
 
-    status, data = client("POST", "/api/config", {"CORTEX_RPM": "viele"})
+    status, data = client("POST", "/api/config", {"AQUATICY_RPM": "viele"})
     assert status == 400
     assert "keine Zahl" in json.loads(data)["error"]
 
-    status, data = client("POST", "/api/config", {"CORTEX_PARALLEL_CALLS": "500"})
+    status, data = client("POST", "/api/config", {"AQUATICY_PARALLEL_CALLS": "500"})
     assert status == 400
     assert "ausserhalb" in json.loads(data)["error"]
 
     # Leer heißt "was der Anbieter verträgt" -- und ist erlaubt.
-    assert client("POST", "/api/config", {"CORTEX_RPM": ""})[0] == 200
+    assert client("POST", "/api/config", {"AQUATICY_RPM": ""})[0] == 200
 
 
 def test_an_invented_choice_is_refused(client) -> None:
-    status, data = client("POST", "/api/config", {"CORTEX_STORAGE_ACCESS": "alles"})
+    status, data = client("POST", "/api/config", {"AQUATICY_STORAGE_ACCESS": "alles"})
     assert status == 400
     assert "off, read, write" in json.loads(data)["error"]
 
 
 def test_an_absurdly_long_value_is_refused(client) -> None:
-    status, data = client("POST", "/api/config", {"CORTEX_LOCATION": "x" * 5000})
+    status, data = client("POST", "/api/config", {"AQUATICY_LOCATION": "x" * 5000})
     assert status == 400
     assert "zu lang" in json.loads(data)["error"]
 
@@ -2971,7 +2973,7 @@ def test_a_refused_form_writes_nothing(client, web_settings: Settings) -> None:
     vorher = web_settings.env_path.read_text() if web_settings.env_path.exists() else ""
     client(
         "POST", "/api/config",
-        {"CORTEX_LOCATION": "Bremen", "CORTEX_CONTEXT_TOKENS": "viel"},
+        {"AQUATICY_LOCATION": "Bremen", "AQUATICY_CONTEXT_TOKENS": "viel"},
     )
     nachher = web_settings.env_path.read_text() if web_settings.env_path.exists() else ""
     assert nachher == vorher
@@ -2981,7 +2983,7 @@ def test_a_refused_form_writes_nothing(client, web_settings: Settings) -> None:
 def test_good_values_still_get_through(client) -> None:
     status, data = client(
         "POST", "/api/config",
-        {"CORTEX_CONTEXT_TOKENS": "32000", "CORTEX_STORAGE_ACCESS": "read"},
+        {"AQUATICY_CONTEXT_TOKENS": "32000", "AQUATICY_STORAGE_ACCESS": "read"},
     )
     assert status == 200
     assert json.loads(data)["ok"] is True
@@ -3024,7 +3026,7 @@ def test_the_page_carries_its_state_along(client) -> None:
     assert 'data-theme="dark"' in html
     assert 'data-palette="nord"' in html
     assert "code-mode" in html[: html.index("</head>") + 200] or 'class="start code-mode"' in html
-    assert "window.__CORTEX_STATE__" in html
+    assert "window.__AQUATICY_STATE__" in html
 
 
 def test_the_chat_uses_the_stored_state(client, agent: FakeAgent) -> None:
@@ -3189,7 +3191,7 @@ def test_the_checkers_report_what_they_do() -> None:
 
 def test_the_roles_are_named_the_same_on_both_sides() -> None:
     """Die Marken im Browser kommen aus derselben Liste wie die Rollen."""
-    from cortex.subagents import ROLE_LABELS
+    from aquaticy.subagents import ROLE_LABELS
 
     html = web.UI_FILE.read_text(encoding="utf-8")
     zeile = html[html.index("const ROLLEN =") :]
@@ -3347,12 +3349,12 @@ def test_the_picker_offers_only_the_strong_ones_in_code_and_pro() -> None:
     assert "(nurStarke ? daten.strong : daten.models)" in html
     assert '"Stärkstes Modell wählen"' in html
     # Gewählt wird dort das Code-Modell -- der Standardmodus behält seins.
-    assert "{ CORTEX_CODE_MODEL: model.id } : { CORTEX_MODEL: model.id }" in html
+    assert "{ AQUATICY_CODE_MODEL: model.id } : { AQUATICY_MODEL: model.id }" in html
 
 
 def test_the_header_shows_what_really_runs() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'cfg.strong_model || cfg.values.CORTEX_MODEL' in html
+    assert 'cfg.strong_model || cfg.values.AQUATICY_MODEL' in html
     assert 'mode === "code" || mode === "pro"' in html
 
 

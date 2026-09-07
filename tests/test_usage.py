@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cortex.usage import CHARS_PER_TOKEN, UsageLog, message_tokens, tokens
+from aquaticy.usage import CHARS_PER_TOKEN, UsageLog, message_tokens, tokens
 
 
 def test_drei_zeichen_sind_ein_token() -> None:

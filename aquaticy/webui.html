@@ -1,0 +1,3956 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Aquaticy AI</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28'%3E%E2%9C%B3%3C/text%3E%3C/svg%3E">
+<style>
+/* =========================================================================
+   Farben. Warmes Papier statt kaltem Grau, gruener Akzent.
+   Alles ueber Variablen, damit Hell und Dunkel nur die Werte tauschen.
+   ========================================================================= */
+:root{
+  --bg:#faf9f5; --surface:#ffffff; --surface-2:#f3f2ec; --sidebar:#f5f4ee;
+  --text:#26251f; --text-2:#5f5d54; --text-3:#8a887c;
+  --line:#e6e4da; --line-2:#d9d7cb;
+  --accent:#3d7d55; --accent-soft:#e8f0ea; --accent-text:#2c6641;
+  --on-accent:#ffffff; --user-bubble:#f0efe8;
+  --warn:#9a6b1f; --err:#a8433a;
+  --shadow:0 2px 12px rgba(38,37,31,.07);
+  /* Der Knopf im Schalter. Er bleibt in jedem Schema weiss -- so macht es
+     auch iOS im Dunkelmodus, und nur so hebt er sich von der gruenen Pille
+     ab. Trotzdem als Wert und nicht festgenagelt: wer ein Schema baut, in
+     dem das nicht passt, kann ihn umstellen. */
+  --knob:#ffffff;
+  --radius:14px; --radius-lg:22px;
+  --serif:ui-serif,"Iowan Old Style",Georgia,"Palatino Linotype",Palatino,serif;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+}
+:root[data-theme="dark"]{
+  --bg:#232320; --surface:#2c2c28; --surface-2:#343330; --sidebar:#1e1e1b;
+  --text:#f2f1ea; --text-2:#b6b3a8; --text-3:#87847a;
+  --line:#3a3934; --line-2:#4a4842;
+  --accent:#7cb894; --accent-soft:#2b3a30; --accent-text:#8fc9a6;
+  --on-accent:#14251b; --user-bubble:#343330;
+  --warn:#d7ac63; --err:#e0837a;
+  --shadow:0 2px 14px rgba(0,0,0,.28);
+}
+
+/* -------------------------------------------------------------------------
+   Farbschemata. Der Aufbau bleibt in jedem Schema derselbe -- getauscht
+   werden nur die Werte oben. Standard ist das gruene Papier; die uebrigen
+   sind die verbreiteten Schemata aus der Editorenwelt, jeweils hell und
+   dunkel, damit der Hell-Dunkel-Schalter ueberall weiterarbeitet.
+   ------------------------------------------------------------------------- */
+/* Nord */
+:root[data-palette="nord"]{
+  --bg:#eceff4;--surface:#ffffff;--surface-2:#e5e9f0;--sidebar:#e5e9f0;
+  --text:#2e3440;--text-2:#4c566a;--text-3:#7b88a1;--line:#dbe1ea;
+  --line-2:#cbd3e0;--accent:#5e81ac;--accent-soft:#e1e9f2;--accent-text:#43648f;
+  --on-accent:#ffffff;--user-bubble:#e5e9f0;--warn:#a37a26;--err:#bf616a;}
+:root[data-palette="nord"][data-theme="dark"]{
+  --bg:#2e3440;--surface:#3b4252;--surface-2:#434c5e;--sidebar:#272c36;
+  --text:#eceff4;--text-2:#d8dee9;--text-3:#a3adc2;--line:#434c5e;
+  --line-2:#4c566a;--accent:#88c0d0;--accent-soft:#35404f;--accent-text:#9fd0dd;
+  --on-accent:#1b2430;--user-bubble:#434c5e;--warn:#ebcb8b;--err:#d08b92;}
+/* Catppuccin */
+:root[data-palette="catppuccin"]{
+  --bg:#eff1f5;--surface:#ffffff;--surface-2:#e6e9ef;--sidebar:#e6e9ef;
+  --text:#4c4f69;--text-2:#6c6f85;--text-3:#8c8fa1;--line:#dce0e8;
+  --line-2:#ccd0da;--accent:#8839ef;--accent-soft:#ece2fb;--accent-text:#7226d4;
+  --on-accent:#ffffff;--user-bubble:#e6e9ef;--warn:#df8e1d;--err:#d20f39;}
+:root[data-palette="catppuccin"][data-theme="dark"]{
+  --bg:#1e1e2e;--surface:#27273a;--surface-2:#313244;--sidebar:#181825;
+  --text:#cdd6f4;--text-2:#a6adc8;--text-3:#7f849c;--line:#313244;
+  --line-2:#45475a;--accent:#cba6f7;--accent-soft:#342c47;--accent-text:#d8bdfa;
+  --on-accent:#1e1e2e;--user-bubble:#313244;--warn:#f9e2af;--err:#f38ba8;}
+/* Gruvbox */
+:root[data-palette="gruvbox"]{
+  --bg:#fbf1c7;--surface:#f9f5d7;--surface-2:#ebdbb2;--sidebar:#f2e5bc;
+  --text:#3c3836;--text-2:#504945;--text-3:#7c6f64;--line:#e6d5a8;
+  --line-2:#d5c4a1;--accent:#af3a03;--accent-soft:#f5e3ce;--accent-text:#9d3204;
+  --on-accent:#fbf1c7;--user-bubble:#ebdbb2;--warn:#b57614;--err:#9d0006;}
+:root[data-palette="gruvbox"][data-theme="dark"]{
+  --bg:#282828;--surface:#32302f;--surface-2:#3c3836;--sidebar:#1d2021;
+  --text:#fbf1c7;--text-2:#d5c4a1;--text-3:#a89984;--line:#3c3836;
+  --line-2:#504945;--accent:#fe8019;--accent-soft:#3d3229;--accent-text:#fabd2f;
+  --on-accent:#282828;--user-bubble:#3c3836;--warn:#fabd2f;--err:#fb4934;}
+/* Tokyo Night */
+:root[data-palette="tokyonight"]{
+  --bg:#e1e2e7;--surface:#ffffff;--surface-2:#d9dae3;--sidebar:#d9dae3;
+  --text:#343b58;--text-2:#4c5590;--text-3:#848cb5;--line:#cdcfda;
+  --line-2:#b9bcca;--accent:#2e7de9;--accent-soft:#dbe6fb;--accent-text:#2765c0;
+  --on-accent:#ffffff;--user-bubble:#d9dae3;--warn:#8c6c3e;--err:#f52a65;}
+:root[data-palette="tokyonight"][data-theme="dark"]{
+  --bg:#1a1b26;--surface:#24283b;--surface-2:#2f334d;--sidebar:#16161e;
+  --text:#c0caf5;--text-2:#a9b1d6;--text-3:#787c99;--line:#2f334d;
+  --line-2:#414868;--accent:#7aa2f7;--accent-soft:#262f47;--accent-text:#8fb4f9;
+  --on-accent:#16161e;--user-bubble:#2f334d;--warn:#e0af68;--err:#f7768e;}
+/* Solarized */
+:root[data-palette="solarized"]{
+  --bg:#fdf6e3;--surface:#fffdf6;--surface-2:#eee8d5;--sidebar:#eee8d5;
+  --text:#073642;--text-2:#586e75;--text-3:#93a1a1;--line:#e6dfc8;
+  --line-2:#d9d2bc;--accent:#268bd2;--accent-soft:#dcecf7;--accent-text:#1e6ea4;
+  --on-accent:#fdf6e3;--user-bubble:#eee8d5;--warn:#b58900;--err:#dc322f;}
+:root[data-palette="solarized"][data-theme="dark"]{
+  --bg:#002b36;--surface:#073642;--surface-2:#0d4451;--sidebar:#00212b;
+  --text:#eee8d5;--text-2:#93a1a1;--text-3:#7f9095;--line:#0d4451;
+  --line-2:#185563;--accent:#2aa198;--accent-soft:#04353c;--accent-text:#4fbdb3;
+  --on-accent:#002b36;--user-bubble:#073642;--warn:#b58900;--err:#cb4b16;}
+/* Dracula */
+:root[data-palette="dracula"]{
+  --bg:#fffbeb;--surface:#ffffff;--surface-2:#f5f0dd;--sidebar:#f7f2e0;
+  --text:#1f1f1f;--text-2:#4a4638;--text-3:#6c664b;--line:#ece5cd;
+  --line-2:#ddd5b8;--accent:#644ac9;--accent-soft:#e8e2f8;--accent-text:#533dab;
+  --on-accent:#ffffff;--user-bubble:#f5f0dd;--warn:#846e15;--err:#cb3a2a;}
+:root[data-palette="dracula"][data-theme="dark"]{
+  --bg:#282a36;--surface:#31333f;--surface-2:#44475a;--sidebar:#21222c;
+  --text:#f8f8f2;--text-2:#c8cbe0;--text-3:#6272a4;--line:#3c3f52;
+  --line-2:#44475a;--accent:#bd93f9;--accent-soft:#363348;--accent-text:#cdaefb;
+  --on-accent:#282a36;--user-bubble:#44475a;--warn:#f1fa8c;--err:#ff5555;}
+/* Rosé Pine */
+:root[data-palette="rosepine"]{
+  --bg:#faf4ed;--surface:#fffaf3;--surface-2:#f2e9e1;--sidebar:#f6ede4;
+  --text:#575279;--text-2:#797593;--text-3:#9893a5;--line:#eaddd2;
+  --line-2:#dfd5c8;--accent:#907aa9;--accent-soft:#efe7f2;--accent-text:#7a6494;
+  --on-accent:#ffffff;--user-bubble:#f2e9e1;--warn:#ea9d34;--err:#b4637a;}
+:root[data-palette="rosepine"][data-theme="dark"]{
+  --bg:#191724;--surface:#1f1d2e;--surface-2:#26233a;--sidebar:#14121f;
+  --text:#e0def4;--text-2:#908caa;--text-3:#6e6a86;--line:#26233a;
+  --line-2:#403d52;--accent:#c4a7e7;--accent-soft:#2c2540;--accent-text:#d3bcef;
+  --on-accent:#191724;--user-bubble:#26233a;--warn:#f6c177;--err:#eb6f92;}
+*{box-sizing:border-box}
+/* Ein Klick soll sich anfuehlen, nicht springen. */
+button,.btn,.tool,.pal,.tmode,.chip,.side-btn{transition:background .12s ease,
+  border-color .12s ease,color .12s ease}
+/* Wer mit der Tastatur bedient, muss sehen, wo er steht -- mit der Maus
+   stoert derselbe Rahmen. Deshalb :focus-visible statt :focus. */
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{
+  transition:none!important;animation:none!important}}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 var(--sans);
+  display:flex;overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+
+/* =========================== Seitenleiste =============================== */
+aside{width:260px;flex:0 0 auto;background:var(--sidebar);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;transition:margin-left .18s ease}
+body.collapsed aside{margin-left:-260px}
+.brand{display:flex;align-items:center;gap:10px;padding:16px 16px 12px}
+.mark{width:22px;height:22px;flex:0 0 auto;color:var(--accent)}
+.brand .name{font-weight:600;letter-spacing:-.01em;font-size:16px}
+.brand .ver{font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums;
+  border:1px solid var(--line-2);border-radius:999px;padding:1px 7px;margin-left:auto}
+.newchat{margin:4px 12px 14px;display:flex;align-items:center;gap:9px;width:calc(100% - 24px);
+  background:transparent;border:1px solid var(--line-2);border-radius:11px;padding:9px 12px;
+  cursor:pointer;color:var(--text);text-align:left;font-size:14px}
+.newchat:hover{background:var(--surface);border-color:var(--accent)}
+.newchat .plus{color:var(--accent);font-size:16px;line-height:1}
+.side-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);
+  padding:0 18px 6px}
+/* min-height:0 ist hier keine Kosmetik: ein Flex-Kind mit flex:1 und
+   overflow-y:auto bekommt sonst per Spezifikation min-height:auto und
+   weigert sich, kleiner als sein Inhalt zu werden -- bei vielen Eintraegen
+   quetscht der Browser dann die Zeilen ineinander, statt sauber zu
+   scrollen. Genau das war der gemeldete Fehler. */
+.recents{flex:1;min-height:0;overflow-y:auto;padding:0 8px 8px;
+  display:flex;flex-direction:column;gap:1px}
+/* Suchfeld ueber der Liste. Es sucht in Namen UND Wortlaut -- wer den Chat
+   nach der ersten Frage benannt hat, findet ihn auch ueber ein Wort aus der
+   Antwort wieder. */
+.side-search{position:relative;margin:0 8px 6px;flex:0 0 auto}
+.side-search .lupe{position:absolute;left:9px;top:50%;transform:translateY(-50%);
+  color:var(--text-3);font-size:14px;pointer-events:none}
+.side-search input{width:100%;background:var(--surface);border:1px solid var(--line-2);
+  border-radius:9px;padding:7px 26px 7px 26px;font:inherit;font-size:13px;
+  color:var(--text);outline:none}
+.side-search input:focus{border-color:var(--accent)}
+.side-search input::-webkit-search-cancel-button{display:none}
+.side-search .leeren{position:absolute;right:5px;top:50%;transform:translateY(-50%);
+  border:0;background:transparent;color:var(--text-3);cursor:pointer;font-size:16px;
+  line-height:1;padding:2px 5px;border-radius:6px}
+.side-search .leeren:hover{background:var(--surface-2);color:var(--text)}
+/* Die Fundstelle unter dem Namen: ohne sie muesste man jeden Treffer
+   oeffnen, um zu sehen, warum er einer ist. */
+.recent.fund{align-items:flex-start;padding:2px 0}
+.recent .fund-text{display:block;font-size:11.5px;color:var(--text-3);
+  white-space:normal;line-height:1.45;margin-top:2px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.recent mark{background:var(--accent-soft);color:var(--accent-text);border-radius:3px;
+  padding:0 1px}
+.recents-leer{color:var(--text-3);font-size:12.5px;padding:14px 10px;line-height:1.5}
+
+/* Auftraege: eine Zeile je Auftrag, mit dem naechsten Termin daneben. */
+.auftraege{display:flex;flex-direction:column;gap:8px;margin:12px 0 14px}
+.auftrag{background:var(--surface);border:1px solid var(--line-2);border-radius:12px;
+  padding:10px 12px;display:flex;gap:10px;align-items:flex-start}
+.auftrag.pausiert{opacity:.6}
+.auftrag .inhalt{flex:1;min-width:0}
+.auftrag .frage{font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.auftrag .wann{font-size:11.5px;color:var(--text-3);margin-top:4px}
+.auftrag .knoepfe{display:flex;gap:5px;flex:none}
+.auftrag .knoepfe button{background:none;border:1px solid var(--line-2);border-radius:8px;
+  color:var(--text-3);cursor:pointer;font:inherit;font-size:11.5px;padding:5px 8px}
+.auftrag .knoepfe button:hover{border-color:var(--accent);color:var(--accent-text)}
+.auftrag .knoepfe button.weg:hover{border-color:var(--err);color:var(--err)}
+.auftrag{animation:rise var(--t-mid) var(--ease-out) both}
+.auftraege-leer{color:var(--text-3);font-size:13px;padding:6px 2px}
+
+/* Unter jeder fertigen Antwort: mitnehmen, was dasteht. Erst beim
+   Darauffahren sichtbar -- eine Knopfreihe unter jeder Antwort waere
+   im Verlauf lauter als die Antworten selbst. */
+.answer-tools{display:flex;gap:6px;margin-top:8px;opacity:0;
+  transition:opacity var(--t-fast) var(--ease-out)}
+.msg.bot:hover .answer-tools,.answer-tools:focus-within{opacity:1}
+.answer-tools button{background:transparent;border:1px solid var(--line-2);
+  border-radius:8px;color:var(--text-3);cursor:pointer;font:inherit;font-size:11.5px;
+  padding:4px 9px}
+.answer-tools button:hover{border-color:var(--accent);color:var(--accent-text);
+  background:var(--accent-soft)}
+/* Eine Zeile besteht aus dem Chat und einem Menue, das erst beim Darauffahren
+   erscheint -- sonst stuende neben jedem Chat ein Knopf im Weg. */
+.recent{display:flex;align-items:center;flex:0 0 auto;width:100%;background:transparent;
+  border:0;border-radius:9px;cursor:pointer;text-align:left;font-size:13.5px;
+  line-height:1.4;color:var(--text-2);position:relative}
+.recent .name{flex:1;min-width:0;padding:8px 4px 8px 10px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.recent:hover{background:var(--surface);color:var(--text)}
+.recent.active{background:var(--accent-soft);color:var(--accent-text)}
+/* Ein Chat, in dem etwas steht, das noch niemand gelesen hat: ein Auftrag
+   hat nachts gefragt und geantwortet. Er leuchtet, bis man ihn oeffnet --
+   danach ist er ein Chat wie jeder andere. Kein Abzeichen mit Zahl: es geht
+   um "da ist was", nicht um "da sind drei". */
+.recent.neu .name{color:var(--text);font-weight:600;padding-left:16px}
+/* Der Punkt selbst steht still ... */
+.recent.neu::before{content:"";position:absolute;left:4px;top:50%;
+  width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--accent)}
+/* ... und darunter laeuft ein Ring aus ihm heraus. Animiert werden nur
+   `transform` und `opacity` -- alles andere zwingt den Browser, das Bild in
+   jedem Einzelbild neu zu zeichnen. */
+.recent.neu::after{content:"";position:absolute;left:4px;top:50%;
+  width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--accent);
+  animation:leuchten 2.4s ease-out infinite;pointer-events:none}
+@keyframes leuchten{
+  0%{transform:scale(1);opacity:.5}
+  70%{transform:scale(3.2);opacity:0}
+  100%{transform:scale(3.2);opacity:0}
+}
+/* Auf dem Handy ist die Leiste zu -- dann traegt der Knopf den Punkt, sonst
+   sieht man das Leuchten nie. */
+body.hat-neues #btn-side{position:relative}
+body.hat-neues #btn-side::after{content:"";position:absolute;top:5px;right:5px;
+  width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.recent .more{flex:0 0 auto;width:26px;height:26px;margin-right:5px;border:0;
+  border-radius:7px;background:transparent;color:var(--text-3);cursor:pointer;
+  font-size:15px;line-height:1;opacity:0}
+.recent:hover .more,.recent .more:focus,.recent.menu-open .more{opacity:1}
+.recent .more:hover{background:var(--surface-2);color:var(--text)}
+.recent input.rename{flex:1;min-width:0;margin:3px 4px 3px 8px;padding:5px 7px;
+  font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--accent);
+  border-radius:7px}
+/* Die Gruppenueberschrift trennt Heute von Gestern -- wie im Posteingang. */
+.recent-group{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-3);padding:12px 10px 4px;flex:0 0 auto}
+.recent-group:first-child{padding-top:2px}
+.chatmenu{position:fixed;z-index:90;background:var(--bg);border:1px solid var(--line);
+  border-radius:11px;box-shadow:var(--shadow);padding:4px;min-width:150px}
+.chatmenu button{display:block;width:100%;background:transparent;border:0;
+  border-radius:7px;padding:8px 10px;text-align:left;font-size:13px;cursor:pointer;
+  color:var(--text-2)}
+.chatmenu button:hover{background:var(--surface);color:var(--text)}
+.chatmenu button.danger:hover{background:var(--err);color:var(--bg)}
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);
+  background:var(--text);color:var(--bg);padding:10px 16px;border-radius:11px;
+  font-size:13px;z-index:120;opacity:0;pointer-events:none;
+  transition:opacity .18s,transform .18s;max-width:min(90vw,30rem)}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+.side-foot{border-top:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:1px}
+.side-btn{display:flex;align-items:center;gap:10px;background:transparent;border:0;
+  border-radius:9px;padding:9px 10px;cursor:pointer;font-size:13.5px;color:var(--text-2);
+  text-align:left}
+.side-btn:hover{background:var(--surface);color:var(--text)}
+
+/* ============================== Rahmen ================================== */
+.pane{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.topbar{display:flex;align-items:center;gap:10px;padding:12px 18px;flex:0 0 auto}
+.iconbtn{background:transparent;border:0;border-radius:9px;padding:6px 8px;cursor:pointer;
+  color:var(--text-3);font-size:15px;line-height:1}
+.iconbtn:hover{background:var(--surface-2);color:var(--text)}
+.topbar .where{font-size:13px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;min-width:0}
+.topbar .spacer{flex:1}
+
+/* ---------- Modellauswahl in der Mitte ---------- */
+.modelpick{display:flex;align-items:center;gap:6px;background:var(--surface);
+  border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer;
+  font-size:13.5px;max-width:min(46vw,340px)}
+.modelpick:hover{border-color:var(--accent)}
+.modelpick #model-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modelpick .caret{color:var(--text-3);flex:0 0 auto;font-size:11px}
+/* Das Fenster scrollt als Ganzes, nicht nur die Modellliste.
+   Vorher scrollte allein `.picker-list`, und alles darunter -- Denktiefe,
+   die Schalter, der Fuss mit dem Weg zu den Einstellungen -- lag ausserhalb
+   des Bildschirms, ohne jede Moeglichkeit, dorthin zu kommen. Man konnte
+   also das Modell waehlen, aber nicht, was es tun darf. */
+.picker{position:absolute;top:52px;left:50%;transform:translateX(-50%);z-index:30;
+  width:min(420px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line-2);
+  border-radius:16px;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;max-height:calc(100vh - 72px);
+  overflow-y:auto;overscroll-behavior:contain}
+/* Die Ueberschrift bleibt beim Scrollen stehen -- sonst weiss man nach zwei
+   Handbewegungen nicht mehr, worin man da blaettert. */
+.picker-head{padding:12px 16px 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-3);position:sticky;top:0;background:var(--surface);z-index:2}
+/* Die Liste bekommt einen kleineren Anteil als frueher: sie soll nicht das
+   ganze Fenster fuellen, sonst faengt das Problem von vorne an. */
+.picker-list{max-height:min(38vh,320px);overflow-y:auto;padding:0 8px 8px;flex:0 0 auto}
+.pick{display:block;width:100%;text-align:left;background:transparent;border:0;
+  border-radius:10px;padding:10px 12px;cursor:pointer}
+.pick:hover{background:var(--surface-2)}
+.pick.active{background:var(--accent-soft)}
+.pick .top{display:flex;align-items:baseline;gap:8px}
+.pick .nm{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick .kind{font-size:11px;color:var(--accent-text);background:var(--accent-soft);
+  border-radius:999px;padding:1px 7px;flex:0 0 auto}
+.pick.active .kind{background:var(--surface)}
+.pick .note{font-size:12px;color:var(--text-3);margin-top:2px;line-height:1.35}
+.picker-foot{border-top:1px solid var(--line);padding:10px 16px;font-size:12px;
+  color:var(--text-3)}
+.linkish{background:none;border:0;padding:0;color:var(--accent-text);cursor:pointer;
+  text-decoration:underline;font-size:12px}
+.backdrop{position:fixed;inset:0;z-index:25}
+main{flex:1;overflow-y:auto;scroll-behavior:smooth;min-height:0}
+/* Startbildschirm: Begruessung und Eingabe stehen zusammen in der Mitte,
+   nicht oben und unten auseinandergezogen. */
+/* Nur der Inhalt rueckt in die Mitte -- die Kopfzeile bleibt oben stehen. */
+body.start .pane{justify-content:center}
+body.start .topbar{position:absolute;top:0;left:0;right:0}
+body.start main{flex:0 0 auto;overflow:visible}
+/* Der leere Gespraechsbereich hat unten Platz fuer die schwebende Eingabe --
+   auf dem Startbildschirm wuerde der nur eine Luecke aufreissen. */
+body.start .thread{display:none}
+/* Nur im Startzustand sichtbar -- geloescht wird sie nicht, sonst liesse
+   sich fuer einen neuen Chat nicht wieder dorthin zurueck. */
+body:not(.start) .hello{display:none}
+.thread{max-width:46rem;margin:0 auto;padding:8px 24px 200px}
+
+/* =========================== Startbildschirm ============================ */
+.hello{max-width:46rem;margin:0 auto;padding:0 24px 26px;text-align:center}
+.hello .star{color:var(--accent);width:34px;height:34px;margin-bottom:18px}
+.hello h1{font:400 34px/1.25 var(--serif);margin:0 0 10px;letter-spacing:-.01em}
+.hello p{color:var(--text-2);margin:0 0 30px;font-size:15px}
+.chips{display:flex;gap:9px;justify-content:center;flex-wrap:wrap;margin:16px auto 0;
+  max-width:46rem}
+body:not(.start) .chips{display:none}
+body:not(.start) .hint{display:none}
+.chip{background:var(--surface);border:1px solid var(--line);border-radius:999px;
+  padding:8px 15px;font-size:13.5px;cursor:pointer;color:var(--text-2)}
+.chip:hover{border-color:var(--accent);color:var(--accent-text)}
+
+/* ============================ Nachrichten =============================== */
+.msg{margin-bottom:28px;animation:rise .2s ease-out}
+@keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.msg.user{display:flex;justify-content:flex-end}
+.msg.user .bubble{background:var(--user-bubble);border-radius:var(--radius);
+  padding:11px 16px;max-width:85%;white-space:pre-wrap;font-size:15.5px}
+.msg.bot .bubble{font-size:16px}
+.bubble h1,.bubble h2,.bubble h3{font:600 1.05em/1.35 var(--sans);margin:1.4em 0 .5em}
+.bubble p{margin:.7em 0}
+.bubble ul,.bubble ol{margin:.6em 0;padding-left:1.35em}
+.bubble li{margin:.35em 0}
+.bubble li::marker{color:var(--text-3)}
+.bubble code{background:var(--surface-2);padding:.12em .38em;border-radius:5px;
+  font:0.88em var(--mono)}
+.codeblock{margin:.9em 0;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.code-head{display:flex;align-items:center;gap:10px;background:var(--surface-2);
+  border-bottom:1px solid var(--line);padding:5px 12px;font:600 11px/1.6 var(--mono);
+  letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+.code-head .lang{flex:1}
+.code-head .copy{background:transparent;border:0;cursor:pointer;color:var(--text-3);
+  font:inherit;text-transform:none;letter-spacing:0}
+.code-head .copy:hover{color:var(--accent-text)}
+.codeblock pre{margin:0;border:0;border-radius:0}
+.bubble pre{background:var(--surface-2);border:1px solid var(--line);padding:13px 15px;
+  border-radius:11px;overflow-x:auto}
+.bubble pre code{background:none;padding:0}
+.bubble a{color:var(--accent-text);text-decoration:underline;text-underline-offset:2px}
+.bubble table{border-collapse:collapse;margin:.9em 0;display:block;overflow-x:auto;font-size:14px}
+.bubble th,.bubble td{border:1px solid var(--line);padding:7px 11px;text-align:left}
+.bubble th{background:var(--surface-2)}
+.bubble blockquote{border-left:2px solid var(--line-2);margin:.8em 0;padding-left:14px;
+  color:var(--text-2)}
+
+/* ========================== Zwischenschritte ============================ */
+.steps{display:flex;flex-direction:column;gap:4px;margin:0 0 14px}
+.step{font-size:13px;color:var(--text-3);display:flex;gap:9px;align-items:flex-start;
+  animation:rise .15s ease-out}
+.step .tag{color:var(--accent);flex:0 0 auto;font:600 11.5px/1.55 var(--mono);
+  min-width:62px;letter-spacing:.02em}
+.step.warn .tag{color:var(--warn)} .step.err .tag{color:var(--err)}
+.step .txt{overflow:hidden;text-overflow:ellipsis}
+.step .sub{padding-left:71px;opacity:.8;font-size:12.5px}
+/* Mitlesen. Die Zeilen entstehen immer, sichtbar sind sie nur mit dem Haken --
+   so zeigt das Einschalten auch das, was schon gelaufen ist. */
+.trace{display:none}
+body.tracing .trace{display:flex}
+/* Die Denkschritte haengen an ihrem eigenen Schalter -- und nur an ihm.
+   Das Mitlesen zeigt sie ausdruecklich NICHT mit: sonst stuende der Block
+   da, obwohl "Denken" aus ist, und der Schalter waere eine Behauptung.
+   Zwei Schalter, die dasselbe zeigen koennen, sind einer zu viel. */
+body.tracing .trace.think{display:none}
+body.denken .trace.think{display:flex}
+body.tracing .trace .txt,
+body.denken .trace.think .txt{white-space:pre-wrap;word-break:break-word;
+  font:12px/1.6 var(--mono);color:var(--text-3);opacity:.85;
+  border-left:2px solid var(--line);padding-left:9px;max-height:15em;overflow-y:auto}
+.trace.think .tag{color:var(--text-3);font-style:italic}
+.cursor{display:inline-block;width:2px;height:1.05em;background:var(--accent);
+  vertical-align:-2px;animation:blink 1.1s steps(2) infinite;margin-left:1px}
+@keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+
+/* ============================= Rueckfrage =============================== */
+/* Die Rueckfrage kommt als eigenes Fenster -- eine Karte mitten im Verlauf
+   uebersieht man, waehrend die Antwort weiterlaeuft. Das Fenster liegt ueber
+   den Einstellungen: es haelt die Anfrage an und hat deshalb Vorrang. */
+.overlay.ask{z-index:100;align-items:center}
+.ask-sheet{max-width:29rem;padding:22px 24px 20px}
+.ask-head{display:flex;align-items:center;gap:8px;font:600 11.5px/1 var(--mono);
+  letter-spacing:.09em;text-transform:uppercase;color:var(--accent-text)}
+.ask-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);
+  animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.ask-q{font:400 19px/1.45 var(--serif);margin:12px 0 16px}
+.ask-opts{display:flex;flex-direction:column;gap:7px}
+.ask-opts:empty{display:none}
+.ask-opt{background:var(--surface);border:1px solid var(--line-2);border-radius:11px;
+  padding:11px 14px;font:inherit;font-size:14.5px;color:var(--text);cursor:pointer;
+  text-align:left;line-height:1.4}
+.ask-opt:hover{border-color:var(--accent);background:var(--accent-soft);
+  color:var(--accent-text)}
+.ask-free{display:block;margin-top:14px}
+.ask-free .lbl{display:block;font-size:12px;color:var(--text-3);margin-bottom:5px}
+.ask-free input{width:100%;background:var(--surface);border:1px solid var(--line-2);
+  border-radius:10px;padding:10px 12px;font:inherit;font-size:14.5px;color:var(--text);
+  outline:none}
+.ask-free input:focus{border-color:var(--accent)}
+.overlay.ask .note{margin-top:12px}
+.overlay.ask .actions{margin-top:16px}
+
+/* Was gefragt und geantwortet wurde, bleibt im Verlauf stehen -- sonst
+   versteht man die Antwort spaeter nicht mehr. */
+.askcard{border-left:2px solid var(--accent);padding:2px 0 2px 12px;margin:2px 0 16px;
+  font-size:13.5px;color:var(--text-2)}
+.askcard .q{font-weight:600;color:var(--text)}
+.askcard .given{color:var(--accent-text);margin-top:2px}
+
+/* ============================== Eingabe ================================= */
+footer{position:absolute;bottom:0;left:0;right:0;padding:0 24px 22px;
+  background:linear-gradient(transparent,var(--bg) 32%);pointer-events:none}
+footer > *{pointer-events:auto}
+body.start footer{position:static;background:none;padding:0 24px 4px}
+.files{max-width:46rem;margin:0 auto 8px;display:flex;gap:8px;flex-wrap:wrap}
+.file{display:flex;align-items:center;gap:8px;background:var(--surface);font-size:12.5px;
+  border:1px solid var(--line);border-radius:10px;padding:6px 11px}
+.file .kind{color:var(--accent-text);font-weight:600}
+.file .sz{color:var(--text-3)}
+.file .x{cursor:pointer;color:var(--text-3);border:0;background:none;font-size:14px;padding:0}
+.file .x:hover{color:var(--err)}
+.attached{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+.composer{max-width:46rem;margin:0 auto;background:var(--surface);
+  border:1px solid var(--line-2);border-radius:var(--radius-lg);padding:12px 13px 9px;
+  box-shadow:var(--shadow)}
+.composer:focus-within{border-color:var(--accent)}
+textarea{width:100%;background:transparent;border:0;color:var(--text);resize:none;
+  font:inherit;outline:none;max-height:200px;min-height:26px;padding:2px 3px;display:block}
+textarea::placeholder{color:var(--text-3)}
+.crow{display:flex;align-items:center;gap:6px;margin-top:6px}
+.crow .spacer{flex:1}
+/* Ein eigenes `display` schlaegt sonst das `hidden`-Attribut, und der
+   Knopf bleibt sichtbar, obwohl er versteckt sein soll. Gilt fuer die
+   ganze Seite, nicht nur fuer die Knoepfe. */
+[hidden]{display:none!important}
+/* Zwischenueberschrift in einem Feld -- trennt zwei Themen, ohne dass
+   daraus gleich ein eigener Kasten werden muss. */
+.sub-title{font:600 11px/1 var(--mono);letter-spacing:.09em;text-transform:uppercase;
+  color:var(--text-3);margin:22px 0 -2px;padding-top:14px;border-top:1px solid var(--line)}
+.tool{background:transparent;border:1px solid var(--line);border-radius:999px;padding:5px 10px;
+  cursor:pointer;font-size:13px;color:var(--text-3);display:flex;align-items:center;gap:6px}
+.tool:hover{border-color:var(--accent);color:var(--accent-text)}
+.send{background:var(--accent);color:var(--on-accent);border:0;border-radius:50%;width:32px;height:32px;
+  cursor:pointer;font-size:15px;flex:0 0 auto;display:grid;place-items:center}
+.send:disabled{background:var(--surface-2);color:var(--text-3);cursor:default}
+/* Der Abbruch steht an der Stelle des Anhaengens -- waehrend eine Anfrage
+   laeuft, ist das der Knopf, den man sucht. */
+/* Die Arbeitsweise steht neben dem Anhaengen: beides gehoert zur Frage, die
+   man gerade schreibt, nicht in die Einstellungen. */
+.modes{display:flex;gap:2px;background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:2px}
+.mode{background:transparent;border:0;border-radius:999px;padding:4px 11px;
+  cursor:pointer;font-size:12.5px;color:var(--text-3);line-height:1.5}
+.mode:hover{color:var(--text)}
+.mode.on{background:var(--bg);color:var(--accent-text);font-weight:600;
+  box-shadow:0 1px 2px rgba(0,0,0,.06)}
+/* Was nur im einen oder anderen Modus Sinn ergibt, steht auch nur dort:
+   im Web suchen gehoert zur Recherche, die Werkstatt zum Programmieren.
+   `only-normal` heisst "ueberall ausser im Code-Modus" -- Pro ist der
+   Standardmodus mit voller Leistung und hat dieselben Schalter.
+   `only-standard` ist enger: nur der Standardmodus, `only-pro` das
+   Gegenstueck. Das Gegenpruefen gibt es in beiden -- es bedeutet nur
+   Verschiedenes, und deshalb steht in jedem eine andere Erklaerung. */
+body:not(.code-mode) .only-code{display:none}
+body.code-mode .only-normal{display:none}
+body.pro-mode .only-standard{display:none}
+body:not(.pro-mode) .only-pro{display:none}
+.picker-effort{padding:11px 16px;border-top:1px solid var(--line)}
+.eff-head{font-size:13px}
+.eff-head .why{display:block;color:var(--text-3);font-size:11.5px;line-height:1.5;
+  margin-top:2px}
+.efforts{display:flex;gap:6px;margin-top:9px}
+.eff{flex:1;background:var(--surface);border:1px solid var(--line-2);border-radius:9px;
+  padding:6px 0;font-size:12.5px;color:var(--text-2);cursor:pointer}
+.eff:hover{border-color:var(--accent);color:var(--text)}
+.eff.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-text);
+  font-weight:600}
+/* Was an einer Antwort noch zu sagen ist: gegengeprueft, gekuerzt, abgebrochen. */
+.answer-note{display:inline-flex;align-items:center;gap:6px;margin-top:12px;
+  border:1px solid var(--line-2);border-radius:999px;padding:4px 11px;
+  font-size:12px;color:var(--text-2);background:var(--surface)}
+.answer-note .tick{color:var(--accent)}
+.picker-think{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;
+  border-top:1px solid var(--line);cursor:pointer;font-size:13px}
+.picker-think .why{display:block;color:var(--text-3);font-size:11.5px;
+  line-height:1.5;margin-top:2px}
+.picker-think>span{flex:1;min-width:0}
+
+/* Der Schalter: eine Pille, in der ein weisser Knopf hin und her faehrt --
+   wie auf dem iPhone. Darunter bleibt ein echtes Ankreuzfeld, nur ohne das
+   Aussehen des Betriebssystems: so funktionieren Label, Tastatur und
+   Vorlesehilfen unveraendert weiter, und das Skript liest wie vorher
+   `.checked`.
+   Die Masse sind die von Apple, auf unsere Schriftgroesse herunterskaliert
+   (51x31 pt -> 44x26 px, Knopf 22 px). Die Farbe kommt aus dem Farbschema,
+   nicht aus iOS: ein festes Apple-Gruen saehe in Nord oder Dracula wie ein
+   Fremdkoerper aus. Im Standardschema ist sie ohnehin gruen. */
+/* role="switch" sagt der Vorlesehilfe, was es geworden ist: ein Schalter,
+   kein Kontrollkaestchen. Der Haken bleibt trotzdem ein Ankreuzfeld, also
+   uebernimmt der Browser den Zustand von selbst. */
+.schalter{appearance:none;-webkit-appearance:none;flex:0 0 auto;margin:0;
+  position:relative;width:44px;height:26px;border:0;border-radius:999px;
+  background:var(--line-2);cursor:pointer;outline:none;
+  transition:background-color 250ms var(--ease-out)}
+.schalter::after{content:"";position:absolute;top:2px;left:2px;
+  width:22px;height:22px;border-radius:999px;background:var(--knob);
+  box-shadow:0 3px 8px rgba(0,0,0,.18),0 1px 1px rgba(0,0,0,.16);
+  transition:transform 250ms var(--ease-pop),width 160ms var(--ease-out)}
+.schalter:checked{background:var(--accent)}
+.schalter:checked::after{transform:translateX(18px)}
+/* Beim Draufdruecken zieht sich der Knopf in die Laenge und schnellt danach
+   zurueck -- das ist die Bewegung, die den Schalter lebendig macht. Der
+   gedrueckte Knopf waechst nach rechts; steht er schon rechts, nach links. */
+.schalter:active::after{width:26px}
+.schalter:checked:active::after{left:auto;right:2px;transform:none}
+.schalter:focus-visible{box-shadow:0 0 0 3px var(--accent-soft)}
+/* Ein Schalter, der gerade nichts bewirken kann, sagt das auch. */
+.schalter:disabled{opacity:.45;cursor:default}
+.tool.stop{color:var(--warn);border-color:var(--warn)}
+.tool.stop:hover{background:var(--warn);color:var(--bg)}
+.hint{max-width:46rem;margin:8px auto 0;color:var(--text-3);font-size:11.5px;text-align:center}
+body.dragging::after{content:"Datei hier ablegen";position:fixed;inset:14px;z-index:40;
+  border:2px dashed var(--accent);border-radius:20px;background:var(--bg);opacity:.94;
+  color:var(--accent-text);display:grid;place-items:center;font:400 19px var(--serif);
+  pointer-events:none}
+
+/* Der Kopf bleibt stehen, damit man in dem langen Formular weiss, wo man
+   ist -- und mit einem Klick zum Abschnitt springt, statt zu scrollen. */
+.sheet-head{position:sticky;top:-24px;z-index:2;background:var(--bg);
+  margin:-24px -26px 0;padding:20px 26px 12px;border-radius:18px 18px 0 0;
+  border-bottom:1px solid var(--line)}
+.secnav{display:flex;flex-wrap:wrap;gap:5px;margin-top:11px}
+.secnav button{background:transparent;border:1px solid var(--line-2);border-radius:999px;
+  padding:4px 11px;font-size:12.5px;color:var(--text-3);cursor:pointer;
+  transition:color .12s,border-color .12s,background .12s}
+.secnav button:hover{color:var(--text);border-color:var(--accent)}
+.secnav button.on{background:var(--accent-soft);border-color:var(--accent);
+  color:var(--accent-text);font-weight:600}
+fieldset{scroll-margin-top:13rem}
+
+/* ============================== Bewegung ================================= */
+/* Erst nachgesehen, was als angenehm gilt, dann gebaut: Eintritte laufen mit
+   ease-out aus, Austritte mit ease-in an; 100-150 ms fuer Kleinigkeiten,
+   200-300 ms fuer Fenster, nie mehr als eine halbe Sekunde. Bewegt werden nur
+   transform und opacity -- alles andere zwingt den Browser zu neuem Layout.
+   Und: Bewegung sagt etwas. Ein Fenster waechst aus der Mitte, weil es sich in
+   den Vordergrund schiebt; ein Schritt kommt von links, weil dort die Zeile
+   beginnt; die Liste laeuft gestaffelt ein, damit man die Reihenfolge sieht.
+   Wer im System "weniger Bewegung" eingestellt hat, bekommt nichts davon --
+   die Regel dazu steht ganz unten in diesem Block. */
+:root{
+  --ease-out:cubic-bezier(.16,1,.3,1);   /* kommt an und bremst aus */
+  --ease-in:cubic-bezier(.4,0,1,1);      /* zieht an und geht weg */
+  --ease-pop:cubic-bezier(.34,1.56,.64,1); /* eine Spur ueber das Ziel hinaus */
+  --t-fast:130ms; --t-mid:220ms; --t-slow:300ms;
+}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+@keyframes fade-out{from{opacity:1}to{opacity:0}}
+@keyframes sheet-in{from{opacity:0;transform:translateY(14px) scale(.97)}
+  to{opacity:1;transform:none}}
+@keyframes sheet-out{from{opacity:1;transform:none}
+  to{opacity:0;transform:translateY(8px) scale(.985)}}
+@keyframes pop{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}
+@keyframes slide-left{from{opacity:0;transform:translateX(-7px)}
+  to{opacity:1;transform:none}}
+@keyframes slide-up{from{opacity:0;transform:translateY(14px)}
+  to{opacity:1;transform:none}}
+@keyframes shoot{40%{transform:translateY(-4px) scale(.94)}
+  100%{transform:none}}
+@keyframes nudge{50%{transform:scale(1.14)}100%{transform:none}}
+
+/* Fenster: Hintergrund und Blatt bewegen sich als ein Stueck -- gleiche
+   Kurve, gleiche Dauer, nur unterschiedliche Wege. */
+.overlay.open{animation:fade-in var(--t-mid) var(--ease-out)}
+.overlay.open>.sheet{animation:sheet-in var(--t-slow) var(--ease-out)}
+.overlay.ask.open>.sheet{animation:pop var(--t-mid) var(--ease-pop)}
+.overlay.closing{animation:fade-out var(--t-fast) var(--ease-in) forwards}
+.overlay.closing>.sheet,
+/* Die Rueckfrage kommt mit einer eigenen Kurve herein; ohne diese Zeile
+   bliebe beim Schliessen die staerkere Einblende-Regel oben stehen. */
+.overlay.ask.closing>.sheet{animation:sheet-out var(--t-fast) var(--ease-in) forwards}
+.backdrop{animation:fade-in var(--t-fast) var(--ease-out)}
+.picker{animation:slide-up var(--t-mid) var(--ease-out)}
+.picker.closing{animation:fade-out var(--t-fast) var(--ease-in) forwards}
+.chatmenu{animation:pop var(--t-fast) var(--ease-out);transform-origin:top right}
+
+/* Listen und Zeilen: gestaffelt, damit die Reihenfolge lesbar bleibt. Die
+   Verzoegerung setzt das Skript, gedeckelt -- sonst wartet der letzte
+   Eintrag einer langen Liste spuerbar lange. */
+.recents.fresh .recent{animation:slide-left var(--t-mid) var(--ease-out) both}
+.step{animation:slide-left var(--t-fast) var(--ease-out)}
+.askcard{animation:pop var(--t-mid) var(--ease-out)}
+.pick{animation:slide-left var(--t-fast) var(--ease-out) both}
+.pal{animation:pop var(--t-mid) var(--ease-out) both}
+.hello .star{animation:pop 420ms var(--ease-pop) both}
+.hello h1{animation:slide-up var(--t-slow) var(--ease-out) 60ms both}
+.hello p{animation:slide-up var(--t-slow) var(--ease-out) 120ms both}
+.chips{animation:slide-up var(--t-slow) var(--ease-out) 180ms both}
+.recent input.rename{animation:pop var(--t-fast) var(--ease-out)}
+.file{animation:pop var(--t-fast) var(--ease-pop)}
+body.dragging::after{animation:fade-in var(--t-fast) var(--ease-out)}
+/* Der Schalter bewegt sich ueber seine eigenen Uebergaenge (siehe oben) --
+   ein zusaetzliches Zucken der ganzen Zeile waere zu viel des Guten. */
+/* Ein Wert, der sich geaendert hat, blitzt kurz auf -- sonst uebersieht man
+   in der Kopfzeile, dass gerade etwas anderes gilt. */
+.flash{animation:nudge var(--t-mid) var(--ease-pop)}
+.where.flash{animation:fade-in var(--t-mid) var(--ease-out)}
+/* Ein zurueckgeholter Chat baut sich auf, statt fertig dazustehen. */
+.thread.fresh .msg{animation:rise var(--t-mid) var(--ease-out) both}
+
+/* Kleinigkeiten unter dem Finger: ein Knopf gibt nach, ein gewaehlter
+   Eintrag hebt sich, der Abbruch atmet, solange er etwas zu beenden hat. */
+.btn:active,.tool:active,.side-btn:active,.mode:active,.tmode:active,
+.secnav button:active,.chip:active{transform:scale(.97)}
+.send:active{transform:scale(.9)}
+.send.sent{animation:shoot 320ms var(--ease-out)}
+.btn.primary:hover{transform:translateY(-1px)}
+.pal:hover{transform:translateY(-2px)}
+.pal.on .peek{animation:pop var(--t-mid) var(--ease-pop)}
+.tmode.on .glyph{animation:nudge var(--t-mid) var(--ease-pop)}
+.secnav button.on{animation:nudge var(--t-fast) var(--ease-out)}
+/* (Der Schalter bringt seine Bewegung selbst mit -- siehe .schalter.) */
+.tool.stop{animation:pulse 1.9s ease-in-out infinite}
+.newchat .plus{transition:transform var(--t-mid) var(--ease-pop)}
+.newchat:hover .plus{transform:rotate(90deg)}
+.iconbtn:active{transform:scale(.9)}
+.meter span{transition:width 420ms var(--ease-out)}
+
+/* Farbwechsel: beim Umstellen des Erscheinungsbilds blenden die Farben
+   ineinander, statt hart umzuspringen. Nur fuer den Moment des Wechsels --
+   dauerhaft wuerde jede Auswahl im Formular nachziehen. */
+:root.theming *{transition:background-color var(--t-slow) ease,
+  color var(--t-slow) ease,border-color var(--t-slow) ease!important}
+
+/* Der Zaehler: drei Kacheln und darunter die Aufschluesselung. */
+.zaehler{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.kachel{background:var(--surface);border:1px solid var(--line-2);border-radius:12px;
+  padding:11px 13px}
+.kachel .wert{font:600 20px/1.2 var(--sans);font-variant-numeric:tabular-nums}
+.kachel .was{font-size:11.5px;color:var(--text-3);margin-top:3px}
+.kachel .dazu{font-size:11.5px;color:var(--text-2);margin-top:5px}
+@media (max-width:520px){.zaehler{grid-template-columns:1fr}}
+
+/* ===================== Was weiss Aquaticy ueber mich ===================== */
+/* Ein Gedaechtnis, in das man nicht hineinsehen kann, ist keins -- es ist
+   ein Geruecht. Darum eine Liste: ein Eintrag je Zeile, mit Thema, Datum
+   und einem Knopf, der genau diesen einen Eintrag entfernt. */
+#membox,#vmbox{z-index:90}
+.merk-sheet{max-width:38rem}
+.merkliste{display:flex;flex-direction:column;gap:8px;margin-top:14px;
+  max-height:52vh;overflow-y:auto;padding-right:2px}
+.merk{background:var(--surface);border:1px solid var(--line-2);border-radius:12px;
+  padding:11px 13px;display:flex;gap:12px;align-items:flex-start}
+.merk .inhalt{flex:1;min-width:0}
+.merk .kopf{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;
+  font-size:11.5px;color:var(--text-3)}
+.merk .thema{font:600 11px/1 var(--mono);letter-spacing:.07em;text-transform:uppercase;
+  color:var(--accent-text);background:var(--accent-soft);border-radius:6px;
+  padding:4px 7px}
+.merk .text{margin-top:6px;font-size:14.5px;line-height:1.5;
+  overflow-wrap:anywhere}
+.merk .weg{background:none;border:1px solid var(--line-2);border-radius:9px;
+  color:var(--text-3);cursor:pointer;font:inherit;font-size:12.5px;padding:6px 10px;
+  flex:none}
+.merk .weg:hover{border-color:var(--err);color:var(--err)}
+/* Gestaffelt einlaufen -- dieselbe Bewegung wie bei den Chats in der Leiste.
+   Ohne sie waere das `stagger()` im Skript ohne Wirkung. */
+.merk{animation:rise var(--t-mid) var(--ease-out) both}
+.merk.geht{animation:fade-out var(--t-fast) var(--ease-in) forwards}
+.merk-leer{color:var(--text-3);font-size:14px;padding:18px 2px}
+
+/* ========================= Erscheinungsbild ============================= */
+/* Helligkeit und Farbschema in einem Fenster. Die Vorschau zeigt denselben
+   Aufbau wie die Seite -- Leiste, Flaeche, Akzent -- damit man vor dem
+   Klicken sieht, worauf man sich einlaesst. */
+.theme-sheet{max-width:34rem}
+.group{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);
+  margin:18px 0 8px}
+.tmodes{display:flex;gap:8px}
+.tmode{flex:1;background:var(--surface);border:1px solid var(--line-2);border-radius:12px;
+  padding:11px 8px;cursor:pointer;font-size:13.5px;color:var(--text-2);
+  display:flex;flex-direction:column;align-items:center;gap:5px}
+.tmode:hover{border-color:var(--accent)}
+.tmode.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text);
+  font-weight:600}
+.tmode .glyph{font-size:15px;line-height:1}
+.palettes{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.5rem,1fr));gap:10px}
+.pal{background:var(--surface);border:1px solid var(--line-2);border-radius:13px;padding:9px;
+  cursor:pointer;text-align:left;display:block;width:100%}
+.pal:hover{border-color:var(--accent)}
+.pal.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.peek{display:flex;height:42px;border-radius:9px;overflow:hidden;border:1px solid var(--line)}
+.peek .bar{width:28%}
+.peek .body{flex:1;padding:9px 8px;display:flex;flex-direction:column;gap:5px}
+.peek .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+.peek .row2{display:flex;align-items:center;gap:6px}
+.peek .line{height:4px;border-radius:3px;opacity:.5;flex:1}
+.pal .pname{display:block;font-size:13px;margin-top:7px;color:var(--text)}
+.pal .pwhy{display:block;font-size:11.5px;color:var(--text-3);margin-top:1px}
+
+/* =========================== Einstellungen ============================== */
+/* Ueber der Seitenleiste (z-index 60) -- ein modales Fenster, das halb
+   verdeckt wird, ist keins. */
+.overlay{position:fixed;inset:0;background:rgba(20,20,17,.42);backdrop-filter:blur(2px);display:none;z-index:80;
+  align-items:flex-start;justify-content:center;padding:5vh 20px;overflow-y:auto}
+.overlay.open{display:flex}
+.sheet{background:var(--bg);border:1px solid var(--line);border-radius:18px;width:100%;
+  max-width:660px;padding:24px 26px 26px;box-shadow:var(--shadow);
+  max-height:90vh;overflow-y:auto;overscroll-behavior:contain}
+.sheet h2{margin:0 0 4px;font:400 22px var(--serif)}
+.sheet .lead{color:var(--text-2);font-size:13.5px;margin:0 0 6px}
+fieldset{border:0;border-top:1px solid var(--line);margin:20px 0 0;padding:16px 0 0}
+legend{color:var(--accent-text);font-size:11px;text-transform:uppercase;letter-spacing:.09em;
+  padding:0 9px 0 0;font-weight:600}
+label{display:block;margin:12px 0}
+label .lbl{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px}
+input[type=text],input[type=password],select{width:100%;background:var(--surface);
+  border:1px solid var(--line-2);color:var(--text);border-radius:10px;padding:9px 12px;
+  font:inherit;font-size:14px;outline:none}
+input:focus,select:focus{border-color:var(--accent)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* Ein einzelnes Feld in einer Zweierreihe stand bisher links und liess
+   rechts eine Luecke -- als fehle dort etwas. Es nimmt jetzt die ganze
+   Zeile, wie die Felder ausserhalb einer Reihe auch. */
+.row>label:only-child{grid-column:1 / -1}
+/* Auch im Formular Schalter statt Haken -- zwei verschiedene Bauarten fuer
+   dieselbe Ja/Nein-Frage waeren nur verwirrend. Etwas kleiner als in der
+   Modellauswahl, damit sie neben dem Fliesstext nicht dominieren. */
+.check{display:flex;align-items:flex-start;gap:11px;margin:14px 0;font-size:14px}
+.check .schalter{width:40px;height:24px;margin-top:1px}
+.check .schalter::after{width:20px;height:20px}
+.check .schalter:checked::after{transform:translateX(16px)}
+.check .schalter:active::after{width:24px}
+.check .why{display:block;color:var(--text-3);font-size:12.5px;margin-top:2px}
+.lbl .why{display:block;color:var(--text-3);font-size:11.5px;margin-top:1px;
+  text-transform:none;letter-spacing:0;font-weight:400}
+.actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
+/* Speichern direkt im Abschnitt -- damit man fuer einen Modellwechsel nicht
+   durch das ganze Formular nach unten scrollen muss. */
+.actions.section{margin-top:14px;align-items:center}
+.actions.section .note{margin:0;margin-right:auto;text-align:left}
+.theme-sheet .actions .note{margin:0;margin-right:auto;text-align:left}
+.btn{border-radius:11px;padding:9px 18px;cursor:pointer;border:1px solid var(--line-2);
+  background:var(--surface);color:var(--text);font-size:14px}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:500}
+.note{font-size:12.5px;color:var(--text-2);margin-top:12px;white-space:pre-line}
+/* Die Einrichtungsanleitung: aufklappbar, damit sie nicht im Weg steht. */
+.note summary{cursor:pointer;color:var(--accent);font-weight:600}
+.note ol{margin:.7em 0;padding-left:1.4em;white-space:normal;line-height:1.65}
+.note ol li{margin:.35em 0}
+.note p{white-space:normal;margin:.6em 0 0}
+.note code{font:11.5px var(--mono);background:var(--sidebar);padding:1px 5px;
+  border-radius:4px}
+.note a{color:var(--accent)}
+.note.ok{color:var(--accent-text)} .note.bad{color:var(--err)}
+.inline{display:flex;gap:8px;align-items:flex-end}
+.inline label{flex:1;margin:0}
+.meter{flex:1;height:10px;border-radius:999px;background:var(--surface-2);
+  border:1px solid var(--line);overflow:hidden}
+.meter span{display:block;height:100%;width:0;background:var(--accent);
+  transition:width .3s ease}
+.meter.warn span{background:var(--warn)}
+.gauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;
+  margin-top:10px}
+.gauge{background:var(--surface);border:1px solid var(--line);border-radius:11px;
+  padding:10px 12px}
+.gauge .g-name{font-size:11px;color:var(--text-3);text-transform:uppercase;
+  letter-spacing:.06em}
+.gauge .g-val{font-size:17px;margin:3px 0 6px}
+.gauge .bar{height:6px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.gauge .bar span{display:block;height:100%;background:var(--accent)}
+.gauge .bar.hot span{background:var(--err)}
+.gauge .g-sub{font-size:11.5px;color:var(--text-3);margin-top:5px}
+
+/* =========================================================================
+   Handy und Tablet. Auf einem 390 Pixel breiten Bildschirm ist alles knapp:
+   die Seitenleiste nimmt die halbe Breite, die Serifen-Begruessung passt
+   nicht in eine Zeile, und die Eingabe darf nicht unter der Tastatur oder
+   der Browserleiste verschwinden.
+   ========================================================================= */
+@media (max-width:900px){
+  /* Auf dem Handy kommt die Rueckfrage von unten -- dort ist der Daumen. */
+  .overlay.ask{align-items:flex-end;padding:0}
+  /* Am Handy sitzt die Rueckfrage unten am Rand -- dann faehrt sie von dort
+     herein, statt aus der Mitte zu wachsen. */
+  .overlay.ask.open>.sheet{animation:slide-up var(--t-mid) var(--ease-out)}
+  .ask-sheet{max-width:100%;border-radius:18px 18px 0 0;
+    padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+  /* Die Seitenleiste liegt ueber dem Chat statt daneben und ist zu. */
+  aside{position:fixed;top:0;bottom:0;z-index:60;width:min(84vw,300px);
+    box-shadow:var(--shadow)}
+  body:not(.collapsed) aside{margin-left:0}
+  body.collapsed aside{margin-left:calc(-1 * min(84vw,300px))}
+  /* Wer die Leiste offen hat, tippt daneben und sie geht wieder zu. */
+  body:not(.collapsed) .pane::before{content:"";position:fixed;inset:0;z-index:55;
+    background:rgba(20,20,17,.45)}
+  .thread,.composer,.hello,.files,.hint,.chips{max-width:100%}
+  .thread{padding:4px 14px 190px}
+  .hello{padding:0 18px 20px}
+  .hello h1{font-size:25px;line-height:1.2}
+  .hello p{font-size:14px;margin-bottom:22px}
+  .hello .star{width:28px;height:28px;margin-bottom:12px}
+  footer{padding:0 12px 12px}
+  body.start footer{padding:0 14px 4px}
+  .composer{border-radius:18px;padding:10px 11px 8px}
+  /* 16px verhindert, dass iOS beim Antippen hineinzoomt. */
+  textarea{font-size:16px}
+  .msg.user .bubble{max-width:92%;font-size:15px}
+  .msg.bot .bubble{font-size:15.5px}
+  .step .tag{min-width:54px;font-size:11px}
+  .step .sub{padding-left:63px}
+  .chips{gap:7px}
+  .chip{font-size:12.5px;padding:7px 12px}
+  .hint{font-size:11px}
+  /* Nur zwei Vorschlaege -- drei stapeln sich sonst zu einem Block. */
+  .chip:nth-child(n+3){display:none}
+  .sheet{padding:18px 16px 20px;border-radius:14px;max-height:94vh}
+  .sheet-head{margin:-18px -16px 0;padding:16px 16px 10px;border-radius:14px 14px 0 0;top:-18px}
+  .overlay{padding:2vh 10px}
+  .row{grid-template-columns:1fr}
+  .picker{width:calc(100vw - 20px)}
+  .modelpick{max-width:52vw}
+  .topbar{padding:10px 12px;gap:6px}
+  .topbar .where{font-size:12px}
+  /* Auf schmalen Schirmen zaehlt die Modellwahl mehr als der Ortsfilter. */
+  .topbar .spacer:first-of-type{flex:0 0 auto}
+}
+
+/* ===================== Tablets: dazwischen ============================= */
+/* Zwischen Handy und Rechner liegt eine Groesse, die lange keine eigene
+   Behandlung hatte: das Tablet im Hochformat. Es bekam das Handy-Layout,
+   weil es unter 900px breit ist -- und damit Masse, die fuer 390px gedacht
+   sind. Auf 820px sah das aus wie eine aufgeblasene Handy-Seite: die
+   Eingabe von Rand zu Rand, die Modellauswahl 800px breit, zwei
+   Beispielfragen statt drei.
+   Die Seitenleiste bleibt hier ueber dem Chat statt daneben -- im
+   Hochformat waere sie sonst ein Drittel der Breite fuer eine Liste, die
+   man selten braucht. Alles andere kehrt zu den Massen des Rechners
+   zurueck. */
+@media (min-width:600px) and (max-width:900px){
+  /* Die Textspalte bekommt ihre Breite zurueck. Eine Zeile ueber die volle
+     Tabletbreite ist zu lang zum Lesen -- dieselbe Regel wie im Buchdruck. */
+  .thread,.composer,.hello,.files,.hint,.chips{max-width:46rem}
+  .thread{padding:8px 24px 200px}
+  .hello{padding:0 24px 26px}
+  .hello h1{font-size:30px}
+  .hello p{font-size:15px}
+  .hello .star{width:34px;height:34px}
+  .composer{border-radius:22px;padding:12px 14px 10px}
+  .msg.user .bubble{max-width:80%;font-size:15.5px}
+  .msg.bot .bubble{font-size:16px}
+  /* Drei Vorschlaege passen hier nebeneinander. */
+  .chip:nth-child(n+3){display:inline-flex}
+  .chip{font-size:13px;padding:8px 14px}
+  /* Die Modellauswahl ist eine Liste, keine Flaeche. */
+  .picker{width:min(30rem, calc(100vw - 48px))}
+  .modelpick{max-width:22rem}
+  /* Im Formular passen zwei Spalten nebeneinander. */
+  .row{grid-template-columns:1fr 1fr}
+  .sheet{padding:22px 22px 24px;max-height:92vh}
+  .sheet-head{margin:-22px -22px 0;padding:18px 22px 12px;top:-22px}
+  .overlay{padding:4vh 24px}
+  .zaehler{grid-template-columns:repeat(3,1fr)}
+  .topbar{padding:12px 18px}
+  .topbar .where{font-size:12.5px}
+}
+
+/* Sehr schmale Geraete: der Ortsfilter weicht ganz, damit der Modellname
+   nicht auf zwei Zeichen zusammenschrumpft. */
+@media (max-width:430px){
+  /* Nebeneinander wird es zu eng, also darunter -- weg soll die Angabe
+     nicht, sie sagt schliesslich, womit gerade gearbeitet wird. */
+  .topbar{flex-wrap:wrap;row-gap:2px}
+  .topbar .where{order:3;width:100%;font-size:11.5px;padding-left:2px}
+  .topbar .spacer{display:none}
+  .modelpick{margin-left:auto;margin-right:auto;max-width:72vw}
+  .hello h1{font-size:22px}
+  .thread{padding:4px 12px 180px}
+  /* Die Kopfzeile ist hier zweizeilig -- die Modellauswahl muss tiefer
+     ansetzen, sonst schneidet sie den Ortsfilter halb ab und es sieht aus
+     wie ein Fehler beim Zeichnen. Und sie hat entsprechend weniger Hoehe. */
+  .picker{top:74px;max-height:calc(100vh - 94px)}
+  .picker-list{max-height:min(30vh,260px)}
+  /* Drei Arbeitsweisen brauchen Platz. Also bleibt vom Anhaengen und vom
+     Abbrechen hier nur das Sinnbild: es sagt dasselbe wie das Wort, und der
+     Titel sagt es noch einmal fuer den, der lange draufhaelt. Ohne das
+     wandert die Zeile bei 360px in die zweite Reihe -- oder darueber hinaus. */
+  .crow .tool .wort{display:none}
+  .crow .tool{padding:5px 9px}
+  .mode{padding:4px 9px;font-size:12px}
+}
+
+/* Randlose Bildschirme: unten liegt sonst die Wischleiste auf der Eingabe. */
+@supports (padding:max(0px)){
+  @media (max-width:900px){
+    footer{padding-bottom:max(12px, env(safe-area-inset-bottom))}
+    aside{padding-top:env(safe-area-inset-top)}
+  }
+}
+
+/* Liegendes Handy: kaum Hoehe, also weniger Luft um die Begruessung. */
+@media (max-height:520px) and (max-width:900px){
+  .hello{padding-bottom:10px}
+  .hello h1{font-size:20px;margin-bottom:4px}
+  .hello p,.chips{display:none}
+}
+</style>
+</head>
+<body class="start">
+
+<aside>
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 1.6l1.9 6.1 5.6-3-3 5.6 6.1 1.9-6.1 1.9 3 5.6-5.6-3L12 22.4l-1.9-6.1-5.6 3 3-5.6L1.4 11.8l6.1-1.9-3-5.6 5.6 3z"/>
+    </svg>
+    <span class="name">Aquaticy AI</span>
+    <span class="ver" id="version">…</span>
+  </div>
+  <button class="newchat" id="btn-new"><span class="plus">+</span> Neuer Chat</button>
+  <div class="side-title">Letzte Chats</div>
+  <div class="side-search">
+    <span class="lupe" aria-hidden="true">⌕</span>
+    <input type="search" id="chatsuche" placeholder="Chats durchsuchen"
+           autocomplete="off" aria-label="Chats durchsuchen">
+    <button type="button" class="leeren" id="suche-weg" title="Suche beenden"
+            aria-label="Suche beenden" hidden>×</button>
+  </div>
+  <div class="recents" id="recents"></div>
+  <div class="side-foot">
+    <button class="side-btn" id="btn-notes">☰ Merkzettel</button>
+    <button class="side-btn" id="btn-settings">⚙ Einstellungen</button>
+    <button class="side-btn" id="btn-theme">◐ Erscheinungsbild</button>
+  </div>
+</aside>
+
+<div class="pane">
+  <div class="topbar">
+    <button class="iconbtn" id="btn-side" title="Seitenleiste">☰</button>
+    <span class="where" id="status"></span>
+    <span class="spacer"></span>
+    <button class="modelpick" id="btn-model" title="Modell wechseln">
+      <span id="model-name">Modell</span><span class="caret">▾</span>
+    </button>
+    <span class="spacer"></span>
+    <button class="iconbtn" id="btn-vmfiles" title="Dateien in der Werkstatt"
+            aria-label="Dateien in der Werkstatt" hidden>🗀</button>
+  </div>
+
+  <div class="picker" id="picker-models" hidden>
+    <div class="picker-head" id="picker-head">Modell wählen</div>
+    <div class="picker-list" id="model-list"></div>
+    <div class="picker-effort">
+      <div class="eff-head"><b>Denktiefe</b>
+        <span class="why">Wie lange das Modell überlegen darf, bevor es
+          antwortet. Low ist flott, High nimmt sich Zeit für schwierige
+          Fragen.</span></div>
+      <div class="efforts" id="efforts" role="group" aria-label="Denktiefe">
+        <button type="button" class="eff" data-effort="low">Low</button>
+        <button type="button" class="eff" data-effort="medium">Medium</button>
+        <button type="button" class="eff" data-effort="high">High</button>
+      </div>
+    </div>
+    <label class="picker-think only-code" for="werkstatt">
+      <input type="checkbox" role="switch" class="schalter" id="werkstatt">
+      <span><b>Virtual Environment</b>
+        <span class="why">Gibt Aquaticy eine abgeschottete Maschine, in der er
+          Code wirklich ausführt, statt zu behaupten, er laufe: ein Prozessorkern,
+          1 GB Arbeitsspeicher, 4 GB Platte, <b>kein Netz</b>. Dort darf er alles —
+          nur nicht heraus. 20 Minuten nach der letzten Nachricht wird sie samt
+          Inhalt gelöscht; die nächste Frage baut eine neue. Nachschlagen im Web
+          kann Aquaticy weiterhin — nur die Maschine selbst hat kein Netz.</span></span>
+    </label>
+    <label class="picker-think only-normal" for="online">
+      <input type="checkbox" role="switch" class="schalter" id="online" checked>
+      <span><b>Im Web suchen</b>
+        <span class="why">Ausgeschaltet geht Aquaticy nicht mehr hinaus: keine Suche,
+          kein Seitenabruf, keine Agenten. Er antwortet dann aus seinem eigenen
+          Wissen, aus dem Gespräch, aus angehängten Dateien und aus seinem
+          Speicher — und sagt dazu, wo sein Wissen alt sein könnte.</span></span>
+    </label>
+    <label class="picker-think only-normal" for="denken">
+      <input type="checkbox" role="switch" class="schalter" id="denken">
+      <span><b>Denken</b>
+        <span class="why">Angeschaltet denkt Aquaticy sichtbar nach, bevor er
+          antwortet: du siehst zu, wie er sich die Antwort zurechtlegt.
+          Ausgeschaltet kommt nur das Ergebnis. Auf die Antwort selbst hat es
+          keinen Einfluss — sie wird davon weder besser noch langsamer.</span></span>
+    </label>
+    <label class="picker-think" for="structure">
+      <input type="checkbox" role="switch" class="schalter" id="structure">
+      <span><b>Strukturieren</b>
+        <span class="why">Gedacht wird immer — hier zerlegt Aquaticy die Frage
+          zusätzlich in Teilfragen, schickt für jede einen Agenten los (jeden
+          auf anderen Seiten) und schreibt daraus eine ausführliche Antwort mit
+          Quellen. Ausgeschaltet führst du ein normales Gespräch: er antwortet
+          selbst und sucht nur, wenn die Frage es braucht oder du ihn darum
+          bittest. Das ist schneller.</span></span>
+    </label>
+    <label class="picker-think only-normal" for="recheck">
+      <input type="checkbox" role="switch" class="schalter" id="recheck">
+      <span><b>Gegenprüfen</b>
+        <span class="why only-standard">Sucht nach der Antwort garantiert noch einmal — und
+          zwar ausschließlich auf Seiten, die beim ersten Mal nicht dran waren.
+          Findet Zahlen, die nur in einer einzigen Quelle so stehen. Dauert
+          etwa doppelt so lang.</span>
+        <span class="why only-pro">Schickt <b>vier Prüfer</b> mit, die jedes
+          Ergebnis auf anderen Seiten gegenlesen — währenddessen die übrigen
+          Agenten noch suchen. Sind die fertig, helfen sie beim Prüfen mit.
+          Kostet deshalb kaum Zeit statt der doppelten. Ausgeschaltet laufen
+          sie nicht: der Master allein entscheidet dann, ob etwas nachgeholt
+          werden muss.</span></span>
+    </label>
+    <div class="picker-foot">Weitere Anbieter und Schlüssel unter
+      <button class="linkish" id="picker-settings">Einstellungen</button>.</div>
+  </div>
+
+  <main id="main">
+    <div class="hello" id="hello">
+      <svg class="star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 1.6l1.9 6.1 5.6-3-3 5.6 6.1 1.9-6.1 1.9 3 5.6-5.6-3L12 22.4l-1.9-6.1-5.6 3 3-5.6L1.4 11.8l6.1-1.9-3-5.6 5.6 3z"/>
+      </svg>
+      <h1 id="greeting">Guten Tag</h1>
+      <p>Ich suche selbst im Web, lese die Seiten und nenne zu jeder Angabe die Quelle.</p>
+    </div>
+    <div class="thread" id="thread"></div>
+  </main>
+
+  <footer>
+    <div class="files" id="files"></div>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="Frag etwas …"></textarea>
+      <input type="file" id="picker" multiple hidden
+             accept="image/*,.pdf,.txt,.md,.csv,.json,.log,.yaml,.yml">
+      <div class="crow">
+        <button class="tool" id="clip" title="Bild oder PDF anhängen">📎 <span class="wort">Anhängen</span></button>
+        <button class="tool stop" id="stop" title="Anfrage abbrechen" hidden>◼ <span class="wort">Abbrechen</span></button>
+          <div class="modes" id="modes" role="group" aria-label="Arbeitsweise">
+          <button class="mode on" data-mode="normal"
+            title="Normales Gespräch — sucht, wenn die Frage es braucht">Normal</button>
+          <button class="mode" data-mode="pro"
+            title="Volle Leistung: stärkstes Modell, bis zu 24 Agenten">Pro</button>
+          <button class="mode" data-mode="code"
+            title="Code statt Prosa, auf dem stärksten Modell">Code</button>
+        </div>
+        <span class="spacer"></span>
+        <button class="send" id="send" title="Senden (Enter)">↑</button>
+      </div>
+    </div>
+    <div class="chips only-normal" id="chips">
+      <span class="chip">Gute Cafés mit WLAN in meiner Stadt</span>
+      <span class="chip">Welche Geräte hängen in meinem Netz?</span>
+      <span class="chip">Laptop bis 1200 € für Bildbearbeitung</span>
+    </div>
+    <!-- Im Code-Modus hilft ein Suchvorschlag niemandem. Beide Listen stehen
+         im HTML und werden per Klasse getauscht: der Modus steht schon in der
+         ausgelieferten Seite, so ist von der ersten Zeile an die richtige da
+         und es wird nichts umgeschrieben, was der Nutzer schon sieht. -->
+    <div class="chips only-code" id="chips-code">
+      <span class="chip">Schreib mir ein Python-Skript, das Ordner nach Datum sortiert</span>
+      <span class="chip">Warum wirft dieser Code einen IndexError?</span>
+      <span class="chip">Baue eine kleine REST-API mit FastAPI</span>
+    </div>
+    <div class="hint">Enter senden · Shift+Enter Zeilenumbruch · /help zeigt die Befehle</div>
+  </footer>
+</div>
+
+<div class="overlay ask" id="askbox">
+  <div class="sheet ask-sheet" role="dialog" aria-modal="true" aria-labelledby="ask-q">
+    <div class="ask-head"><span class="ask-dot"></span>Aquaticy hat eine Frage</div>
+    <div class="ask-q" id="ask-q"></div>
+    <div class="ask-opts" id="ask-opts"></div>
+    <label class="ask-free">
+      <span class="lbl">Oder selbst schreiben</span>
+      <input type="text" id="ask-free" placeholder="Deine Antwort …" autocomplete="off">
+    </label>
+    <div class="note">Ohne Antwort mache ich nach ein paar Minuten mit einer
+      naheliegenden Annahme weiter — und sage sie dir dann dazu.</div>
+    <div class="actions">
+      <button type="button" class="btn" id="ask-skip">Überspringen</button>
+      <button type="button" class="btn primary" id="ask-send">Antworten</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="vmbox">
+  <div class="sheet merk-sheet" role="dialog" aria-modal="true" aria-labelledby="vm-title">
+    <h2 id="vm-title">Werkstatt</h2>
+    <p class="lead">Was gerade unter <code>/work</code> liegt. Angehängte Dateien
+      landen in <code>/work/eingang</code>; alles, was Aquaticy AI dort erzeugt,
+      kannst du herunterladen. Zwanzig Minuten nach der letzten Nachricht wird
+      die Werkstatt samt Inhalt gelöscht.</p>
+    <div class="merkliste" id="vmliste"></div>
+    <div class="actions">
+      <span class="note" id="vm-note"></span>
+      <button type="button" class="btn" id="vm-refresh">Neu ansehen</button>
+      <button type="button" class="btn primary" id="vm-close">Fertig</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="membox">
+  <div class="sheet merk-sheet" role="dialog" aria-modal="true" aria-labelledby="merk-title">
+    <h2 id="merk-title">Was Aquaticy über dich weiß</h2>
+    <p class="lead">Alles, was Aquaticy AI von selbst abgelegt oder auf deinen Wunsch
+      gemerkt hat. Nur Text, verschlüsselt, auf diesem Rechner. Jede Zeile lässt
+      sich einzeln entfernen.</p>
+    <div class="merkliste" id="merkliste"></div>
+    <div class="actions">
+      <span class="note" id="merk-note"></span>
+      <button type="button" class="btn" id="merk-clear">Alles vergessen</button>
+      <button type="button" class="btn primary" id="merk-close">Fertig</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="themebox">
+  <div class="sheet theme-sheet" role="dialog" aria-modal="true" aria-labelledby="theme-title">
+    <h2 id="theme-title">Erscheinungsbild</h2>
+    <p class="lead">Hell oder dunkel — und in welchen Farben. Der Aufbau bleibt
+      derselbe, es wechseln nur die Farben.</p>
+    <div class="group">Helligkeit</div>
+    <div class="tmodes" id="tmodes" role="group" aria-label="Helligkeit">
+      <button type="button" class="tmode" data-tmode="light">
+        <span class="glyph">☀</span>Hell</button>
+      <button type="button" class="tmode" data-tmode="dark">
+        <span class="glyph">☾</span>Dunkel</button>
+      <button type="button" class="tmode" data-tmode="system">
+        <span class="glyph">◐</span>Wie das System</button>
+    </div>
+    <div class="group">Farbschema</div>
+    <div class="palettes" id="palettes"></div>
+    <div class="actions">
+      <span class="note" id="theme-note">Gilt sofort und bleibt in diesem Browser.</span>
+      <button type="button" class="btn" id="theme-reset">Standard</button>
+      <button type="button" class="btn primary" id="theme-close">Fertig</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2>Einstellungen</h2>
+      <p class="lead">Alles, was du auch bei <code>aquaticy setup</code> festlegst. Landet in
+        deiner <code>.env</code> und gilt sofort.</p>
+      <div class="secnav" id="secnav" role="group" aria-label="Abschnitte"></div>
+    </div>
+    <form id="settings">
+      <fieldset><legend>Modell</legend>
+        <label><span class="lbl">Hauptmodell <span class="why">Anbieter und Name, z.B. mistral/mistral-large-latest</span></span>
+          <input type="text" name="AQUATICY_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
+        <div class="row">
+          <label><span class="lbl">Vision-Modell (leer = Hauptmodell)</span>
+            <input type="text" name="AQUATICY_VISION_MODEL"></label>
+          <label><span class="lbl">Subagenten-Modell
+            <span class="why">Leer = das schnelle kleine Modell des Anbieters</span></span>
+            <input type="text" name="AQUATICY_SUBAGENT_MODEL"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Code-Modell
+            <span class="why">Für den Code-Modus. Leer = Aquaticy nimmt das stärkste,
+              das es erreichen kann</span></span>
+            <input type="text" name="AQUATICY_CODE_MODEL"></label>
+        </div>
+        <label><span class="lbl">Eigene Adresse <span class="why">Nur nötig, wenn das Modell nicht beim Anbieter selbst liegt</span></span>
+          <input type="text" name="AQUATICY_API_BASE" placeholder="http://localhost:11434"></label>
+        <div class="row">
+          <label><span class="lbl">Anbieter</span>
+            <select id="provider">
+              <option value="">— aus der Modell-ID übernehmen —</option>
+            </select></label>
+          <label><span class="lbl">Schlüssel <span id="keyname"></span></span>
+            <input type="password" name="__API_KEY__"
+                   placeholder="leer lassen = unverändert"></label>
+        </div>
+        <div class="note" id="provider-note"></div>
+        <div class="actions section">
+          <span class="note" id="model-note"></span>
+          <button type="button" class="btn primary" id="save-model">Modell speichern</button>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Speicher</legend>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="memon" name="AQUATICY_MEMORY">
+          <label for="memon" style="margin:0">Aquaticy AI darf sich Dinge merken
+            <span class="why">Merkt sich, was länger gilt — Wohnort, Vorlieben,
+              laufende Vorhaben. Nur Text, nie Bilder. Verschlüsselt, höchstens
+              400 MB.</span></label>
+        </div>
+        <div class="inline">
+          <div class="meter" id="storage-meter"><span></span></div>
+        </div>
+        <div class="note" id="storage-note"></div>
+        <div class="actions section">
+          <span class="note">Einsehen, was drinsteht — und Einzelnes löschen.</span>
+          <button type="button" class="btn" id="btn-memory">Was weißt du über mich?</button>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Mitlesen</legend>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="showtrace">
+          <label for="showtrace" style="margin:0">Aktionen mitlesen
+            <span class="why">Zeigt jede Suchanfrage im Wortlaut, jede geöffnete
+              Seite und was ein Werkzeug zurückgab. Wirkt sofort, auch auf die
+              Antwort, die gerade dasteht. Die Denkschritte gehören nicht dazu —
+              die schaltet <b>Denken</b> in der Modellauswahl ein.</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Auslastung</legend>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="showload">
+          <label for="showload" style="margin:0">Auslastung des Rechners anzeigen
+            <span class="why">Prozessor, Arbeitsspeicher, Festplatte, Grafikkarte
+              und Speicherstand — aufgefrischt, solange dieses Fenster offen
+              ist.</span></label>
+        </div>
+        <div class="note" id="usage-note"></div>
+      </fieldset>
+
+      <fieldset><legend>Nutzung</legend>
+        <p class="lead">Wie viel durch die Leitung geht. Ein Token sind hier drei
+          Zeichen — eine Vereinbarung, keine Messung: jeder Anbieter zerlegt Text
+          anders. Für Größenordnungen reicht es. Ein Limit gibt es nicht.</p>
+        <div class="zaehler" id="zaehler"></div>
+        <div class="note" id="usage-detail"></div>
+        <div class="actions section">
+          <span class="note" id="usage-cleared"></span>
+          <button type="button" class="btn" id="usage-reset">Zähler zurücksetzen</button>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Aufträge</legend>
+        <p class="lead">Fragen, die Aquaticy AI von selbst stellt — stündlich,
+          täglich oder wöchentlich. Die Antwort landet als Chat in der
+          Seitenleiste. Verpasste Termine werden nicht nachgeholt: war der
+          Rechner aus, geht es beim nächsten Mal weiter.</p>
+        <div class="auftraege" id="auftraege"></div>
+        <div class="row">
+          <label style="flex:2"><span class="lbl">Frage</span>
+            <input type="text" id="job-frage"
+                   placeholder="Was gibt es Neues zu …?"></label>
+          <label><span class="lbl">Rhythmus</span>
+            <select id="job-rhythm">
+              <option value="daily">täglich</option>
+              <option value="hourly">stündlich</option>
+              <option value="weekly">wöchentlich</option>
+            </select></label>
+        </div>
+        <div class="row">
+          <label id="job-tag-feld"><span class="lbl">Wochentag</span>
+            <select id="job-weekday">
+              <option value="0">Montag</option>
+              <option value="1">Dienstag</option>
+              <option value="2">Mittwoch</option>
+              <option value="3">Donnerstag</option>
+              <option value="4">Freitag</option>
+              <option value="5">Samstag</option>
+              <option value="6">Sonntag</option>
+            </select></label>
+          <label><span class="lbl">Uhrzeit <span class="why">Bei „stündlich"
+            zählt nur die Minute</span></span>
+            <input type="time" id="job-zeit" value="08:00"></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="job-struktur" checked>
+          <label for="job-struktur" style="margin:0">Richtig recherchieren
+            <span class="why">Teilfragen, Agenten, Quellen — wie der Schalter
+              „Strukturieren". Ausgeschaltet antwortet Aquaticy AI kurz aus
+              eigenem Wissen.</span></label>
+        </div>
+        <div class="actions section">
+          <span class="note" id="job-note"></span>
+          <button type="button" class="btn primary" id="job-add">Auftrag anlegen</button>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Gmail &amp; Kalender</legend>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" name="AQUATICY_GOOGLE" id="google-on">
+          <label for="google-on" style="margin:0">Termine und Mails lesen dürfen
+            <span class="why">Aquaticy AI kann dann Fragen zu Terminen und E-Mails
+              beantworten und die Angaben für die Recherche nutzen. Für sich
+              genommen nur lesen — ändern kommt erst mit dem Schalter
+              darunter.</span></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" name="AQUATICY_GOOGLE_WRITE" id="google-write">
+          <label for="google-write" style="margin:0">Ändern erlaubt
+            <span class="why">Aquaticy AI darf dann Termine anlegen und ändern und
+              Mail-<b>Entwürfe</b> schreiben. Vor jeder Änderung fragt er nach.
+              <b>Verschickt wird nie eine Mail</b> und gelöscht wird nichts —
+              dafür holt Aquaticy bei Google gar nicht erst die Rechte. Nach dem
+              Einschalten einmal neu verbinden, sonst fehlen die Rechte.</span></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Client-ID <span id="google-id-hint"></span></span>
+            <input type="text" name="__GOOGLE_ID__"
+                   placeholder="…apps.googleusercontent.com" autocomplete="off"></label>
+          <label><span class="lbl">Client-Secret <span id="google-secret-hint"></span></span>
+            <input type="password" name="__GOOGLE_SECRET__"
+                   placeholder="leer lassen = unverändert" autocomplete="off"></label>
+        </div>
+        <div class="inline">
+          <button type="button" class="btn" id="google-connect">Verbinden</button>
+          <button type="button" class="btn" id="google-off">Trennen</button>
+          <span class="note" id="google-state"></span>
+        </div>
+        <div id="google-step" hidden>
+          <div class="note">1. <a id="google-link" href="#" target="_blank"
+            rel="noopener">Bei Google zustimmen</a> — 2. Danach landest du auf einer
+            Adresse, die mit <code>localhost</code> beginnt. Kopiere sie vollständig
+            aus der Adresszeile (auch wenn der Browser eine Fehlerseite zeigt) und
+            füge sie hier ein:</div>
+          <div class="inline">
+            <label style="flex:1"><input type="text" id="google-code"
+                   placeholder="http://localhost:8765/google?code=…"></label>
+            <button type="button" class="btn" id="google-save">Fertig</button>
+          </div>
+        </div>
+        <details class="note"><summary>Wie richte ich das ein?</summary>
+          <ol>
+            <li>Auf <a href="https://console.cloud.google.com/" target="_blank"
+              rel="noopener">console.cloud.google.com</a> anmelden und oben links ein
+              neues Projekt anlegen (Name egal, z.B. „Aquaticy").</li>
+            <li><b>APIs und Dienste → Bibliothek</b>: nach „Gmail API" suchen,
+              aktivieren. Dasselbe mit „Google Calendar API".</li>
+            <li><b>APIs und Dienste → OAuth-Zustimmungsbildschirm</b>: Nutzertyp
+              „Extern", Name und deine Mailadresse eintragen. Unter <b>Zielgruppe</b>
+              dich selbst als Testnutzer hinzufügen — sonst lehnt Google später ab.</li>
+            <li><b>Anmeldedaten → Anmeldedaten erstellen → OAuth-Client-ID</b>,
+              Anwendungstyp <b>Desktop-App</b>. Als autorisierte Weiterleitungs-URI
+              <code id="google-redirect">http://localhost:8765/google</code>
+              eintragen.</li>
+            <li>Client-ID und Client-Secret hier oben einfügen, <b>speichern</b>,
+              dann auf <b>Verbinden</b>.</li>
+          </ol>
+          <p>Der Zugriff bleibt auf Lesen beschränkt. Die Anmeldedaten liegen
+            verschlüsselt auf dem Rechner, auf dem Aquaticy läuft, und verlassen ihn
+            nicht. Trennen entfernt sie wieder.</p>
+        </details>
+      </fieldset>
+
+      <fieldset><legend>Zuhause &amp; Netz</legend>
+        <div class="inline">
+          <label><span class="lbl">Home Assistant</span>
+            <input type="text" name="AQUATICY_HA_URL" placeholder="192.168.1.5:8123"></label>
+          <button type="button" class="btn" id="ha-find">Suchen</button>
+        </div>
+        <div class="inline">
+          <label><span class="lbl">Zugriffstoken <span id="ha-hint"></span></span>
+            <input type="password" name="__HA_TOKEN__"
+                   placeholder="leer lassen = unverändert"></label>
+          <button type="button" class="btn" id="ha-test">Testen</button>
+        </div>
+        <div class="note" id="ha-note"></div>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="hactl" name="AQUATICY_HA_CONTROL">
+          <label for="hactl" style="margin:0">Aquaticy AI darf auch schalten
+            <span class="why">Ohne Haken sieht er nur nach. Schlösser, Alarm, Tore und
+              Heizung fragen auch mit Haken jedes Mal nach.</span></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="lanon" name="AQUATICY_LAN_ENABLED">
+          <label for="lanon" style="margin:0">Ins eigene Netz sehen dürfen
+            <span class="why">Für Fragen wie „welche Geräte hängen hier" oder „läuft mein
+              Drucker". Nur private Netze, nur die Frage ob etwas antwortet.</span></label>
+        </div>
+        <label><span class="lbl">Netz (leer = automatisch erkennen)</span>
+          <input type="text" name="AQUATICY_LAN_SUBNET" placeholder="192.168.1.0/24"></label>
+
+        <div class="sub-title">Lagerverwaltung</div>
+        <div class="inline">
+          <label><span class="lbl">Adresse
+            <span class="why">Räume → Möbel → Artikel, mit Artikelnummern. Aquaticy kann
+              dann sagen, wo etwas liegt und wie viel noch da ist.</span></span>
+            <input type="text" name="AQUATICY_STORAGE_URL" placeholder="192.168.1.5:3000"></label>
+          <button type="button" class="btn" id="storage-find">Suchen</button>
+          <button type="button" class="btn" id="storage-test">Testen</button>
+        </div>
+        <label><span class="lbl">Was Aquaticy dort darf</span>
+          <select name="AQUATICY_STORAGE_ACCESS">
+            <option value="off">Nichts — abgeschaltet</option>
+            <option value="read">Nur lesen — suchen und nachsehen</option>
+            <option value="write">Lesen und schreiben — auch anlegen und ändern</option>
+          </select></label>
+        <div class="note" id="lager-note"></div>
+        <div class="note">Gelöscht wird in keiner Stufe. Ein versehentlich angelegter
+          Artikel ist schnell wieder weg; ein gelöschter Raum nimmt alles darin mit —
+          das bleibt beim Menschen. Und zur Ehrlichkeit: die Lagerverwaltung selbst hat
+          keine Anmeldung. „Nur lesen" ist eine Fessel für Aquaticy, kein Schloss am
+          Server — wer im Netz ist, darf dort weiterhin alles.</div>
+      </fieldset>
+
+      <fieldset><legend>Suche</legend>
+        <div class="row">
+          <label><span class="lbl">Suchmaschine</span>
+            <select name="AQUATICY_SEARCH_BACKEND">
+              <option value="duckduckgo">Offene Metasuche (kein Key)</option>
+              <option value="searxng">SearXNG (eigene Instanz)</option>
+              <option value="brave">Brave Search (Key)</option>
+              <option value="tavily">Tavily (Key)</option>
+            </select></label>
+          <label><span class="lbl">Suchdienste <span class="why">Leer lassen nutzt alle</span></span>
+            <input type="text" name="AQUATICY_SEARCH_ENGINES" placeholder="duckduckgo,mojeek"></label>
+        </div>
+        <label><span class="lbl">SearXNG-Adresse</span>
+          <input type="text" name="AQUATICY_SEARXNG_URL" placeholder="http://localhost:8080"></label>
+        <div class="row">
+          <label><span class="lbl">Schlüssel der Suchmaschine
+            <span class="why" id="search-keyname">nur bei Brave und Tavily nötig</span></span>
+            <input type="password" name="__SEARCH_KEY__" placeholder="leer lassen = unverändert"
+                   autocomplete="off"></label>
+          <label><span class="lbl">Formulierungen je Suche
+            <span class="why">Dieselbe Frage anders gestellt findet mehr. 2 bis 3 ist
+              das Maß, 1 schaltet es ab.</span></span>
+            <input type="number" name="AQUATICY_SEARCH_VARIANTS" min="1" max="3"></label>
+        </div>
+        <div class="inline">
+          <button type="button" class="btn" id="probe">Verbindung testen</button>
+          <span class="note" id="probe-note"></span>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Ort &amp; Sprache</legend>
+        <div class="row">
+          <label><span class="lbl">Standard-Ort</span>
+            <input type="text" name="AQUATICY_LOCATION" placeholder="Mönchengladbach"></label>
+          <label><span class="lbl">Sprache / Land</span>
+            <div class="row">
+              <input type="text" name="AQUATICY_LANG" placeholder="de">
+              <input type="text" name="AQUATICY_COUNTRY" placeholder="de">
+            </div></label>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>Subagenten &amp; Limits</legend>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="auto" name="AQUATICY_SUBAGENTS_AUTO">
+          <label for="auto" style="margin:0">Fragen automatisch aufteilen
+            <span class="why">Große Fragen werden in Teilfragen zerlegt und parallel
+              recherchiert. Das dauert kürzer, kostet aber mehr Aufrufe.</span></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Helfer je Anfrage <span class="why">Wie viele Teilfragen gleichzeitig bearbeitet werden. 0 schaltet sie ab</span></span>
+            <input type="text" name="AQUATICY_MAX_SUBAGENTS"></label>
+          <label><span class="lbl">Suchen je Helfer <span class="why">Wie oft ein Helfer suchen oder eine Seite lesen darf</span></span>
+            <input type="text" name="AQUATICY_SUBAGENT_BUDGET"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Suchen je Anfrage <span class="why">Obergrenze für Suchen und Seitenaufrufe zusammen</span></span>
+            <input type="text" name="AQUATICY_MAX_TOOL_CALLS"></label>
+          <label><span class="lbl">Gedächtnis im Gespräch <span class="why">Wie viel vom Gespräch das Modell überblickt. Gilt nur für lokale Modelle</span></span>
+            <input type="text" name="AQUATICY_CONTEXT_TOKENS"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Zeit fürs Planen <span class="why">Sekunden, die das Zerlegen einer Frage dauern darf</span></span>
+            <input type="text" name="AQUATICY_PLANNER_TIMEOUT"></label>
+          <label><span class="lbl">Gleichzeitig <span class="why">Wie viele Helfer parallel laufen. 0 überlässt es Aquaticy AI</span></span>
+            <input type="text" name="AQUATICY_SUBAGENT_PARALLEL"></label>
+        </div>
+        <div class="row">
+          <label><span class="lbl">Anfragen pro Minute <span class="why">Was dein Anbieter verträgt. Leer = das Freikontingent (NVIDIA 40, Mistral 240)</span></span>
+            <input type="text" name="AQUATICY_RPM" placeholder="leer = Freikontingent"></label>
+          <label><span class="lbl">Gleichzeitige Anfragen <span class="why">Mehr offene Verbindungen machen jede einzelne Antwort langsamer. Leer = NVIDIA 4, Mistral 8</span></span>
+            <input type="text" name="AQUATICY_PARALLEL_CALLS" placeholder="leer = Freikontingent"></label>
+        </div>
+        <div class="check">
+          <input type="checkbox" role="switch" class="schalter" id="pw" name="AQUATICY_ENABLE_PLAYWRIGHT">
+          <label for="pw" style="margin:0">Seiten mit echtem Browser laden
+            <span class="why">Für Seiten, die ihren Inhalt erst nachladen. Braucht
+              einmalig <code>aquaticy install-browser</code>.</span></label>
+        </div>
+      </fieldset>
+
+      <div class="actions">
+        <button type="button" class="btn" id="cancel">Abbrechen</button>
+        <button type="submit" class="btn primary">Speichern</button>
+      </div>
+      <div class="note" id="savenote"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
+let busy = false;
+
+/* ---------- Arbeitsweise, Struktur und Denktiefe ---------- */
+// Alles drei gehoert zur Frage, nicht zur Sitzung -- es geht bei jeder
+// Anfrage mit. Gemerkt wird es trotzdem, damit man es nicht jedes Mal neu
+// einstellt. "Strukturieren" hiess frueher "Denken"; gedacht wird immer,
+// zerlegt nur hier.
+let mode = "normal";
+let structured = false;
+let recheck = false;
+let effort = "medium";
+let online = true;
+let sandbox = false;
+// Nur die Anzeige: ob man Aquaticy beim Denken zusieht.
+let denken = false;
+
+// Was hier umgelegt wird, gehoert dem Server. Der Browser meldet es und
+// zeigt es an -- was gilt, entscheidet der Server (siehe aquaticy/uistate.py).
+// Gesammelt und einmal geschickt: sonst kaeme bei jedem Klick auf drei
+// Schalter hintereinander dreimal dieselbe Anfrage.
+let zustandTimer = null;
+let zustandOffen = {};
+// Der Aufschub fuer die Kopfzeile. Die Funktion dazu steht ganz unten, die
+// Variable muss aber hier oben stehen: die Schalter unten rufen sie beim
+// Laden auf, und eine `let`-Zeile, die dann noch nicht gelaufen ist, wirft
+// einen ReferenceError -- der stoppt das ganze Skript, und dann bleibt auf
+// dem Handy die Seitenleiste offen ueber dem Chat liegen.
+let kopfTimer = null;
+function merkeZustand(teil){
+  Object.assign(zustandOffen, teil);
+  clearTimeout(zustandTimer);
+  zustandTimer = setTimeout(() => {
+    const senden = zustandOffen;
+    zustandOffen = {};
+    // Ein fehlgeschlagenes Merken darf nichts kaputt machen: die Ansicht
+    // stimmt trotzdem, es steht beim naechsten Laden nur wieder das Alte da.
+    api("/api/prefs", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(senden),
+    }).catch(() => {});
+  }, 180);
+}
+
+// Dieselbe Liste wie in `aquaticy/uistate.py` und `aquaticy/agent.py`. Was hier
+// nicht steht, wird "normal" -- der Server sieht es genauso.
+const MODI = ["normal", "pro", "code"];
+// Wie die Rollen und die Urteile der Pruefer heissen. Dieselben Schluessel
+// wie in `aquaticy/subagents.py`; was hier fehlt, bleibt einfach unbeschriftet.
+const ROLLEN = {zahlen:"Zahlen", gegenstimmen:"Gegenstimmen", frisch:"Aktuelles",
+                tiefe:"Spurensuche"};
+const URTEILE = {BESTAETIGT:"bestätigt", ABWEICHUNG:"Abweichung gefunden",
+                 UNKLAR:"nichts Belastbares gefunden"};
+const PLATZHALTER = {
+  normal: "Frag etwas …",
+  pro: "Frag etwas Größeres …",
+  code: "Was soll ich bauen?",
+};
+
+function setMode(wanted, { merken = true } = {}){
+  mode = MODI.includes(wanted) ? wanted : "normal";
+  document.querySelectorAll("#modes .mode").forEach(button =>
+    button.classList.toggle("on", button.dataset.mode === mode));
+  document.body.classList.toggle("code-mode", mode === "code");
+  document.body.classList.toggle("pro-mode", mode === "pro");
+  $("#input").placeholder = PLATZHALTER[mode] || PLATZHALTER.normal;
+  if (merken) merkeZustand({ mode });
+  zeigeWerkstattKnopf();
+  refreshHeader();
+  // Pro heisst vor allem: viele Agenten. Die gibt es nur mit Strukturieren
+  // -- ohne das antwortet das Modell selbst, und vom Modus bliebe nur ein
+  // staerkeres Modell uebrig. Beim Wechsel wird es deshalb eingeschaltet:
+  // sichtbar am Schalter und jederzeit wieder umlegbar. Beim Laden nicht --
+  // wer es im Pro-Modus ausgeschaltet hat, hat es so gemeint.
+  if (merken && mode === "pro" && !structured) setStructured(true);
+}
+
+function setRecheck(on, { merken = true } = {}){
+  recheck = !!on;
+  $("#recheck").checked = recheck;
+  if (merken) merkeZustand({ recheck });
+  refreshHeader();
+}
+
+function setSandbox(on, { merken = true } = {}){
+  sandbox = !!on;
+  $("#werkstatt").checked = sandbox;
+  if (merken) merkeZustand({ sandbox });
+  zeigeWerkstattKnopf();
+  refreshHeader();
+}
+
+// Der Knopf zur Werkstatt steht nur da, wo es eine gibt: im Code-Modus mit
+// eingeschalteter Maschine. Sonst waere es ein Knopf ins Leere.
+function zeigeWerkstattKnopf(){
+  const knopf = $("#btn-vmfiles");
+  if (knopf) knopf.hidden = !(mode === "code" && sandbox);
+}
+
+function setOnline(on, { merken = true } = {}){
+  online = !!on;
+  $("#online").checked = online;
+  if (merken) merkeZustand({ online });
+  refreshHeader();
+}
+
+// Gedacht wird immer -- dieser Schalter entscheidet nur, ob man dabei
+// zusieht. Auf die Anfrage hat er keinen Einfluss, nur auf die Anzeige.
+function setDenken(on, { merken = true } = {}){
+  denken = !!on;
+  $("#denken").checked = denken;
+  document.body.classList.toggle("denken", denken);
+  if (merken) merkeZustand({ denken });
+}
+
+function setStructured(on, { merken = true } = {}){
+  structured = !!on;
+  $("#structure").checked = structured;
+  if (merken) merkeZustand({ structured });
+  refreshHeader();
+}
+
+const EFFORTS = ["low", "medium", "high"];
+function setEffort(wanted, { merken = true } = {}){
+  effort = EFFORTS.includes(wanted) ? wanted : "medium";
+  document.querySelectorAll("#efforts .eff").forEach(button =>
+    button.classList.toggle("on", button.dataset.effort === effort));
+  if (merken) merkeZustand({ effort });
+  refreshHeader();
+}
+
+document.querySelectorAll("#modes .mode").forEach(button =>
+  button.addEventListener("click", () => {
+    // Ein Wechsel der Arbeitsweise faengt einen neuen Chat an. Code und
+    // Prosa im selben Verlauf zu mischen geht selten gut: das Modell
+    // wechselt, der Systemtext wechselt, und die halbe Unterhaltung davor
+    // passt nicht mehr zu dem, was jetzt gefragt ist. Steht schon nichts
+    // im Chat, gibt es auch nichts anzufangen.
+    const anders = button.dataset.mode !== mode;
+    setMode(button.dataset.mode);
+    if (anders && thread.children.length) neuerChat({ leiste: false });
+  }));
+document.querySelectorAll("#efforts .eff").forEach(button =>
+  button.addEventListener("click", () => setEffort(button.dataset.effort)));
+$("#online").addEventListener("change", (e) => setOnline(e.target.checked));
+$("#werkstatt").addEventListener("change", (e) => setSandbox(e.target.checked));
+$("#denken").addEventListener("change", (e) => setDenken(e.target.checked));
+$("#structure").addEventListener("change", (e) => setStructured(e.target.checked));
+$("#recheck").addEventListener("change", (e) => setRecheck(e.target.checked));
+
+// Der Anfangszustand kommt mit der Seite mit -- der Server hat ihn beim
+// Ausliefern hineingeschrieben. Fehlt er (eine Datei, die jemand von Hand
+// geoeffnet hat), gelten dieselben Standardwerte wie dort. `merken: false`,
+// weil das Anzeigen des Bestehenden kein Aendern ist.
+const START = (typeof window.__AQUATICY_STATE__ === "object" && window.__AQUATICY_STATE__)
+  ? window.__AQUATICY_STATE__ : {};
+setMode(START.mode || "normal", { merken: false });
+setStructured(START.structured === true, { merken: false });
+setRecheck(START.recheck === true, { merken: false });
+setEffort(START.effort || "medium", { merken: false });
+setOnline(START.online !== false, { merken: false });
+setSandbox(START.sandbox === true, { merken: false });
+setDenken(START.denken === true, { merken: false });
+
+// Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
+// soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
+// eines allein reicht nicht.
+let running = null;
+// Die offene Rueckfrage. Steht hier oben und nicht bei ihren Funktionen:
+// setBusy() greift darauf zu und laeuft frueher -- eine spaetere let-Zeile
+// gaebe sonst einen ReferenceError.
+let asking = null;          // {bubble, question, sent}
+
+function setBusy(on){
+  busy = on;
+  // Ist der Durchlauf vorbei, wartet auch niemand mehr auf eine Antwort.
+  // Eine Frage, die nach dem Abbruch offen stehen bliebe, waere eine Falle:
+  // man antwortet, und die Antwort geht ins Leere.
+  if (!on && asking) finishAsk("", true);
+  $("#send").disabled = on;
+  // Waehrend eine Anfrage laeuft, steht an der Stelle des Anhaengens der
+  // Abbruch: das ist der Knopf, den man dann sucht.
+  $("#clip").hidden = on;
+  $("#stop").hidden = !on;
+  if (!on) running = null;
+}
+let currentModel = "";
+
+/* ---------- Zugangswort (nur im Netzbetrieb) ----------
+   Der Server setzt es auch als Cookie. Wir merken es zusaetzlich selbst und
+   schicken es als Kopfzeile mit -- dann geht es auch dort, wo der Browser
+   Cookies zurueckhaelt. Aus der Adresszeile nehmen wir es danach heraus,
+   damit es nicht in jedem Screenshot mitfaehrt. */
+let token = new URLSearchParams(location.search).get("token") || "";
+try {
+  if (token) localStorage.setItem("aquaticy-token", token);
+  else token = localStorage.getItem("aquaticy-token") || "";
+} catch {}
+if (location.search) history.replaceState(null, "", location.pathname);
+
+function api(path, options = {}){
+  const headers = Object.assign({}, options.headers);
+  if (token) headers["X-Aquaticy-Token"] = token;
+  return fetch(path, Object.assign({}, options, { headers }));
+}
+
+/* ---------- Markdown (klein gehalten, kein Fremdcode) ---------- */
+const esc = (t) => t.replace(/[&<>"']/g, (c) =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+function md(text){
+  let h = esc(text);
+  // Die Sprachangabe hinter den Backticks gehoert in die Kopfzeile des Blocks,
+  // nicht als erste Zeile in den Code -- vorher stand dort woertlich "python".
+  h = h.replace(/```([a-zA-Z0-9+#._-]*)\n?([\s\S]*?)```/g, (m, lang, code) =>
+    `<div class="codeblock"><div class="code-head"><span class="lang">${
+      lang || "Code"}</span><button type="button" class="copy">Kopieren</button></div>`
+    + `<pre><code>${code.replace(/\s+$/, "")}</code></pre></div>`);
+  h = h.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  h = h.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  h = h.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  h = h.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
+    '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  const lines = h.split("\n"); const out = []; let list = null;
+  const closeList = () => { if (list){ out.push(`</${list}>`); list = null; } };
+  for (const line of lines){
+    const head = line.match(/^(#{1,4})\s+(.*)$/);
+    const ol = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
+    const ul = line.match(/^\s*[-*•]\s+(.*)$/);
+    const quote = line.match(/^&gt;\s?(.*)$/);
+    if (head){ closeList(); out.push(`<h3>${head[2]}</h3>`); continue; }
+    if (ol){ if(list!=="ol"){ closeList(); out.push("<ol>"); list="ol";}
+      out.push(`<li>${ol[2]}</li>`); continue; }
+    if (ul){ if(list!=="ul"){ closeList(); out.push("<ul>"); list="ul";}
+      out.push(`<li>${ul[1]}</li>`); continue; }
+    // Eine Leerzeile beendet eine Liste nicht -- Modelle setzen zwischen
+    // Aufzaehlungspunkten gern eine, und die Nummerierung finge sonst bei
+    // jedem Punkt wieder bei 1 an.
+    if (!line.trim()){ if (!list) out.push(""); continue; }
+    // Eingerueckte Folgezeilen gehoeren zum vorigen Punkt, nicht daneben.
+    if (list && /^\s{2,}\S/.test(line) && out.length && out[out.length-1].endsWith("</li>")){
+      out[out.length-1] = out[out.length-1].replace(/<\/li>$/, `<br>${line.trim()}</li>`);
+      continue;
+    }
+    closeList();
+    if (quote){ out.push(`<blockquote>${quote[1]}</blockquote>`); continue; }
+    out.push(`<p>${line}</p>`);
+  }
+  closeList();
+  return out.join("");
+}
+
+/* ---------- Nachrichten ---------- */
+function leaveStart(){ document.body.classList.remove("start"); }
+function addUser(text, files = []){
+  leaveStart();
+  const el = document.createElement("div");
+  el.className = "msg user";
+  el.innerHTML = `<div class="bubble"></div>`;
+  const bubble = el.querySelector(".bubble");
+  bubble.textContent = text;
+  if (files.length){
+    const box = document.createElement("div");
+    box.className = "attached";
+    files.forEach(file => {
+      const chip = document.createElement("div");
+      chip.className = "file";
+      chip.innerHTML = `<span class="kind"></span><span class="nm"></span>`;
+      chip.querySelector(".kind").textContent = kindOf(file.name);
+      chip.querySelector(".nm").textContent = file.name;
+      box.appendChild(chip);
+    });
+    bubble.appendChild(box);
+  }
+  thread.appendChild(el); scroll();
+}
+function addBot(){
+  leaveStart();
+  const el = document.createElement("div");
+  el.className = "msg bot";
+  el.innerHTML = `<div class="steps"></div><div class="bubble"></div>`;
+  thread.appendChild(el); scroll();
+  return { steps: el.querySelector(".steps"), bubble: el.querySelector(".bubble") };
+}
+// Ein Vermerk unter der Antwort. Anders als ein Zwischenschritt bleibt er
+// sichtbar, auch wenn niemand das Mitlesen eingeschaltet hat.
+function mark(bubble, text){
+  if (!bubble || bubble.parentNode === null) return;
+  // Der Name ist bewusst lang: "mark" traegt in der Seitenleiste schon das
+  // Logo, und eine zweite Regel gleichen Namens hat es prompt umgestylt.
+  let box = bubble.parentNode.querySelector(".answer-note");
+  if (!box){
+    box = document.createElement("div");
+    box.className = "answer-note";
+    box.innerHTML = '<span class="tick">✓</span><span class="txt"></span>';
+    bubble.parentNode.appendChild(box);
+  }
+  box.querySelector(".txt").textContent = text;
+  scroll();
+}
+
+// Was auf dem Bildschirm steht, soll man auch mitnehmen koennen. Kopiert
+// und gespeichert wird der Wortlaut, nicht das gerenderte HTML: Markdown
+// laesst sich weiterverwenden, ein Ausschnitt aus dem DOM nicht.
+function answerTools(bubble, text, question){
+  if (!bubble || !bubble.parentNode || !text) return;
+  bubble.parentNode.querySelector(".answer-tools")?.remove();
+  const box = document.createElement("div");
+  box.className = "answer-tools";
+  box.innerHTML = '<button type="button" data-do="copy">Kopieren</button>'
+    + '<button type="button" data-do="save">Als Datei</button>';
+  box.querySelector('[data-do="copy"]').addEventListener("click", async (e) => {
+    const ok = await copyText(text);
+    e.target.textContent = ok ? "Kopiert" : "Ging nicht";
+    setTimeout(() => { e.target.textContent = "Kopieren"; }, 1400);
+  });
+  box.querySelector('[data-do="save"]').addEventListener("click", () => {
+    const kopf = question ? `# ${question.replace(/\s+/g, " ").trim()}\n\n` : "";
+    downloadText(dateiname(question || "antwort") + ".md", kopf + text);
+  });
+  bubble.parentNode.appendChild(box);
+}
+
+// Der moderne Weg braucht einen sicheren Kontext; ueber http:// im eigenen
+// Netz gibt es den nicht. Dann der alte Weg -- lieber unschoen als gar nicht.
+async function copyText(text){
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  try {
+    const feld = document.createElement("textarea");
+    feld.value = text;
+    feld.style.position = "fixed"; feld.style.opacity = "0";
+    document.body.appendChild(feld);
+    feld.select();
+    const ok = document.execCommand("copy");
+    feld.remove();
+    return ok;
+  } catch { return false; }
+}
+
+function downloadText(name, text){
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = name;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// Ein Dateiname aus einer Frage: nur Zeichen, die jedes Dateisystem mag.
+function dateiname(roh){
+  const rein = String(roh || "aquaticy").normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  return rein.toLowerCase() || "aquaticy";
+}
+
+function step(box, tag, text, kind){
+  const el = document.createElement("div");
+  el.className = "step" + (kind ? " " + kind : "");
+  el.innerHTML = `<span class="tag"></span><span class="txt"></span>`;
+  el.querySelector(".tag").textContent = tag;
+  el.querySelector(".txt").textContent = text || "";
+  box.appendChild(el); scroll(); return el;
+}
+// Mitlese-Zeile. Sie wird immer erzeugt; ob man sie sieht, entscheidet der
+// Haken in den Einstellungen -- deshalb kann man auch nachtraeglich noch
+// nachschauen, was gerade passiert ist.
+function trace(box, tag, text, kind){
+  const el = step(box, tag, text, "trace" + (kind ? " " + kind : ""));
+  if (!document.body.classList.contains("tracing")) scrollLock = true;
+  return el;
+}
+// Verhindert, dass unsichtbare Zeilen den Chat springen lassen.
+let scrollLock = false;
+const scroll = () => {
+  if (scrollLock){ scrollLock = false; return; }
+  main.scrollTop = main.scrollHeight;
+};
+
+/* ---------- Bewegung ---------- */
+// Ein Fenster, das beim Schliessen einfach verschwindet, wirkt wie ein
+// Aussetzer. Also: erst die Ausblende spielen, dann wegnehmen. Die Dauer
+// steht hier genauso wie im Stilblock -- sie muss zusammenpassen.
+const CLOSE_MS = 140;
+function openOverlay(box){
+  clearTimeout(box._closing);   // eine laufende Ausblende gilt nicht mehr
+  box.classList.remove("closing");
+  box.classList.add("open");
+}
+function closeOverlay(box, after){
+  if (!box.classList.contains("open") || box.classList.contains("closing")) return;
+  box.classList.add("closing");
+  box._closing = setTimeout(() => {
+    box.classList.remove("open", "closing");
+    after?.();
+  }, CLOSE_MS);
+}
+// Gestaffelt einlaufen lassen: der zehnte Eintrag wartet sonst spuerbar,
+// und ab da bringt die Staffelung nichts mehr.
+function stagger(nodes, step = 26, cap = 10){
+  [...nodes].forEach((node, index) => {
+    node.style.animationDelay = `${Math.min(index, cap) * step}ms`;
+  });
+}
+
+// Setzt einen Text und laesst ihn kurz aufblitzen -- aber nur, wenn er sich
+// wirklich geaendert hat. Sonst zappelt die Kopfzeile bei jedem Abgleich.
+function flash(node, text){
+  if (node.textContent === text) return;
+  node.textContent = text;
+  node.classList.remove("flash");
+  void node.offsetWidth;
+  node.classList.add("flash");
+}
+
+/* ---------- Anhaenge ---------- */
+const MAX_FILES = 5, MAX_BYTES = 25000000;
+const filesBox = $("#files"), picker = $("#picker");
+let pending = [];
+
+const prettySize = (n) => n < 1000000
+  ? Math.max(1, Math.round(n / 1000)) + " KB"
+  : (n / 1000000).toFixed(1) + " MB";
+const kindOf = (name) => {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (["png","jpg","jpeg","webp","gif","bmp"].includes(ext)) return "Bild";
+  if (ext === "pdf") return "PDF";
+  return "Datei";
+};
+
+function drawFiles(){
+  filesBox.innerHTML = "";
+  pending.forEach((file, index) => {
+    const el = document.createElement("div");
+    el.className = "file";
+    el.innerHTML = `<span class="kind"></span><span class="nm"></span>
+      <span class="sz"></span><button class="x" title="Entfernen">✕</button>`;
+    el.querySelector(".kind").textContent = kindOf(file.name);
+    el.querySelector(".nm").textContent = file.name;
+    el.querySelector(".sz").textContent = prettySize(file.size);
+    el.querySelector(".x").addEventListener("click", () => {
+      pending.splice(index, 1); drawFiles();
+    });
+    filesBox.appendChild(el);
+  });
+}
+
+function readFile(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("nicht lesbar"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addFiles(list){
+  for (const file of Array.from(list)){
+    if (pending.length >= MAX_FILES){ alert(`Höchstens ${MAX_FILES} Dateien.`); break; }
+    if (file.size > MAX_BYTES){
+      alert(`${file.name} ist zu groß (${prettySize(file.size)}, erlaubt sind 25 MB).`);
+      continue;
+    }
+    try {
+      pending.push({ name: file.name, size: file.size, data: await readFile(file) });
+    } catch { alert(`${file.name} konnte nicht gelesen werden.`); }
+  }
+  drawFiles();
+  input.focus();
+}
+
+$("#clip").addEventListener("click", () => picker.click());
+$("#stop").addEventListener("click", () => {
+  // Erst dem Server sagen, dass Schluss ist -- sonst rechnet er weiter,
+  // waehrend hier schon niemand mehr zuhoert.
+  api("/api/stop", { method:"POST" }).catch(() => {});
+  if (running) running.abort();
+});
+picker.addEventListener("change", () => { addFiles(picker.files); picker.value = ""; });
+
+let dragDepth = 0;
+document.addEventListener("dragenter", (e) => {
+  if (!e.dataTransfer?.types?.includes("Files")) return;
+  dragDepth++; document.body.classList.add("dragging");
+});
+document.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0){ dragDepth = 0; document.body.classList.remove("dragging"); }
+});
+document.addEventListener("dragover", (e) => {
+  if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  dragDepth = 0; document.body.classList.remove("dragging");
+  addFiles(e.dataTransfer.files);
+});
+input.addEventListener("paste", (e) => {
+  const files = Array.from(e.clipboardData?.files || []);
+  if (files.length){ e.preventDefault(); addFiles(files); }
+});
+
+/* ---------- Rueckfragen des Agenten ---------- */
+/* ---------- Rückfragen ---------- */
+// Aquaticy haelt die Anfrage an und wartet auf eine Antwort. Frueher stand die
+// Frage als Karte im Verlauf -- und wurde uebersehen, weil man auf die Antwort
+// schaute. Jetzt kommt sie als eigenes Fenster: es hat Vorrang, weil ohne
+// Antwort ohnehin nichts weitergeht.
+const askBox = $("#askbox");
+
+function openAsk(bubble, question, options){
+  // Kommt wider Erwarten eine zweite Frage, waehrend die erste offen steht,
+  // gilt die neue -- die alte wartet auf niemanden mehr.
+  if (asking) finishAsk("", true);
+  asking = { bubble, question, sent: false };
+
+  $("#ask-q").textContent = question;
+  const box = $("#ask-opts");
+  box.innerHTML = "";
+  (options || []).forEach(option => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ask-opt";
+    button.textContent = option;
+    button.addEventListener("click", () => finishAsk(option));
+    box.appendChild(button);
+  });
+  const field = $("#ask-free");
+  field.value = "";
+  openOverlay(askBox);
+  // Gibt es Vorschlaege, liegt der Finger auf dem ersten; sonst tippt man.
+  setTimeout(() => (options?.length ? box.firstElementChild : field).focus(), 40);
+}
+
+async function finishAsk(text, quiet){
+  const open = asking;
+  if (!open || open.sent) return;
+  open.sent = true;
+  asking = null;
+  closeOverlay(askBox);
+
+  // Was gefragt und geantwortet wurde, bleibt im Verlauf stehen -- sonst
+  // versteht man die Antwort spaeter nicht mehr.
+  if (open.bubble?.parentNode){
+    const note = document.createElement("div");
+    note.className = "askcard";
+    note.innerHTML = '<div class="q"></div><div class="given"></div>';
+    note.querySelector(".q").textContent = open.question;
+    note.querySelector(".given").textContent = text ? "→ " + text : "→ (übersprungen)";
+    open.bubble.parentNode.insertBefore(note, open.bubble);
+    scroll();
+  }
+  if (quiet) return;
+  try {
+    await api("/api/answer", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ text }),
+    });
+  } catch { toast("Die Antwort kam nicht an — läuft Aquaticy noch?"); }
+  input.focus();
+}
+
+$("#ask-send").addEventListener("click", () => finishAsk($("#ask-free").value.trim()));
+$("#ask-skip").addEventListener("click", () => finishAsk(""));
+$("#ask-free").addEventListener("keydown", (e) => {
+  if (e.key === "Enter"){ e.preventDefault(); finishAsk(e.target.value.trim()); }
+});
+// Escape heisst hier "ueberspringen" -- die Frage verschwindet nicht einfach,
+// sie wird beantwortet, nur eben ohne Inhalt.
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && asking) finishAsk("");
+});
+// Nur daneben tippen soll die Frage NICHT wegwischen: zu leicht passiert,
+// und die Anfrage haengt danach an einer Antwort, die man nie gegeben hat.
+
+/* ---------- Slash-Befehle ---------- */
+async function runCommand(line){
+  setBusy(true);
+  addUser(line); input.value = ""; input.style.height = "auto";
+  const { steps, bubble } = addBot();
+  steps.remove();
+  try {
+    const res = await api("/api/command", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ line })
+    });
+    const data = await res.json();
+    bubble.innerHTML = md(data.ok ? (data.text || "") : ("**Fehler:** " + data.error));
+    if (data.clear){ thread.innerHTML = ""; }
+    // Kein `await`: die Kopfzeile zeichnet sich gleich von selbst neu, und
+    // nichts hier unten wartet auf sie.
+    if (data.reload){ refreshHeader(); }
+  } catch (err){
+    bubble.innerHTML = md("**Fehler:** " + String(err));
+  }
+  scroll();
+  setBusy(false); input.focus();
+}
+
+/* ---------- Senden ---------- */
+async function ask(text){
+  if (busy) return;
+  if (!text.trim() && !pending.length) return;
+  // /image und "/max <Frage>" recherchieren und laufen deshalb ueber den
+  // normalen Weg mit Live-Anzeige; alle anderen Befehle antworten sofort.
+  // "/max" ohne Frage ist keine Recherche, sondern eine Frage an Aquaticy, was
+  // der Befehl tut -- die beantwortet der Befehlsweg.
+  const eingabe = text.trim();
+  if (eingabe.startsWith("/") && !/^\/image\b/i.test(eingabe)
+      && !/^\/max\s+\S/i.test(eingabe)){
+    return runCommand(eingabe);
+  }
+  setBusy(true);
+  const attachments = pending;
+  pending = []; drawFiles();
+  addUser(text, attachments); input.value = ""; input.style.height = "auto";
+  noteChat(text.trim() || "Angehängte Datei");
+  const { steps, bubble } = addBot();
+  await verfolge(() => {
+    running = new AbortController();
+    return api("/api/chat", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        message: text, attachments, mode, structured, recheck, effort, sandbox,
+        // Im Code-Modus gibt es den Web-Schalter nicht -- also darf er dort
+        // auch nichts abschalten. Sonst haette ein "aus" aus dem
+        // Standardmodus das Nachschlagen still mitgenommen, ohne dass ein
+        // Schalter dafuer sichtbar waere.
+        online: mode === "code" ? true : online,
+      }),
+      signal: running.signal,
+    });
+  }, steps, bubble, text);
+}
+
+// Eine laufende Anfrage mitlesen -- egal, ob sie gerade gestellt wurde oder
+// ob wir uns an eine anhaengen, die schon laeuft. `hole` liefert die Antwort
+// des Servers; alles danach ist fuer beide Wege dasselbe.
+async function verfolge(hole, steps, bubble, text){
+  // `thoughtLine` gehoert hier hoch und nicht zu seiner Funktion: die
+  // Leseschleife ruft handle() auf, bevor eine spaetere let-Zeile ueberhaupt
+  // ausgefuehrt waere -- das gaebe einen ReferenceError. Und sie traegt
+  // bewusst keinen Schalternamen: eine gleichnamige lokale Variable verdeckte
+  // hier einmal den Schalter, der dann als `null` beim Server ankam.
+  let answer = "", reading = null, readCount = 0, planning = null, thoughtLine = null;
+
+  try {
+    const res = await hole();
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    while (true){
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const parts = buf.split("\n\n"); buf = parts.pop();
+      for (const part of parts){
+        // Zeilen mit Doppelpunkt am Anfang sind Kommentare -- damit haelt
+        // der Server die Leitung warm, waehrend das Modell nachdenkt.
+        if (part.trimStart().startsWith(":")) continue;
+        const line = part.replace(/^data: ?/, "").trim();
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        handle(ev);
+      }
+    }
+  } catch (err){
+    // Ein abgerissener Strom ist etwas anderes als ein Programmfehler: die
+    // Recherche laeuft auf dem Rechner weiter, nur die Leitung ist weg.
+    // "TypeError: network error" waere hier eine nutzlose Auskunft.
+    if (err && err.name === "AbortError"){
+      step(steps, "[Abgebrochen]", answer ? "Oben steht, was bis dahin da war." : "");
+      if (answer) bubble.innerHTML = md(answer);
+      setBusy(false); input.focus();
+      return;
+    }
+    const broken = err instanceof TypeError
+      || /network|fetch|load failed|abgebrochen/i.test(String(err.message || err));
+    if (broken){
+      step(steps, "[Verbindung]",
+        answer
+          ? "Die Verbindung ist mittendrin abgerissen. Oben steht, was bis dahin ankam."
+          : "Keine Verbindung zu Aquaticy. Läuft das Programm noch? "
+            + "Bei einem Modell aus der Cloud kann die erste Antwort etwas dauern.",
+        "warn");
+    } else {
+      step(steps, "[Fehler]", String(err), "err");
+    }
+    if (answer) bubble.innerHTML = md(answer);
+  }
+
+  // Denkschritte kommen tokenweise. Jedes Token als eigene Zeile waere
+  // unlesbar -- sie wachsen deshalb in derselben.
+  function thought(box, text){
+    if (!thoughtLine) thoughtLine = trace(box, "[Denkt]", "", "think");
+    thoughtLine.querySelector(".txt").textContent += text;
+    // Nur mitscrollen, wenn der Block auch zu sehen ist -- sonst springt
+    // die Ansicht wegen etwas, das gar nicht dasteht.
+    if (denken || document.body.classList.contains("tracing")) scroll();
+  }
+
+  function handle(ev){
+    if (ev.type !== "thought") thoughtLine = null;
+    switch (ev.type){
+      case "planning":
+        planning = step(steps, "[Plane]", "sichte die Anfrage …"); break;
+      case "triage":
+        // Ohne Recherche bleibt sonst ein "[Plane] …" ohne Ausgang stehen.
+        if (ev.decision === "chat"){
+          if (planning) planning.remove();
+          planning = null;
+        } else if (planning){
+          planning.querySelector(".txt").textContent =
+            "Recherche" + (ev.seconds ? ` (${ev.seconds}s)` : "");
+        }
+        break;
+      case "recheck":
+        step(steps, "[Gegenprobe]",
+          `andere Quellen als die ${ev.sources} gelesenen`); break;
+      case "recheck_done":
+        step(steps, "[Gegenprobe]", ev.changed ? "abgeschlossen" : "nichts Neues");
+        // Und dasselbe noch einmal an der Antwort selbst: die Zwischenschritte
+        // sieht nur, wer sie aufklappt -- dass gegengeprueft wurde, gehoert
+        // aber zur Antwort dazu.
+        mark(bubble, ev.changed
+          ? "Gegengeprüft — mit anderen Quellen, Änderungen sind eingearbeitet"
+          : "Gegengeprüft — andere Quellen, nichts widersprochen");
+        break;
+      case "subagents":
+        step(steps, "[Teile]", `${ev.tasks.length} Teilfragen`);
+        ev.tasks.forEach((t, i) => {
+          const s = document.createElement("div");
+          s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
+          // Der Blickwinkel steht dahinter, wenn es einen gibt: wer nach
+          // Preisen fragt, bekommt den Agenten, der auf Zahlen achtet.
+          const rolle = ROLLEN[(ev.roles || [])[i]] || "";
+          s.querySelector(".sub").textContent = rolle ? `${t}  · ${rolle}` : t;
+          steps.appendChild(s);
+        }); break;
+      case "master_plan":
+        // Der Master hat die Einheit aufgestellt. Das ist die erste Zeile,
+        // die im Pro-Modus etwas ueber die Groesse der Recherche sagt.
+        step(steps, "[Master]",
+          `${ev.agents} ${ev.agents === 1 ? "Agent" : "Agenten"}`
+          + (ev.strong ? `, davon ${ev.strong} auf dem starken Modell` : "")
+          + (ev.forced ? " (volle Mannschaft)" : "")
+          + (ev.plan ? ` — ${ev.plan}` : ""),
+          ev.fallback ? "warn" : "");
+        break;
+      case "master_review":
+        step(steps, "[Master]", ev.verdict === "gut"
+          ? "die Rückmeldungen tragen"
+          : `Lücken: ${(ev.missing || []).join(" · ") || "es fehlt etwas"}`,
+          ev.verdict === "gut" ? "" : "warn");
+        break;
+      case "master_retry":
+        // Genau dafuer gibt es den Master: was nichts hergab, geht noch
+        // einmal los -- und man sieht es, statt es zu vermissen.
+        step(steps, "[Nachrunde]",
+          `${ev.tasks.length} ${ev.tasks.length === 1 ? "Auftrag" : "Aufträge"} noch einmal`);
+        (ev.tasks || []).forEach(t => {
+          const s = document.createElement("div");
+          s.className = "step"; s.innerHTML = `<span class="sub"></span>`;
+          s.querySelector(".sub").textContent = t; steps.appendChild(s);
+        });
+        break;
+      case "places":
+        step(steps, "[Karte]", `${ev.what}${ev.where ? " in " + ev.where : ""}`); break;
+      case "places_done":
+        step(steps, "[Karte]", `${ev.hits} ${ev.hits === 1 ? "Ort" : "Orte"}`); break;
+      case "note":
+        step(steps, "[Hinweis]", ev.text, "warn"); break;
+      case "checkers":
+        step(steps, "[Prüfer]",
+          `${ev.count} prüfen mit, während die anderen noch suchen`); break;
+      case "check":
+        step(steps, "[Prüfer]", "prüft: " + ev.task); break;
+      case "check_done":
+        step(steps, "[Prüfer]", `${ev.task} — ${URTEILE[ev.verdict] || "geprüft"}`,
+             ev.verdict === "ABWEICHUNG" ? "warn" : ""); break;
+      case "checks_done":
+        // Wie bei der Gegenprobe im Standardmodus: dass geprueft wurde,
+        // gehoert an die Antwort und nicht nur in die Zwischenschritte.
+        mark(bubble, ev.deviations
+          ? `Gegengeprüft — ${ev.checked} Teilergebnisse, ${ev.deviations} mit abweichenden Angaben`
+          : `Gegengeprüft — ${ev.checked} Teilergebnisse auf anderen Quellen, nichts widersprochen`);
+        break;
+      case "vm_start":
+        step(steps, "[Werkstatt]", `wird gestartet (${ev.runtime})`); break;
+      case "vm_run":
+        step(steps, "[Werkstatt]", ev.command); break;
+      case "vm_write":
+        step(steps, "[Werkstatt]", `schreibt ${ev.path}`); break;
+      case "vm_done":
+        step(steps, "[Werkstatt]", ev.exit_code === 0
+          ? `lief durch (${ev.seconds}s)`
+          : `Rückgabewert ${ev.exit_code} (${ev.seconds}s)`,
+          ev.exit_code === 0 ? "" : "warn"); break;
+      case "vm_stop":
+        step(steps, "[Werkstatt]", `abgeräumt — ${ev.reason}`); break;
+      case "code_model":
+        // Im Code- wie im Pro-Modus zaehlt das staerkste Modell, nicht das
+        // eingestellte. Die Marke sagt, aus welchem der beiden Gruende --
+        // "[Code]" ueber einer Recherche waere eine falsche Auskunft.
+        step(steps, mode === "pro" ? "[Pro]" : "[Code]",
+             `stärkstes Modell: ${ev.model}`); break;
+      case "subagents_empty":
+        // Die Vorrecherche kam mit leeren Haenden zurueck. Das wandert
+        // bewusst NICHT in den Kontext -- sonst schriebe das Modell eine
+        // Erklaerung darueber statt einer Antwort.
+        step(steps, "[Vorab]", "nichts gefunden — ich mache selbst weiter",
+             "warn"); break;
+      case "subagent_done":
+        step(steps, "[Fertig]", ev.task + (ev.error ? "  (fehlgeschlagen)" : ""),
+             ev.error ? "warn" : ""); break;
+      case "waiting": step(steps, "[Warte]", ev.reason); break;
+      case "upload": step(steps, "[Datei]", `${ev.name} (${prettySize(ev.bytes)})`); break;
+      case "ask": openAsk(bubble, ev.question, ev.options || []); break;
+      case "image": step(steps, "[Bild]", ev.path); break;
+      case "image_done": step(steps, "[Bild]", "beschrieben"); break;
+      case "memory_read": step(steps, "[Speicher]", ev.query); break;
+      case "memory_save": step(steps, "[Merke]", ev.text); break;
+      case "lan_scan": step(steps, "[Netz]", `${ev.subnet} …`); break;
+      case "lan_done": step(steps, "[Netz]",
+        `${ev.found} ${ev.found === 1 ? "Gerät" : "Geräte"} erreichbar`); break;
+      case "lan_check": step(steps, "[Netz]", ev.host); break;
+      case "setting": step(steps, "[Stelle um]", `${ev.label}: ${ev.value}`); break;
+      case "setting_done": break;   // die Antwort sagt es ohnehin
+      case "appearance":
+        // Aquaticy stellt das Aussehen um, weil jemand darum gebeten hat.
+        if (ev.theme) setTheme(ev.theme);
+        if (ev.palette !== undefined) setPalette(ev.palette);
+        break;
+      case "storage": step(steps, "[Lager]", `${ev.action} ${ev.detail || ""}`.trim()); break;
+      case "storage_done": step(steps, "[Lager]", ev.action
+        || `${ev.found} ${ev.found === 1 ? "Eintrag" : "Einträge"}`); break;
+      case "calendar": step(steps, "[Termine]", ev.query || `${ev.days || 7} Tage`); break;
+      case "calendar_done": step(steps, "[Termine]",
+        `${ev.found} ${ev.found === 1 ? "Termin" : "Termine"}`); break;
+      case "mail": step(steps, "[Mail]", ev.query); break;
+      case "mail_done": step(steps, "[Mail]",
+        `${ev.found} ${ev.found === 1 ? "Nachricht" : "Nachrichten"}`); break;
+      case "ha_read": step(steps, "[Haus]", ev.search); break;
+      case "ha_call": step(steps, "[Haus]",
+        `${ev.domain}.${ev.service} → ${ev.entity_id || ev.domain}`, "warn"); break;
+      case "search":
+        step(steps, "[Suche]", ev.query);
+        if ((ev.queries || []).length > 1){
+          trace(steps, "[Anfragen]", ev.queries.map((q, i) => `${i + 1}. ${q}`).join("\n"));
+        }
+        break;
+      case "search_done":
+        trace(steps, "[Treffer]", `${ev.hits} nach dem Zusammenführen`); break;
+      case "thought": thought(steps, ev.text); break;
+      case "action":
+        trace(steps, "[Aufruf]", ev.tool + " " + JSON.stringify(ev.arguments || {})); break;
+      case "action_done":
+        trace(steps, "[Zurueck]", ev.result || ""); break;
+      case "fetch":
+        readCount++;
+        if (!reading) reading = step(steps, "[Lese]", "");
+        reading.querySelector(".txt").textContent = `${readCount} Seiten …`; break;
+      case "skip":
+        if (reading) reading.className = "step warn";
+        step(steps, "[Skip]", `${ev.url} — ${ev.reason}`, "warn"); break;
+      case "calculate": step(steps, "[Rechne]", ev.expression); break;
+      case "remember": step(steps, "[Merke]", ev.text); break;
+      case "fallback": step(steps, "[Ausweich]", `${ev.source} → ${ev.target}`, "warn"); break;
+      case "retry": step(steps, "[Neu]", `Versuch ${ev.attempt}: ${ev.reason}`, "warn"); break;
+      case "error": step(steps, "[Fehler]", ev.message, "err"); break;
+      case "chunk":
+        answer += ev.text;
+        bubble.innerHTML = md(answer) + '<span class="cursor"></span>'; scroll(); break;
+      // Aquaticy hat gemerkt, dass seine Antwort nur eine Frage war, und setzt
+      // neu an. Was schon dasteht, ist damit hinfaellig -- bliebe es stehen,
+      // klebte die Frage ueber der Antwort, die gleich kommt.
+      case "answer_reset":
+        answer = "";
+        bubble.innerHTML = '<span class="cursor"></span>';
+        break;
+      case "done":
+        bubble.innerHTML = md(answer || "(keine Antwort)");
+        answerTools(bubble, answer, text);
+        scroll(); loadRecents(); break;
+    }
+  }
+  setBusy(false); input.focus();
+}
+
+// Zurueck auf der Seite, waehrend Aquaticy noch arbeitet.
+//
+// Frueher lebte eine Anfrage in ihrer Verbindung: wer die Seite verliess,
+// das Handy sperrte oder kurz in eine andere App wechselte, riss die Leitung
+// ab -- und kam vor einen leeren Chat zurueck, die Frage musste neu gestellt
+// werden. Der Lauf liegt jetzt auf dem Server; hier haengen wir uns wieder
+// an und lassen den ganzen Verlauf ab Ereignis 0 nachwachsen, als waere man
+// nie weg gewesen.
+async function wiederAufnehmen(){
+  let stand;
+  try {
+    const res = await api("/api/runstate");
+    if (!res.ok) return;
+    stand = await res.json();
+  } catch { return; }
+  if (!stand || !stand.resume || busy) return;
+
+  addUser(stand.question || "…", []);
+  const { steps, bubble } = addBot();
+  step(steps, "[Weiter]", stand.running
+    ? "Die Anfrage lief weiter, während du weg warst."
+    : "Die Anfrage ist fertig geworden, während du weg warst.");
+  setBusy(true);
+  await verfolge(() => {
+    running = new AbortController();
+    return api("/api/run?since=0", { signal: running.signal });
+  }, steps, bubble, stand.question || "");
+}
+
+/* ---------- Eingabe ---------- */
+input.addEventListener("input", () => {
+  input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight,200) + "px";
+});
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); ask(input.value); }
+});
+send.addEventListener("click", () => {
+  // Der Pfeil schnellt kurz nach oben -- die Frage ist weg.
+  send.classList.remove("sent");
+  void send.offsetWidth;          // erzwingt den Neustart der Animation
+  send.classList.add("sent");
+  ask(input.value);
+});
+// Kopieren am Codeblock. Ein Zuhoerer fuer alle Bloecke, auch fuer die, die
+// erst noch kommen -- die Antworten wachsen ja waehrend des Schreibens.
+thread.addEventListener("click", async (e) => {
+  const knopf = e.target.closest(".code-head .copy");
+  if (!knopf) return;
+  const code = knopf.closest(".codeblock")?.querySelector("code");
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code.textContent || "");
+    knopf.textContent = "Kopiert";
+    setTimeout(() => { knopf.textContent = "Kopieren"; }, 1600);
+  } catch {
+    toast("Kopieren ging nicht — der Browser lässt es hier nicht zu.");
+  }
+});
+
+document.querySelectorAll(".chip").forEach(c =>
+  c.addEventListener("click", () => {
+    input.value = c.textContent; input.focus();
+    input.dispatchEvent(new Event("input"));
+  }));
+
+/* ---------- Seitenleiste ---------- */
+const narrow = () => window.matchMedia("(max-width:900px)").matches;
+// Auf dem Handy liegt die Leiste ueber dem Chat -- offen waere sie im Weg.
+if (narrow()) document.body.classList.add("collapsed");
+$("#btn-side").addEventListener("click", () => document.body.classList.toggle("collapsed"));
+// Tippt jemand neben die offene Leiste, geht sie wieder zu.
+$(".pane").addEventListener("click", (e) => {
+  if (narrow() && !document.body.classList.contains("collapsed")
+      && e.target.closest(".pane") && !e.target.closest("aside")){
+    document.body.classList.add("collapsed");
+  }
+}, true);
+// Einen neuen Chat anfangen. Steht als eigene Funktion da, weil es zwei
+// Wege dorthin gibt: den Knopf und den Wechsel der Arbeitsweise.
+async function neuerChat({ leiste = true } = {}){
+  const res = await api("/api/clear", { method:"POST" });
+  try { currentChat = (await res.json()).current || ""; } catch {}
+  thread.innerHTML = "";
+  document.body.classList.add("start");
+  greet();
+  loadRecents();
+  if (leiste && narrow()) document.body.classList.add("collapsed");
+  input.value = ""; input.style.height = "auto"; input.focus();
+}
+$("#btn-new").addEventListener("click", () => neuerChat());
+$("#btn-notes").addEventListener("click", () => {
+  if (narrow()) document.body.classList.add("collapsed");
+  ask("/notes");
+});
+/* ---------- Erscheinungsbild ---------- */
+// Zwei Dinge, die unabhaengig voneinander sind: wie hell es ist und in
+// welchen Farben. Beides steht als Attribut am <html>, den Rest erledigen
+// die Variablen im Stilblock -- kein Bauteil kennt eine feste Farbe.
+// Die Vorschaufarben hier sind bewusst dieselben wie im CSS: sie zeigen
+// Leiste, Flaeche, Akzent und Schrift eines Schemas.
+const PALETTES = [
+  { id:"",            name:"Standard",    why:"die jetzigen Farben",
+    light:["#faf9f5","#f5f4ee","#3d7d55","#26251f"],
+    dark: ["#232320","#1e1e1b","#7cb894","#f2f1ea"] },
+  { id:"nord",        name:"Nord",        why:"kühles Blau",
+    light:["#eceff4","#e5e9f0","#5e81ac","#2e3440"],
+    dark: ["#2e3440","#272c36","#88c0d0","#eceff4"] },
+  { id:"catppuccin",  name:"Catppuccin",  why:"sanftes Violett",
+    light:["#eff1f5","#e6e9ef","#8839ef","#4c4f69"],
+    dark: ["#1e1e2e","#181825","#cba6f7","#cdd6f4"] },
+  { id:"gruvbox",     name:"Gruvbox",     why:"warmes Retro",
+    light:["#fbf1c7","#f2e5bc","#af3a03","#3c3836"],
+    dark: ["#282828","#1d2021","#fe8019","#fbf1c7"] },
+  { id:"tokyonight",  name:"Tokyo Night", why:"nächtliches Blau",
+    light:["#e1e2e7","#d9dae3","#2e7de9","#343b58"],
+    dark: ["#1a1b26","#16161e","#7aa2f7","#c0caf5"] },
+  { id:"solarized",   name:"Solarized",   why:"gedämpft, augenschonend",
+    light:["#fdf6e3","#eee8d5","#268bd2","#073642"],
+    dark: ["#002b36","#00212b","#2aa198","#eee8d5"] },
+  { id:"dracula",     name:"Dracula",     why:"kräftiges Lila",
+    light:["#fffbeb","#f7f2e0","#644ac9","#1f1f1f"],
+    dark: ["#282a36","#21222c","#bd93f9","#f8f8f2"] },
+  { id:"rosepine",    name:"Rosé Pine",   why:"weiches Rosé",
+    light:["#faf4ed","#f6ede4","#907aa9","#575279"],
+    dark: ["#191724","#14121f","#c4a7e7","#e0def4"] },
+];
+const THEMES = ["light", "dark", "system"];
+let themeMode = "system", palette = "";
+
+function darkNow(){
+  if (themeMode !== "system") return themeMode === "dark";
+  try { return matchMedia("(prefers-color-scheme: dark)").matches; } catch { return false; }
+}
+let themingTimer = null;
+function applyAppearance(){
+  const root = document.documentElement;
+  // Nur fuer den Moment des Wechsels: die Farben blenden ineinander.
+  root.classList.add("theming");
+  clearTimeout(themingTimer);
+  themingTimer = setTimeout(() => root.classList.remove("theming"), 340);
+  root.setAttribute("data-theme", darkNow() ? "dark" : "light");
+  if (palette) root.setAttribute("data-palette", palette);
+  else root.removeAttribute("data-palette");
+}
+// setTheme nimmt auch, was Aquaticy im Gespraech schickt ("light"/"dark").
+function setTheme(theme, { merken = true } = {}){
+  themeMode = THEMES.includes(theme) ? theme : "light";
+  if (merken) merkeZustand({ theme: themeMode });
+  applyAppearance(); paintAppearance();
+}
+function setPalette(id, { merken = true } = {}){
+  palette = PALETTES.some(entry => entry.id === id) ? id : "";
+  if (merken) merkeZustand({ palette });
+  applyAppearance(); paintAppearance();
+}
+function paintAppearance(){
+  document.querySelectorAll("#tmodes .tmode").forEach(button =>
+    button.classList.toggle("on", button.dataset.tmode === themeMode));
+  const dark = darkNow();
+  const box = $("#palettes");
+  box.innerHTML = "";
+  for (const entry of PALETTES){
+    const [bg, bar, accent, text] = dark ? entry.dark : entry.light;
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "pal" + (entry.id === palette ? " on" : "");
+    card.dataset.palette = entry.id;
+    card.setAttribute("aria-pressed", entry.id === palette ? "true" : "false");
+    card.innerHTML =
+      `<span class="peek" style="background:${bg}">` +
+        `<span class="bar" style="background:${bar}"></span>` +
+        `<span class="body">` +
+          `<span class="row2"><span class="dot" style="background:${accent}"></span>` +
+            `<span class="line" style="background:${text}"></span></span>` +
+          `<span class="line" style="background:${text}"></span>` +
+        `</span></span>` +
+      `<span class="pname"></span><span class="pwhy"></span>`;
+    card.querySelector(".pname").textContent = entry.name;
+    card.querySelector(".pwhy").textContent = entry.why;
+    card.addEventListener("click", () => setPalette(entry.id));
+    box.appendChild(card);
+  }
+  stagger(box.querySelectorAll(".pal"), 24);
+}
+document.querySelectorAll("#tmodes .tmode").forEach(button =>
+  button.addEventListener("click", () => setTheme(button.dataset.tmode)));
+$("#theme-reset").addEventListener("click", () => { setTheme("system"); setPalette(""); });
+const themeBox = $("#themebox");
+function closeTheme(){ closeOverlay(themeBox); }
+$("#btn-theme").addEventListener("click", () => {
+  if (narrow()) document.body.classList.add("collapsed");
+  paintAppearance();
+  openOverlay(themeBox);
+});
+$("#theme-close").addEventListener("click", closeTheme);
+themeBox.addEventListener("click", (e) => { if (e.target === themeBox) closeTheme(); });
+
+// Auch das Erscheinungsbild kommt vom Server. Es steht bereits als
+// Attribut am <html> -- das hier holt nur die Skriptvariablen nach, damit
+// das Fenster den richtigen Eintrag hervorhebt.
+if (THEMES.includes(START.theme)) themeMode = START.theme;
+palette = typeof START.palette === "string" ? START.palette : "";
+if (!PALETTES.some(entry => entry.id === palette)) palette = "";
+applyAppearance();
+// Wer dem System folgt, folgt ihm auch, wenn es abends umschaltet.
+try {
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (themeMode === "system") { applyAppearance(); paintAppearance(); }
+  });
+} catch {}
+
+let currentChat = "";
+
+// Ein Eintrag ist ein Chat, keine einzelne Frage. Benannt nach der ersten
+// Frage darin -- oder nach dem, was der Nutzer selbst vergeben hat.
+let chats = [];
+
+function chatGroup(touched){
+  const day = 86400;
+  const now = Date.now() / 1000;
+  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  const today = midnight.getTime() / 1000;
+  if (touched >= today) return "Heute";
+  if (touched >= today - day) return "Gestern";
+  if (touched >= now - 7 * day) return "Letzte 7 Tage";
+  if (touched >= now - 30 * day) return "Letzte 30 Tage";
+  return "Älter";
+}
+
+// Woraus die Liste zuletzt gezeichnet wurde. Steht hier oben, nicht unter
+// der Funktion: eine Deklaration mit let gilt vor ihrer Zeile als nicht
+// vorhanden, und die Funktion darueber wuerde darueber stolpern.
+let drawnChats = "";
+
+// Wonach gerade gesucht wird. Leer = die gewohnte Liste.
+let chatQuery = "";
+
+// Den gesuchten Teil hervorheben, ohne dabei fremden Text als HTML zu
+// deuten: es wird immer nur Text eingesetzt, nie Markup.
+function markiere(ziel, text, needle){
+  ziel.textContent = "";
+  const stelle = needle ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+  if (stelle < 0){ ziel.textContent = text; return; }
+  ziel.append(text.slice(0, stelle));
+  const treffer = document.createElement("mark");
+  treffer.textContent = text.slice(stelle, stelle + needle.length);
+  ziel.append(treffer, text.slice(stelle + needle.length));
+}
+
+function drawRecents(){
+  const box = $("#recents");
+  box.innerHTML = "";
+  if (chatQuery && !chats.length){
+    const leer = document.createElement("div");
+    leer.className = "recents-leer";
+    leer.textContent = `Nichts gefunden zu „${chatQuery}".`;
+    box.appendChild(leer);
+    drawnChats = "leer:" + chatQuery;
+    return;
+  }
+  // Ueberschriften nur, wenn es wirklich mehrere Tage gibt. Sonst stuende
+  // unter "Letzte Chats" gleich noch ein "Heute" -- zwei Ueberschriften
+  // uebereinander, die dasselbe sagen. Beim Suchen gar keine: die Treffer
+  // sortieren sich nach Fund, nicht nach Tag.
+  const groups = new Set(chats.map(chat => chatGroup(chat.touched || 0)));
+  const showGroups = !chatQuery && groups.size > 1;
+  let group = "";
+  for (const chat of chats){
+    const label = (chat.title || "Ohne Titel").replace(/\s+/g, " ").trim();
+    const where = chatGroup(chat.touched || 0);
+    if (showGroups && where !== group){
+      group = where;
+      const head = document.createElement("div");
+      head.className = "recent-group";
+      head.textContent = where;
+      box.appendChild(head);
+    }
+    const row = document.createElement("div");
+    row.className = "recent"
+      + (chat.session_id === currentChat ? " active" : "")
+      + (chat.unread ? " neu" : "");
+    row.innerHTML = '<span class="name"></span>'
+      + '<button class="more" title="Mehr" aria-label="Mehr">⋯</button>';
+    const name = row.querySelector(".name");
+    markiere(name, label, chatQuery);
+    name.title = chat.turns > 1 ? `${label}  (${chat.turns} Fragen)` : label;
+    if (chatQuery && chat.snippet){
+      row.classList.add("fund");
+      const stelle = document.createElement("span");
+      stelle.className = "fund-text";
+      markiere(stelle, chat.snippet, chatQuery);
+      name.appendChild(stelle);
+    }
+    name.addEventListener("click", () => openChat(chat.session_id));
+    row.querySelector(".more").addEventListener("click", (e) => {
+      e.stopPropagation();
+      chatMenu(row, chat);
+    });
+    box.appendChild(row);
+  }
+  const signature = chats.map(chat => `${chat.session_id}:${chat.title}`).join("|");
+  box.classList.toggle("fresh", signature !== drawnChats);
+  drawnChats = signature;
+  stagger(box.querySelectorAll(".recent"));
+}
+
+async function loadRecents(){
+  const gesucht = chatQuery;
+  try {
+    const pfad = gesucht ? `/api/chats?q=${encodeURIComponent(gesucht)}` : "/api/chats";
+    const data = await (await api(pfad)).json();
+    // Wer weitergetippt hat, waehrend die Antwort unterwegs war, bekommt
+    // sonst das Ergebnis von vorgestern zurueck.
+    if (chatQuery !== gesucht) return;
+    currentChat = data.current || "";
+    chats = data.chats || [];
+    // Steht irgendwo etwas Ungelesenes, traegt auch der Knopf zur Leiste
+    // einen Punkt: auf dem Handy ist sie zu, dort saehe man das Leuchten sonst
+    // nie.
+    document.body.classList.toggle("hat-neues", chats.some(chat => chat.unread));
+    drawRecents();
+  } catch {}
+}
+
+// Ein Auftrag stellt seine Frage von selbst -- die Antwort soll auffallen,
+// ohne dass jemand die Seite neu laedt. Einmal pro Minute nachsehen reicht
+// dafuer und kostet eine Abfrage, die ohnehin nur in die eigene Datenbank
+// geht. Waehrend einer laufenden Anfrage nicht: dann wird die Liste sowieso
+// gleich neu geladen.
+setInterval(() => { if (!busy && !chatQuery) loadRecents(); }, 60_000);
+
+// Erst tippen lassen, dann fragen: bei jedem Tastendruck eine Anfrage waere
+// eine Anfrage je Buchstabe.
+let sucheTimer = null;
+const sucheFeld = $("#chatsuche");
+function sucheJetzt(){
+  const wort = sucheFeld.value.trim();
+  if (wort === chatQuery) return;
+  chatQuery = wort;
+  $("#suche-weg").hidden = !wort;
+  loadRecents();
+}
+sucheFeld.addEventListener("input", () => {
+  clearTimeout(sucheTimer);
+  sucheTimer = setTimeout(sucheJetzt, 220);
+});
+sucheFeld.addEventListener("keydown", (e) => {
+  if (e.key === "Enter"){ e.preventDefault(); clearTimeout(sucheTimer); sucheJetzt(); }
+  if (e.key === "Escape"){ e.preventDefault(); sucheEnde(); }
+});
+function sucheEnde(){
+  clearTimeout(sucheTimer);
+  sucheFeld.value = "";
+  if (!chatQuery) return;
+  chatQuery = "";
+  $("#suche-weg").hidden = true;
+  loadRecents();
+}
+$("#suche-weg").addEventListener("click", sucheEnde);
+
+// Ein neuer Chat soll in dem Moment in der Liste stehen, in dem man ihn
+// beginnt -- nicht erst, wenn die Antwort fertig ist. Bis dahin waeren es
+// bei einer laengeren Recherche Minuten, in denen die Leiste leer bleibt.
+function noteChat(question){
+  // Waehrend gesucht wird, zeigt die Leiste Treffer. Ein neuer Chat, der
+  // nicht dazu passt, haette darin nichts zu suchen.
+  if (chatQuery) return;
+  const known = chats.find(chat => chat.session_id === currentChat);
+  if (known){ known.turns += 1; known.touched = Date.now() / 1000; }
+  else {
+    chats.unshift({
+      session_id: currentChat || "neu",
+      title: question, turns: 1, touched: Date.now() / 1000,
+    });
+  }
+  chats.sort((a, b) => (b.touched || 0) - (a.touched || 0));
+  drawRecents();
+}
+
+// Kurze Meldung am unteren Rand. Eine Aktion, die stillschweigend nichts
+// tut, ist schlimmer als eine, die sagt woran sie gescheitert ist.
+let toastTimer = null;
+function toast(text){
+  let box = $("#toast");
+  if (!box){
+    box = document.createElement("div");
+    box.id = "toast";
+    document.body.appendChild(box);
+  }
+  box.textContent = text;
+  box.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove("on"), 4000);
+}
+
+/* ---------- Umbenennen und Löschen ---------- */
+let openMenu = null;
+
+function closeChatMenu(){
+  openMenu?.remove();
+  openMenu = null;
+  document.querySelectorAll(".recent.menu-open")
+    .forEach(row => row.classList.remove("menu-open"));
+}
+addEventListener("click", closeChatMenu);
+addEventListener("keydown", (e) => { if (e.key === "Escape") closeChatMenu(); });
+
+function chatMenu(row, chat){
+  const wasOpen = openMenu && openMenu.dataset.chat === chat.session_id;
+  closeChatMenu();
+  if (wasOpen) return;
+  row.classList.add("menu-open");
+  const menu = document.createElement("div");
+  menu.className = "chatmenu";
+  menu.dataset.chat = chat.session_id;
+  menu.innerHTML = '<button data-do="rename">Umbenennen</button>'
+    + '<button data-do="export">Exportieren</button>'
+    + '<button class="danger" data-do="delete">Löschen</button>';
+  const box = row.getBoundingClientRect();
+  menu.style.left = Math.min(box.left + 12, innerWidth - 170) + "px";
+  menu.style.top = (box.bottom + 4) + "px";
+  menu.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const what = e.target.dataset.do;
+    closeChatMenu();
+    if (what === "rename") renameChat(row, chat);
+    if (what === "export") exportChat(chat);
+    if (what === "delete") deleteChat(chat);
+  });
+  document.body.appendChild(menu);
+  openMenu = menu;
+}
+
+async function chatEdit(body){
+  try {
+    return await (await api("/api/chat-edit", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body),
+    })).json();
+  } catch { return null; }
+}
+
+function renameChat(row, chat){
+  const name = row.querySelector(".name");
+  const field = document.createElement("input");
+  field.className = "rename";
+  field.value = chat.title || "";
+  field.maxLength = 120;
+  row.replaceChild(field, name);
+  field.focus(); field.select();
+
+  let done = false;
+  const finish = async (keep) => {
+    if (done) return;
+    done = true;
+    const title = field.value.trim();
+    if (keep && title !== (chat.title || "")){
+      const data = await chatEdit({
+        action: "rename", session_id: chat.session_id, title,
+      });
+      // Leerer Name heisst: zurueck zur ersten Frage. Was dann gilt, weiss
+      // nur der Server -- deshalb neu laden statt zu raten.
+      if (data && data.ok && title) chat.title = data.title;
+      else if (data && !data.ok) toast(data.error || "Umbenennen hat nicht geklappt.");
+      else { await loadRecents(); return; }
+    }
+    drawRecents();
+  };
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){ e.preventDefault(); finish(true); }
+    if (e.key === "Escape"){ e.preventDefault(); finish(false); }
+  });
+  field.addEventListener("blur", () => finish(true));
+  field.addEventListener("click", (e) => e.stopPropagation());
+}
+
+// Einen ganzen Chat als Markdown herunterladen. Der Server setzt ihn
+// zusammen -- so laesst sich auch ein Chat mitnehmen, der gerade nicht
+// offen ist.
+async function exportChat(chat){
+  try {
+    const res = await api(
+      `/api/chatexport?session_id=${encodeURIComponent(chat.session_id)}`);
+    const data = await res.json();
+    if (!data.markdown){ toast(data.error || "Da war nichts zu exportieren."); return; }
+    downloadText(dateiname(data.title || chat.title) + ".md", data.markdown);
+    toast("Gespeichert.");
+  } catch { toast("Der Export ist nicht durchgekommen."); }
+}
+
+async function deleteChat(chat){
+  const label = (chat.title || "dieser Chat").slice(0, 60);
+  if (!confirm(`„${label}" löschen? Das lässt sich nicht rückgängig machen.`)) return;
+  const data = await chatEdit({ action: "delete", session_id: chat.session_id });
+  if (!data || !data.ok){
+    toast(data?.error || "Löschen hat nicht geklappt.");
+    return;
+  }
+  chats = chats.filter(entry => entry.session_id !== chat.session_id);
+  // War es der offene Chat, faengt der Server einen neuen an -- das Fenster
+  // soll dann nicht weiter einen geloeschten Verlauf zeigen.
+  if (chat.session_id === currentChat){
+    currentChat = "";
+    thread.innerHTML = "";
+    document.body.classList.add("start");   // zurueck zum Begruessungsbild
+    await loadRecents();
+    return;
+  }
+  drawRecents();
+}
+
+async function openChat(sessionId){
+  if (narrow()) document.body.classList.add("collapsed");
+  if (busy || sessionId === currentChat) return;
+  let data;
+  try {
+    const res = await api("/api/open", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    data = await res.json();
+  } catch {
+    toast("Der Chat ließ sich nicht öffnen — läuft Aquaticy noch?");
+    return;
+  }
+  if (!data.ok){ toast(data.error || "Der Chat ließ sich nicht öffnen."); return; }
+  if (!data.turns?.length){ toast("In diesem Chat steht noch nichts."); return; }
+
+  currentChat = sessionId;
+  thread.innerHTML = "";
+  leaveStart();
+  // Den Verlauf so wieder aufbauen, wie er beim Schreiben aussah.
+  // Der zurueckgeholte Chat baut sich gestaffelt auf, statt fertig
+  // dazustehen -- so sieht man, dass er gerade geladen wurde.
+  thread.classList.add("fresh");
+  data.turns.forEach(turn => {
+    addUser(turn.question);
+    const { steps, bubble } = addBot();
+    steps.remove();
+    bubble.innerHTML = md(turn.answer || "");
+    answerTools(bubble, turn.answer || "", turn.question);
+  });
+  stagger(thread.querySelectorAll(".msg"), 30, 8);
+  setTimeout(() => thread.classList.remove("fresh"), 900);
+  loadRecents();
+  input.focus();
+}
+
+/* ---------- Modellauswahl ---------- */
+const modelBox = $("#picker-models");
+let backdrop = null;
+
+// Waehrend der Ausblende ist die Liste zwar noch da, aber schon zu. Ohne
+// diese Unterscheidung schloss ein Klick auf den Knopf in diesen 140 ms die
+// ohnehin schliessende Liste ein zweites Mal, statt sie neu zu oeffnen.
+let pickerClosing = null;
+const pickerOpen = () => !modelBox.hidden && !modelBox.classList.contains("closing");
+
+function closePicker(){
+  if (!pickerOpen()) return;
+  modelBox.classList.add("closing");
+  backdrop?.remove();
+  backdrop = null;
+  pickerClosing = setTimeout(() => {
+    modelBox.hidden = true;
+    modelBox.classList.remove("closing");
+  }, CLOSE_MS);
+}
+
+// Der Kasten haengt unter der Kopfzeile -- und zwar unter ihrer wirklichen
+// Unterkante, nicht unter einer geratenen Zahl. Die Leiste ist auf dem Handy
+// zweizeilig, auf dem Tablet einzeilig und wird laenger, wenn mehr darin
+// steht; jede feste Angabe waere irgendwo falsch. Vorher lag der Kasten
+// sechs Pixel zu hoch: seine abgerundete Oberkante verschwand hinter der
+// Leiste, und auf dem Handy schnitt er den Ortsfilter an.
+function setzePickerHoehe(){
+  const leiste = document.querySelector(".topbar");
+  const flaeche = document.querySelector(".pane");
+  if (!leiste || !flaeche) return;
+  const unten = leiste.getBoundingClientRect().bottom - flaeche.getBoundingClientRect().top;
+  modelBox.style.top = Math.round(unten + 6) + "px";
+}
+addEventListener("resize", () => { if (pickerOpen()) setzePickerHoehe(); });
+
+async function openPicker(){
+  const list = $("#model-list");
+  list.innerHTML = '<div class="picker-foot">Sehe nach …</div>';
+  clearTimeout(pickerClosing);          // eine laufende Ausblende gilt nicht mehr
+  modelBox.classList.remove("closing");
+  modelBox.hidden = false;
+  setzePickerHoehe();
+  backdrop = document.createElement("div");
+  backdrop.className = "backdrop";
+  backdrop.addEventListener("click", closePicker);
+  document.body.appendChild(backdrop);
+
+  // Im Code- und im Pro-Modus zaehlt nicht das eingestellte Modell, sondern
+  // das staerkste erreichbare -- ein schwaches ist genau dort am teuersten.
+  // Also stehen dort auch nur die drei staerksten zur Wahl; alles andere
+  // waere eine Auswahl, die gleich wieder ueberstimmt wird.
+  const nurStarke = mode === "code" || mode === "pro";
+  let models = [];
+  try {
+    // Was "am staerksten" heisst, haengt am Modus: im Code-Modus sind das
+    // die Modelle fuers Programmieren, im Pro-Modus die fuer die Recherche.
+    const zweck = mode === "code" ? "?purpose=code" : "";
+    const daten = await (await api("/api/models" + zweck)).json();
+    models = (nurStarke ? daten.strong : daten.models) || [];
+  } catch { /* Server weg -- die Liste bleibt leer, der Hinweis unten steht */ }
+  $("#picker-head").textContent = mode === "code"
+    ? "Stärkstes Code-Modell wählen"
+    : nurStarke ? "Stärkstes Modell wählen" : "Modell wählen";
+
+  if (!models.length){
+    list.innerHTML = '<div class="picker-foot">Kein Modell gefunden. '
+      + 'Trag unter Einstellungen einen Anbieter samt Schlüssel ein, '
+      + 'oder installiere eins mit <code>aquaticy install-model</code>.</div>';
+    return;
+  }
+  list.innerHTML = "";
+  models.forEach(model => {
+    const item = document.createElement("button");
+    item.className = "pick" + (model.id === currentModel ? " active" : "");
+    item.innerHTML = `<span class="top"><span class="nm"></span><span class="kind"></span></span>
+      <span class="note"></span>`;
+    item.querySelector(".nm").textContent = model.label;
+    item.querySelector(".kind").textContent = model.kind;
+    item.querySelector(".note").textContent = model.note || "";
+    item.title = model.id;
+    item.addEventListener("click", () => chooseModel(model, nurStarke));
+    list.appendChild(item);
+  });
+  stagger(list.querySelectorAll(".pick"), 22);
+}
+
+async function chooseModel(model, alsStarkes){
+  closePicker();
+  $("#model-name").textContent = model.label;
+  // Im Code- und Pro-Modus wird das starke Modell gesetzt, nicht das
+  // allgemeine: sonst haette die Wahl beim naechsten Wechsel in den
+  // Standardmodus alles umgestellt, was man dort eingerichtet hatte.
+  const wunsch = alsStarkes
+    ? { AQUATICY_CODE_MODEL: model.id } : { AQUATICY_MODEL: model.id };
+  const res = await api("/api/config", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(wunsch)
+  });
+  const data = await res.json();
+  if (data.ok){ currentModel = model.id; refreshHeader(); }
+  else alert(data.error || "Das Modell ließ sich nicht umstellen.");
+}
+
+$("#btn-model").addEventListener("click", () => pickerOpen() ? closePicker() : openPicker());
+$("#picker-settings").addEventListener("click", () => {
+  closePicker(); $("#btn-settings").click();
+});
+// Escape schliesst, was gerade oben liegt: erst die Modellliste, dann die
+// Einstellungen. Sonst bleibt das Fenster offen und die Auslastung fragt weiter.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (asking) return;              // die Rueckfrage liegt obenauf
+  if (pickerOpen()) { closePicker(); return; }
+  if (vmBox.classList.contains("open")) { closeOverlay(vmBox); return; }
+  if (memBox.classList.contains("open")) { closeOverlay(memBox); return; }
+  if (themeBox.classList.contains("open")) { closeTheme(); return; }
+  if (overlay.classList.contains("open")) closeSettings();
+});
+
+/* ---------- Einstellungen ---------- */
+const overlay = $("#overlay"), form = $("#settings");
+
+// Das Formular ist lang. Die Marken oben nehmen ihre Namen aus den
+// Abschnitten selbst -- wer unten einen Abschnitt ergaenzt, bekommt die
+// Marke dafuer geschenkt.
+function buildSectionNav(){
+  const nav = $("#secnav"), sections = [...form.querySelectorAll("fieldset")];
+  nav.innerHTML = "";
+  sections.forEach((section, index) => {
+    section.id = section.id || `sec-${index}`;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.textContent = section.querySelector("legend").textContent.trim();
+    chip.dataset.section = section.id;
+    // Von Hand gerechnet statt scrollIntoView: der stehende Kopf ist je nach
+    // Fensterbreite unterschiedlich hoch und verdeckt sonst die Ueberschrift.
+    chip.addEventListener("click", () => {
+      const sheet = form.closest(".sheet"), head = $(".sheet-head");
+      const delta = section.getBoundingClientRect().top - sheet.getBoundingClientRect().top;
+      sheet.scrollTo({ top: sheet.scrollTop + delta - head.offsetHeight - 10,
+                       behavior: "smooth" });
+    });
+    nav.appendChild(chip);
+  });
+  // Die Marke des Abschnitts, den man gerade liest, ist hervorgehoben.
+  const spot = new IntersectionObserver((entries) => {
+    for (const entry of entries){
+      if (!entry.isIntersecting) continue;
+      nav.querySelectorAll("button").forEach(chip =>
+        chip.classList.toggle("on", chip.dataset.section === entry.target.id));
+    }
+  }, { root: form.closest(".sheet"), rootMargin: "-25% 0px -60% 0px" });
+  sections.forEach(section => spot.observe(section));
+}
+buildSectionNav();
+function fill(values){
+  for (const [k, v] of Object.entries(values)){
+    const field = form.elements[k];
+    if (!field) continue;
+    if (field.type === "checkbox") field.checked = (v === "true" || v === true);
+    else field.value = v ?? "";
+  }
+}
+$("#btn-settings").addEventListener("click", async () => {
+  // Auf dem Handy steht die offene Leiste sonst im Weg.
+  if (narrow()) document.body.classList.add("collapsed");
+  let cfg;
+  try { cfg = await (await api("/api/config")).json(); }
+  catch { alert("Aquaticy AI antwortet gerade nicht — läuft der Server noch?"); return; }
+  fill(cfg.values);
+  fillProviders();
+  $("#provider").value = "";
+  $("#provider-note").textContent = "";
+  $("#model-note").textContent = "";
+  $("#usage-note").innerHTML = "";
+  api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
+  $("#usage-cleared").textContent = "";
+  loadUsage();
+  $("#job-note").textContent = "";
+  jobFelder();
+  loadJobs();
+  $("#showtrace").checked = document.body.classList.contains("tracing");
+  const wanted = START.load === true;
+  $("#showload").checked = wanted;
+  if (wanted) $("#showload").dispatchEvent(new Event("change"));
+  $("#keyname").textContent = cfg.key_name ? `(${cfg.key_name})` : "(nicht nötig)";
+  searchKeyHint();
+  if (cfg.search_key_set) $("#search-keyname").textContent += " · gesetzt";
+  $("#probe-note").textContent = ""; $("#probe-note").className = "note";
+  $("#google-step").hidden = true;
+  showGoogle(cfg.google);
+  $("#lager-note").textContent = ""; $("#lager-note").className = "note";
+  $("#ha-hint").textContent = cfg.ha_connected ? "(gesetzt)" : "";
+  $("#savenote").textContent = ""; $("#savenote").className = "note";
+  $("#ha-note").textContent = ""; $("#ha-note").className = "note";
+  openOverlay(overlay);
+});
+function closeSettings(){
+  closeOverlay(overlay);
+  stopLoad();   // sonst fragt die Auslastung im Hintergrund weiter
+}
+$("#cancel").addEventListener("click", closeSettings);
+overlay.addEventListener("click", (e) => { if (e.target === overlay) closeSettings(); });
+
+/* ---------- Nutzung ---------- */
+// Grosse Zahlen liest niemand als Ziffernfolge. 1234567 -> "1,23 Mio".
+function kurz(zahl){
+  const n = Number(zahl) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(2).replace(".", ",") + " Mrd";
+  if (n >= 1e6) return (n / 1e6).toFixed(2).replace(".", ",") + " Mio";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(".", ",") + " Tsd";
+  return String(n);
+}
+
+async function loadUsage(){
+  const box = $("#zaehler"), detail = $("#usage-detail");
+  box.innerHTML = "";
+  detail.textContent = "";
+  let data;
+  try { data = await (await api("/api/usage")).json(); }
+  catch { detail.textContent = "Der Zählerstand ließ sich nicht laden."; return; }
+
+  const kacheln = [
+    ["heute", data.today, "Heute"],
+    ["fenster", data.window, `Letzte ${data.window_days || 7} Tage`],
+    ["gesamt", data.total, "Insgesamt"],
+  ];
+  for (const [, wert, was] of kacheln){
+    const gesamt = (wert?.tokens_in || 0) + (wert?.tokens_out || 0);
+    const kachel = document.createElement("div");
+    kachel.className = "kachel";
+    kachel.innerHTML = '<div class="wert"></div><div class="was"></div>'
+      + '<div class="dazu"></div>';
+    kachel.querySelector(".wert").textContent = kurz(gesamt);
+    kachel.querySelector(".was").textContent = was + " (Token)";
+    kachel.querySelector(".dazu").textContent =
+      `${kurz(wert?.tokens_in || 0)} hinein · ${kurz(wert?.tokens_out || 0)} heraus`
+      + ` · ${wert?.calls || 0} Aufrufe`;
+    box.appendChild(kachel);
+  }
+
+  const zeilen = (data.models || []).map(m =>
+    `${m.model}: ${kurz((m.tokens_in || 0) + (m.tokens_out || 0))} Token `
+    + `in ${m.calls} Aufrufen`);
+  detail.textContent = zeilen.length
+    ? "Je Modell:\n" + zeilen.join("\n")
+    : "Noch nichts gezählt.";
+}
+
+$("#usage-reset").addEventListener("click", async () => {
+  if (!confirm("Den Zählerstand wirklich zurücksetzen?")) return;
+  try {
+    await api("/api/usage", { method: "DELETE" });
+    $("#usage-cleared").textContent = "Zurückgesetzt.";
+    loadUsage();
+  } catch { $("#usage-cleared").textContent = "Ging nicht."; }
+});
+
+/* ---------- Werkstatt: Dateien ---------- */
+// Ohne diese Liste muesste man raten, wie die Datei heisst, die Aquaticy
+// gerade gebaut hat -- und haette keine Moeglichkeit, sie mitzunehmen.
+const vmBox = $("#vmbox");
+
+function groesse(bytes){
+  const n = Number(bytes) || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(".", ",") + " MB";
+  if (n >= 1e3) return Math.round(n / 1e3) + " kB";
+  return n + " B";
+}
+
+async function loadWorkshop(){
+  const liste = $("#vmliste"), note = $("#vm-note");
+  liste.innerHTML = "";
+  note.textContent = "";
+  let data;
+  try { data = await (await api("/api/werkstatt")).json(); }
+  catch { note.textContent = "Die Werkstatt antwortet nicht."; return; }
+
+  if (!data.running){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Die Werkstatt läuft gerade nicht. Sie entsteht mit der "
+      + "nächsten Frage im Code-Modus — und verschwindet zwanzig Minuten nach "
+      + "der letzten wieder.";
+    liste.appendChild(leer);
+    return;
+  }
+  const dateien = data.files || [];
+  if (!dateien.length){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Die Werkstatt läuft, es liegt aber noch nichts darin.";
+    liste.appendChild(leer);
+  }
+  for (const datei of dateien) liste.appendChild(vmZeile(datei));
+  stagger(liste.querySelectorAll(".merk"), 16);
+  const belegt = data.usage_gb;
+  note.textContent = `${dateien.length} ${dateien.length === 1 ? "Datei" : "Dateien"}`
+    + (belegt != null ? ` · ${belegt} von ${data.disk_gb || 4} GB belegt` : "")
+    + (data.status?.idle_left_seconds != null
+        ? ` · noch ${Math.ceil(data.status.idle_left_seconds / 60)} Min.` : "");
+}
+
+function vmZeile(datei){
+  const zeile = document.createElement("div");
+  zeile.className = "merk";
+  zeile.innerHTML = '<div class="inhalt"><div class="kopf">'
+    + '<span class="thema"></span></div><div class="text"></div></div>'
+    + '<button type="button" class="weg">Holen</button>';
+  const kurzname = String(datei.path).replace(/^\/work\/?/, "") || datei.path;
+  zeile.querySelector(".thema").textContent = groesse(datei.bytes);
+  zeile.querySelector(".text").textContent = kurzname;
+  const knopf = zeile.querySelector(".weg");
+  knopf.addEventListener("click", async () => {
+    knopf.disabled = true;
+    try {
+      const res = await api(
+        `/api/werkstatt/datei?path=${encodeURIComponent(datei.path)}`);
+      if (!res.ok){
+        const fehler = await res.json().catch(() => ({}));
+        $("#vm-note").textContent = fehler.error || "Die Datei kam nicht durch.";
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = kurzname.split("/").pop() || "datei";
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch { $("#vm-note").textContent = "Die Datei kam nicht durch."; }
+    finally { knopf.disabled = false; }
+  });
+  return zeile;
+}
+
+$("#btn-vmfiles").addEventListener("click", () => {
+  loadWorkshop();
+  openOverlay(vmBox);
+});
+$("#vm-refresh").addEventListener("click", loadWorkshop);
+$("#vm-close").addEventListener("click", () => closeOverlay(vmBox));
+vmBox.addEventListener("click", (e) => { if (e.target === vmBox) closeOverlay(vmBox); });
+
+/* ---------- Was Aquaticy ueber mich weiss ---------- */
+// Ein Gedaechtnis, das man nicht einsehen kann, muesste man auf Zuruf
+// glauben. Darum diese Liste -- und ein Loeschknopf je Zeile, damit man
+// Einzelnes wegnehmen kann, ohne alles zu verlieren.
+const memBox = $("#membox");
+
+// SQLite legt die Zeit als "2026-09-06 14:03:11" in UTC ab. Ohne das Z
+// deutet der Browser das als Ortszeit und zeigt die Stunde falsch.
+function wann(roh){
+  if (!roh) return "";
+  const zeit = new Date(String(roh).replace(" ", "T") + "Z");
+  if (isNaN(zeit)) return String(roh);
+  return zeit.toLocaleDateString("de-DE",
+    { day: "2-digit", month: "short", year: "numeric" });
+}
+
+async function loadMemory(){
+  const liste = $("#merkliste"), note = $("#merk-note");
+  liste.innerHTML = "";
+  note.textContent = "";
+  let data;
+  try { data = await (await api("/api/memory")).json(); }
+  catch { liste.innerHTML = '<div class="merk-leer"></div>';
+          liste.firstChild.textContent = "Der Speicher ließ sich nicht laden."; return; }
+
+  if (!data.enabled){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Der Speicher ist abgeschaltet. Solange er aus ist, "
+      + "legt Aquaticy AI nichts ab — und es steht auch nichts drin.";
+    liste.appendChild(leer);
+    $("#merk-clear").disabled = true;
+    return;
+  }
+  $("#merk-clear").disabled = false;
+
+  const eintraege = data.entries || [];
+  if (!eintraege.length){
+    const leer = document.createElement("div");
+    leer.className = "merk-leer";
+    leer.textContent = "Noch nichts gemerkt. Was du im Gespräch über dich "
+      + "erzählst, landet von selbst hier.";
+    liste.appendChild(leer);
+    return;
+  }
+  for (const eintrag of eintraege) liste.appendChild(merkZeile(eintrag));
+  stagger(liste.querySelectorAll(".merk"), 18);
+  const platz = data.usage || {};
+  note.textContent = `${eintraege.length} ${eintraege.length === 1 ? "Eintrag" : "Einträge"}`
+    + (platz.used_mb != null ? ` · ${platz.used_mb} von ${platz.limit_mb} MB belegt` : "");
+}
+
+function merkZeile(eintrag){
+  const zeile = document.createElement("div");
+  zeile.className = "merk";
+  zeile.innerHTML = '<div class="inhalt"><div class="kopf">'
+    + '<span class="thema"></span><span class="zeit"></span></div>'
+    + '<div class="text"></div></div>'
+    + '<button type="button" class="weg">Löschen</button>';
+  zeile.querySelector(".thema").textContent = eintrag.topic || "notiz";
+  zeile.querySelector(".zeit").textContent = wann(eintrag.when);
+  zeile.querySelector(".text").textContent = eintrag.text || "";
+  zeile.querySelector(".weg").addEventListener("click", async () => {
+    const weg = zeile.querySelector(".weg");
+    weg.disabled = true;
+    try {
+      await api(`/api/memory?id=${encodeURIComponent(eintrag.id)}`, { method: "DELETE" });
+      zeile.classList.add("geht");
+      setTimeout(() => { zeile.remove(); loadMemory(); }, CLOSE_MS);
+    } catch {
+      weg.disabled = false;
+      $("#merk-note").textContent = "Ging nicht — läuft der Server noch?";
+    }
+  });
+  return zeile;
+}
+
+$("#btn-memory").addEventListener("click", () => {
+  loadMemory();
+  openOverlay(memBox);
+});
+$("#merk-close").addEventListener("click", () => closeOverlay(memBox));
+memBox.addEventListener("click", (e) => { if (e.target === memBox) closeOverlay(memBox); });
+$("#merk-clear").addEventListener("click", async () => {
+  if (!confirm("Wirklich alles vergessen, was Aquaticy AI über dich weiß?")) return;
+  try {
+    await api("/api/memory", { method: "DELETE" });
+    loadMemory();
+  } catch { $("#merk-note").textContent = "Ging nicht."; }
+});
+
+/* ---------- Auftraege ---------- */
+// Eine Frage, die sich von selbst stellt. Die Antwort landet als Chat --
+// so muss man nichts Neues lernen, um sie zu lesen.
+const TAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+              "Samstag", "Sonntag"];
+
+function wannGenau(stempel){
+  if (!stempel) return "";
+  const zeit = new Date(stempel * 1000);
+  if (isNaN(zeit)) return "";
+  return zeit.toLocaleString("de-DE",
+    { weekday: "short", day: "2-digit", month: "short", hour: "2-digit",
+      minute: "2-digit" });
+}
+
+async function loadJobs(){
+  const box = $("#auftraege");
+  box.innerHTML = "";
+  let data;
+  try { data = await (await api("/api/jobs")).json(); }
+  catch { box.innerHTML = '<div class="auftraege-leer"></div>';
+          box.firstChild.textContent = "Die Aufträge ließen sich nicht laden."; return; }
+  const jobs = data.jobs || [];
+  if (!jobs.length){
+    const leer = document.createElement("div");
+    leer.className = "auftraege-leer";
+    leer.textContent = "Noch kein Auftrag. Unten steht, wie einer entsteht.";
+    box.appendChild(leer);
+    return;
+  }
+  for (const job of jobs) box.appendChild(jobZeile(job));
+  stagger(box.querySelectorAll(".auftrag"), 18);
+}
+
+function jobZeile(job){
+  const zeile = document.createElement("div");
+  zeile.className = "auftrag" + (job.enabled ? "" : " pausiert");
+  zeile.innerHTML = '<div class="inhalt"><div class="frage"></div>'
+    + '<div class="wann"></div></div><div class="knoepfe">'
+    + '<button type="button" data-do="run">Jetzt</button>'
+    + '<button type="button" data-do="toggle"></button>'
+    + '<button type="button" class="weg" data-do="delete">Löschen</button></div>';
+  zeile.querySelector(".frage").textContent = job.question;
+
+  const takt = job.rhythm === "hourly"
+    ? `stündlich zur Minute ${String(job.minute).padStart(2, "0")}`
+    : job.rhythm === "weekly"
+      ? `wöchentlich, ${TAGE[job.weekday] || "Montag"} um `
+        + `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`
+      : `täglich um ${String(job.hour).padStart(2, "0")}:`
+        + `${String(job.minute).padStart(2, "0")}`;
+  const teile = [takt];
+  if (job.enabled) teile.push("nächstes Mal " + wannGenau(job.next_run));
+  else teile.push("angehalten");
+  if (job.last_run) teile.push(`zuletzt ${wannGenau(job.last_run)} — ${job.last_state}`);
+  zeile.querySelector(".wann").textContent = teile.join(" · ");
+
+  zeile.querySelector('[data-do="toggle"]').textContent =
+    job.enabled ? "Anhalten" : "Weiter";
+  zeile.querySelectorAll("button").forEach(knopf =>
+    knopf.addEventListener("click", async () => {
+      const was = knopf.dataset.do;
+      if (was === "delete"
+          && !confirm("Diesen Auftrag löschen? Die bisherigen Chats bleiben.")) return;
+      const aktion = was === "toggle" ? (job.enabled ? "pause" : "resume") : was;
+      knopf.disabled = true;
+      try {
+        const res = await api("/api/jobs", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ action: aktion, id: job.id }),
+        });
+        const antwort = await res.json();
+        if (!antwort.ok){ $("#job-note").textContent = antwort.error || "Ging nicht."; }
+        else if (aktion === "run"){
+          $("#job-note").textContent = "Läuft — die Antwort steht gleich in der Leiste.";
+        }
+      } catch { $("#job-note").textContent = "Ging nicht."; }
+      finally { knopf.disabled = false; loadJobs(); }
+    }));
+  return zeile;
+}
+
+// Bei "stündlich" gibt es keinen Wochentag und keine Stunde -- also weg damit.
+function jobFelder(){
+  const takt = $("#job-rhythm").value;
+  $("#job-tag-feld").hidden = takt !== "weekly";
+}
+$("#job-rhythm").addEventListener("change", jobFelder);
+
+$("#job-add").addEventListener("click", async () => {
+  const frage = $("#job-frage").value.trim();
+  const note = $("#job-note");
+  if (!frage){ note.textContent = "Ohne Frage gibt es nichts zu tun."; return; }
+  const [stunde, minute] = ($("#job-zeit").value || "08:00").split(":");
+  try {
+    const res = await api("/api/jobs", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        action: "add",
+        question: frage,
+        rhythm: $("#job-rhythm").value,
+        hour: Number(stunde) || 0,
+        minute: Number(minute) || 0,
+        weekday: Number($("#job-weekday").value) || 0,
+        structured: $("#job-struktur").checked,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok){ note.textContent = data.error || "Anlegen ging nicht."; return; }
+    $("#job-frage").value = "";
+    note.textContent = "Angelegt.";
+    loadJobs();
+  } catch { note.textContent = "Anlegen ging nicht."; }
+});
+
+/* ---------- Anbieter und Schluessel ---------- */
+// Wer welchen Schluessel braucht -- damit man den Anbieter waehlen kann,
+// ohne die Modell-ID auswendig zu koennen.
+// Anbieter, Schluesselname, Beispielmodell und wie der Schluessel aussieht.
+// Das Aussehen hilft beim Erkennen: ein NVIDIA-Schluessel faengt mit nvapi-
+// an. Wer den falschen einfuegt, sieht es sofort, statt erst beim ersten
+// Fehlschlag.
+//
+// Zwei Anbieter, nicht dreizehn. Eine lange Liste sieht grosszuegig aus,
+// bedeutet aber dreizehnmal "irgendein Standardmodell, ungetestet, mit
+// unbekannten Grenzen". Zwei kann man kennen: welches Modell wofuer, wie
+// schnell es antwortet, wie viele Anfragen pro Minute es vertraegt -- und
+// danach richtet sich Aquaticy dann auch. Ollama ist kein Anbieter, sondern
+// der Weg, ganz ohne einen auszukommen.
+const PROVIDERS = [
+  ["nvidia_nim",  "NVIDIA NIM",         "NVIDIA_NIM_API_KEY",
+   "nvidia_nim/meta/llama-3.3-70b-instruct", "nvapi-…"],
+  ["mistral",     "Mistral",            "MISTRAL_API_KEY",    "mistral/mistral-large-latest",
+   ""],
+  ["ollama_chat", "Ollama (lokal)",     "",                   "ollama_chat/gemma4:12b", ""],
+];
+
+function fillProviders(){
+  const select = $("#provider");
+  if (select.options.length > 1) return;   // nur einmal aufbauen
+  PROVIDERS.forEach(([id, label]) => {
+    const option = document.createElement("option");
+    option.value = id; option.textContent = label;
+    select.appendChild(option);
+  });
+  select.addEventListener("change", () => {
+    const found = PROVIDERS.find(entry => entry[0] === select.value);
+    if (!found) return;
+    const [, label, keyName, example, shape] = found;
+    const model = form.elements["AQUATICY_MODEL"];
+    if (!model.value.startsWith(select.value + "/")) model.value = example;
+    const key = form.elements["__API_KEY__"];
+    key.placeholder = shape ? `${shape}  (leer lassen = unverändert)` : "leer lassen = unverändert";
+    $("#keyname").textContent = keyName ? `(${keyName})` : "(nicht nötig)";
+    $("#provider-note").textContent = keyName
+      ? `${label} braucht ${keyName}${shape ? ` — er beginnt mit ${shape}` : ""}. `
+        + "Trag ihn rechts ein, er landet in deiner .env."
+      : `${label} läuft auf deinem Rechner. Kein Schlüssel nötig.`;
+  });
+}
+
+// Nur die Felder aus dem Modell-Abschnitt speichern, nicht das ganze Formular.
+const MODEL_FIELDS = ["AQUATICY_MODEL", "AQUATICY_VISION_MODEL", "AQUATICY_SUBAGENT_MODEL",
+  "AQUATICY_CODE_MODEL",
+                      "AQUATICY_API_BASE"];
+
+$("#save-model").addEventListener("click", async () => {
+  const note = $("#model-note");
+  note.className = "note"; note.textContent = "Speichere …";
+  const values = {};
+  MODEL_FIELDS.forEach(name => { values[name] = form.elements[name].value; });
+  const key = form.elements["__API_KEY__"].value;
+  if (key.trim()) values["__API_KEY__"] = key;
+
+  let data;
+  try {
+    const res = await api("/api/config", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(values)
+    });
+    data = await res.json();
+  } catch (err){
+    note.className = "note bad"; note.textContent = String(err); return;
+  }
+  if (!data.ok){
+    note.className = "note bad"; note.textContent = data.error || "Das hat nicht geklappt.";
+    return;
+  }
+  note.className = "note ok";
+  // Der Server ergaenzt ein fehlendes Anbieter-Praefix -- das soll man sehen.
+  const fresh = await (await api("/api/config")).json();
+  const saved = fresh.values.AQUATICY_MODEL;
+  form.elements["AQUATICY_MODEL"].value = saved;
+  form.elements["__API_KEY__"].value = "";
+  note.textContent = saved !== values.AQUATICY_MODEL
+    ? `Gespeichert als ${saved} — das Anbieter-Kürzel hat gefehlt.`
+    : `${saved} ist jetzt aktiv.`;
+  refreshHeader();
+});
+
+/* ---------- Mitlesen ---------- */
+// Reine Anzeigesache: die Zeilen stehen ohnehin im Dokument, der Haken
+// blendet sie nur ein. Deshalb kein Serveraufruf und keine .env -- und
+// deshalb wirkt er auch auf die Antwort, die schon dasteht.
+function setTracing(on, { merken = true } = {}){
+  document.body.classList.toggle("tracing", on);
+  if (merken) merkeZustand({ tracing: !!on });
+}
+// Der Server hat die Klasse schon beim Ausliefern gesetzt; hier wird nur
+// der Haken im Formular nachgezogen.
+setTracing(START.tracing === true, { merken: false });
+$("#showtrace").addEventListener("change", (e) => setTracing(e.target.checked));
+
+/* ---------- Auslastung ---------- */
+function gauge(name, value, sub, percent){
+  const hot = percent >= 85 ? " hot" : "";
+  const width = Math.max(0, Math.min(100, percent || 0));
+  return `<div class="gauge"><div class="g-name">${name}</div>
+    <div class="g-val">${value}</div>
+    <div class="bar${hot}"><span style="width:${width}%"></span></div>
+    <div class="g-sub">${sub}</div></div>`;
+}
+
+// Solange der Haken steht, frischt sich die Anzeige selbst auf.
+let loadTimer = null;
+
+function stopLoad(){
+  clearInterval(loadTimer);
+  loadTimer = null;
+}
+
+$("#showload").addEventListener("change", (e) => {
+  stopLoad();
+  const on = e.target.checked;
+  merkeZustand({ load: !!on });
+  if (!on){ $("#usage-note").innerHTML = ""; return; }
+  showLoad();
+  loadTimer = setInterval(showLoad, 4000);
+});
+
+async function showLoad(){
+  const note = $("#usage-note");
+  if (!note.innerHTML) note.textContent = "Sehe nach …";
+  let data;
+  try { data = await (await api("/api/system")).json(); }
+  catch (err){ note.className = "note bad"; note.textContent = String(err); return; }
+
+  const parts = [];
+  if (data.cpu?.percent !== undefined)
+    parts.push(gauge("Prozessor", data.cpu.percent + " %",
+      `${data.cpu.cores} Kerne · Last ${data.cpu.load}`, data.cpu.percent));
+  if (data.memory?.percent !== undefined)
+    parts.push(gauge("Arbeitsspeicher", data.memory.used_gb + " GB",
+      `von ${data.memory.total_gb} GB`, data.memory.percent));
+  if (data.disk?.percent !== undefined)
+    parts.push(gauge("Festplatte", data.disk.free_gb + " GB frei",
+      `von ${data.disk.total_gb} GB`, data.disk.percent));
+  if (data.gpu?.name)
+    parts.push(gauge("Grafikkarte", data.gpu.percent + " %",
+      `${data.gpu.name} · ${data.gpu.used_gb} von ${data.gpu.total_gb} GB`, data.gpu.percent));
+  if (data.storage)
+    parts.push(gauge("Speicher", data.storage.used_mb + " MB",
+      `von ${data.storage.limit_mb} MB · ${data.storage.entries} Notizen`,
+      data.storage.percent));
+
+  note.className = "note";
+  note.innerHTML = `<div class="gauges">${parts.join("")}</div>`
+    + `<div style="margin-top:8px">${data.system} · Python ${data.python}</div>`;
+  showStorage(data.storage);
+}
+
+function showStorage(storage){
+  const meter = $("#storage-meter");
+  const note = $("#storage-note");
+  if (!storage){
+    meter.firstElementChild.style.width = "0";
+    if (note) note.textContent = "Der Speicher ist ausgeschaltet.";
+    return;
+  }
+  meter.firstElementChild.style.width = Math.min(100, storage.percent) + "%";
+  meter.className = "meter" + (storage.percent >= 85 ? " warn" : "");
+  meter.title = `${storage.used_mb} von ${storage.limit_mb} MB belegt`;
+  if (note){
+    note.textContent = `${storage.used_mb} von ${storage.limit_mb} MB belegt`
+      + ` · ${storage.entries} ${storage.entries === 1 ? "Notiz" : "Notizen"}`;
+  }
+}
+
+async function haCall(payload){
+  const note = $("#ha-note");
+  note.className = "note"; note.textContent = "Moment …";
+  try {
+    const res = await api("/api/ha", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  } catch (err){
+    note.className = "note bad"; note.textContent = String(err);
+    return null;
+  }
+}
+$("#ha-find").addEventListener("click", async () => {
+  const data = await haCall({ action: "discover" });
+  if (!data) return;
+  const note = $("#ha-note");
+  if (!data.ok || !data.found?.length){
+    note.className = "note bad";
+    note.textContent = "Nichts gefunden. Die Adresse steht in der Browserzeile, "
+      + "wenn du Home Assistant offen hast.";
+    return;
+  }
+  form.elements["AQUATICY_HA_URL"].value = data.found[0];
+  note.className = "note ok";
+  note.textContent = data.found.length === 1
+    ? `Gefunden: ${data.found[0]}`
+    : `Gefunden: ${data.found.join(", ")} — die erste ist eingetragen.`;
+});
+$("#ha-test").addEventListener("click", async () => {
+  const data = await haCall({
+    url: form.elements["AQUATICY_HA_URL"].value.trim(),
+    token: form.elements["__HA_TOKEN__"].value.trim(),
+  });
+  if (!data) return;
+  const note = $("#ha-note");
+  if (!data.ok){ note.className = "note bad"; note.textContent = data.error; return; }
+  note.className = "note ok";
+  note.textContent = `Verbunden mit ${data.name} — ${data.entities} Geräte und Werte. `
+    + "Zum Übernehmen unten speichern.";
+});
+
+/* ---------- Gmail und Kalender ---------- */
+// Zwei Schritte, weil Google dazwischen den Nutzer fragt: erst die Adresse
+// zum Zustimmen holen, dann den Code einloesen, den Google zurueckgibt.
+async function googleCall(body){
+  try {
+    return await (await api("/api/google", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body),
+    })).json();
+  } catch { return null; }
+}
+
+function showGoogle(state){
+  const note = $("#google-state");
+  if (!state){ note.textContent = ""; return; }
+  if (state.redirect) $("#google-redirect").textContent = state.redirect;
+  $("#google-id-hint").textContent = state.has_id ? "(gesetzt)" : "";
+  $("#google-secret-hint").textContent = state.has_secret ? "(gesetzt)" : "";
+  if (state.connected){
+    note.className = "note ok";
+    note.textContent = "Verbunden" + (state.account ? ` als ${state.account}` : "")
+      + (state.write ? " — darf auch ändern." : " — nur lesend.");
+  } else {
+    note.className = "note";
+    note.textContent = state.has_id
+      ? "Noch kein Konto verbunden."
+      : "Erst Client-ID und Secret speichern.";
+  }
+}
+
+$("#google-connect").addEventListener("click", async () => {
+  const data = await googleCall({
+    action:"start", client_id: form.elements["__GOOGLE_ID__"].value.trim(),
+    // Was gerade angehakt ist, zaehlt -- nicht, was zuletzt gespeichert wurde.
+    write: $("#google-write").checked,
+  });
+  const note = $("#google-state");
+  if (!data || !data.ok){
+    note.className = "note bad";
+    note.textContent = data ? data.error : "Keine Antwort vom Server.";
+    return;
+  }
+  $("#google-link").href = data.url;
+  $("#google-redirect").textContent = data.redirect;
+  $("#google-step").hidden = false;
+  note.className = "note";
+  note.textContent = "Fenster bei Google geöffnet — danach die Adresse hier einfügen.";
+  window.open(data.url, "_blank", "noopener");
+});
+
+$("#google-save").addEventListener("click", async () => {
+  const note = $("#google-state");
+  note.className = "note"; note.textContent = "Löse den Code ein …";
+  const data = await googleCall({ action:"finish", code: $("#google-code").value.trim() });
+  if (!data || !data.ok){
+    note.className = "note bad";
+    note.textContent = data ? data.error : "Keine Antwort vom Server.";
+    return;
+  }
+  $("#google-code").value = "";
+  $("#google-step").hidden = true;
+  showGoogle(data);
+});
+
+$("#google-off").addEventListener("click", async () => {
+  const data = await googleCall({ action:"disconnect" });
+  if (data && data.ok){
+    $("#google-step").hidden = true;
+    showGoogle(data);
+  }
+});
+
+/* ---------- Lagerverwaltung ---------- */
+async function storageCall(url){
+  try {
+    return await (await api("/api/storage", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ url }),
+    })).json();
+  } catch { return null; }
+}
+
+async function storageProbe(url, searching){
+  const note = $("#lager-note");
+  note.className = "note";
+  note.textContent = searching ? "Suche im Netz …" : "Frage nach …";
+  const data = await storageCall(url);
+  if (!data){ note.className = "note bad"; note.textContent = "Keine Antwort vom Server."; return; }
+  if (!data.ok){ note.className = "note bad"; note.textContent = data.error; return; }
+  form.elements["AQUATICY_STORAGE_URL"].value = data.url;
+  note.className = "note ok";
+  note.textContent = data.rooms === undefined
+    ? `Gefunden: ${data.url}. Zum Übernehmen unten speichern.`
+    : `${data.name} ${data.version} unter ${data.url} — `
+      + `${data.rooms} ${data.rooms === 1 ? "Raum" : "Räume"}, `
+      + `${data.items} ${data.items === 1 ? "Artikel" : "Artikel"}. `
+      + "Zum Übernehmen unten speichern.";
+}
+
+$("#storage-find").addEventListener("click", () => storageProbe("", true));
+$("#storage-test").addEventListener("click", () =>
+  storageProbe(form.elements["AQUATICY_STORAGE_URL"].value.trim(), false));
+
+/* ---------- Verbindungstest ---------- */
+// Dasselbe, was `aquaticy setup` am Ende macht: eine winzige Anfrage ans Modell
+// und eine Testsuche. Geprueft wird, was IM FORMULAR steht -- so sieht man vor
+// dem Speichern, ob ein Schluessel stimmt.
+$("#probe").addEventListener("click", async () => {
+  const note = $("#probe-note"), button = $("#probe");
+  note.className = "note"; note.textContent = "Teste Modell und Suche …";
+  button.disabled = true;
+  const body = {
+    AQUATICY_MODEL: form.elements["AQUATICY_MODEL"].value.trim(),
+    AQUATICY_API_BASE: form.elements["AQUATICY_API_BASE"].value.trim(),
+    AQUATICY_SEARCH_BACKEND: form.elements["AQUATICY_SEARCH_BACKEND"].value,
+    AQUATICY_SEARCH_ENGINES: form.elements["AQUATICY_SEARCH_ENGINES"].value.trim(),
+    AQUATICY_SEARXNG_URL: form.elements["AQUATICY_SEARXNG_URL"].value.trim(),
+    __API_KEY__: form.elements["__API_KEY__"].value.trim(),
+    __SEARCH_KEY__: form.elements["__SEARCH_KEY__"].value.trim(),
+  };
+  let data;
+  try {
+    data = await (await api("/api/probe", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body),
+    })).json();
+  } catch { data = null; }
+  button.disabled = false;
+  if (!data){ note.className = "note bad"; note.textContent = "Keine Antwort vom Server."; return; }
+  const mark = (part) => (part.ok ? "✓" : "✗") + " " + part.message;
+  note.className = "note " + (data.ok ? "ok" : "bad");
+  note.textContent = `Modell (${data.llm.model}): ${mark(data.llm)}
+Suche (${data.search.backend}): ${mark(data.search)}`;
+});
+
+// Der Hinweis am Schluesselfeld richtet sich nach der gewaehlten Suchmaschine.
+function searchKeyHint(){
+  const names = { brave: "BRAVE_API_KEY", tavily: "TAVILY_API_KEY" };
+  const name = names[form.elements["AQUATICY_SEARCH_BACKEND"].value] || "";
+  $("#search-keyname").textContent = name
+    ? `(${name})` : "nur bei Brave und Tavily nötig";
+}
+form.elements["AQUATICY_SEARCH_BACKEND"].addEventListener("change", searchKeyHint);
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const values = {};
+  for (const el of form.elements){
+    if (!el.name) continue;   // z.B. die Anbieterauswahl, die nur die Felder fuellt
+    values[el.name] = el.type === "checkbox" ? String(el.checked) : el.value;
+  }
+  const note = $("#savenote");
+  note.textContent = "Speichere …"; note.className = "note";
+  const res = await api("/api/config", {
+    method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(values)
+  });
+  const data = await res.json();
+  if (data.ok){
+    note.textContent = "Gespeichert in " + data.path + " — sofort aktiv.";
+    note.className = "note ok";
+    refreshHeader();
+    setTimeout(closeSettings, 1100);
+  } else {
+    note.textContent = data.error || "Das hat nicht geklappt."; note.className = "note bad";
+  }
+});
+
+/* ---------- Start ---------- */
+function greet(){
+  const hour = new Date().getHours();
+  const when = hour < 5 ? "Gute Nacht" : hour < 11 ? "Guten Morgen"
+             : hour < 18 ? "Guten Tag" : "Guten Abend";
+  $("#greeting").textContent = `${when} — was soll ich herausfinden?`;
+}
+// Die Kopfzeile wird von jedem Schalter angestossen. Beim Laden sind das
+// sieben Aufrufe hintereinander -- also sieben Abfragen fuer dasselbe
+// Ergebnis. Ein kurzer Aufschub fasst sie zu einer zusammen; sichtbar ist
+// davon nichts, die Zeile steht ohnehin erst da, wenn die Antwort kommt.
+// (Die Variable dazu steht weit oben -- siehe dort, warum.)
+function refreshHeader(){
+  clearTimeout(kopfTimer);
+  kopfTimer = setTimeout(kopfNeuZeichnen, 60);
+}
+
+async function kopfNeuZeichnen(){
+  try {
+    const cfg = await (await api("/api/config")).json();
+    $("#version").textContent = "v" + cfg.version;
+    document.title = `Aquaticy AI ${cfg.version}`;
+    // Oben steht, womit gerade WIRKLICH gearbeitet wird: im Code- und im
+    // Pro-Modus das staerkste erreichbare Modell, sonst das eingestellte.
+    // Frueher stand dort immer das eingestellte -- und man sah nicht, dass
+    // gerade ein anderes antwortet.
+    currentModel = mode === "code"
+      ? (cfg.strong_code_model || cfg.strong_model || cfg.values.AQUATICY_MODEL || "")
+      : mode === "pro"
+        ? (cfg.strong_model || cfg.values.AQUATICY_MODEL || "")
+        : (cfg.values.AQUATICY_MODEL || "");
+    flash($("#model-name"), currentModel.split("/").pop() || "Modell wählen");
+    // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
+    // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.
+    const bits = [cfg.values.AQUATICY_LOCATION || "kein Ortsfilter"];
+    // Was vom Normalfall abweicht, gehoert in die Kopfzeile -- es aendert
+    // das Ergebnis spuerbar, und man sieht es sonst nirgends.
+    if (mode === "code" && sandbox) bits.push("Werkstatt");
+    else if (!online) bits.push("ohne Web");
+    if (mode === "pro") bits.push("Pro");
+    if (structured) bits.push("strukturiert");
+    // Im Pro-Modus pruefen vier Agenten mit -- der Schalter heisst gleich,
+    // meint aber etwas anderes.
+    if (mode === "pro"){
+      if (recheck) bits.push("4 Prüfer");
+    } else if (recheck) bits.push("gegenprüfen");
+    if (effort !== "medium") bits.push("Denktiefe " + effort);
+    if (cfg.ha_connected) bits.push("Zuhause verbunden");
+    if (cfg.values.AQUATICY_MEMORY === "true") bits.push("Speicher an");
+    flash($("#status"), bits.join(" · "));
+    $("#status").title = cfg.problems?.length ? cfg.problems.join("; ") : "";
+  } catch { /* Server weg -- die Oberflaeche bleibt trotzdem bedienbar */ }
+}
+greet();
+refreshHeader();
+loadRecents();
+wiederAufnehmen();
+input.focus();
+</script>
+</body>
+</html>

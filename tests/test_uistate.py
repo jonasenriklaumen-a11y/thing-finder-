@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cortex.uistate import (
+from aquaticy.uistate import (
     EFFORTS,
     FIELDS,
     MODES,
@@ -62,10 +62,10 @@ def test_an_unknown_mode_does_not_get_through() -> None:
 
 def test_unknown_fields_are_dropped() -> None:
     """Was hier nicht steht, gibt es nicht -- auch nicht als Beifang."""
-    stand = clean({"mode": "code", "admin": True, "CORTEX_HA_CONTROL": "true"})
+    stand = clean({"mode": "code", "admin": True, "AQUATICY_HA_CONTROL": "true"})
     assert stand["mode"] == "code"
     assert "admin" not in stand
-    assert "CORTEX_HA_CONTROL" not in stand
+    assert "AQUATICY_HA_CONTROL" not in stand
 
 
 def test_a_partial_suggestion_keeps_the_rest() -> None:
@@ -145,7 +145,7 @@ def test_the_modes_are_the_same_on_both_sides() -> None:
     """Zwei Listen, eine Wahrheit: was der Agent kennt, muss die Oberflaeche
     durchlassen -- und umgekehrt. Sonst faellt ein gueltiger Modus hier auf
     "normal" zurueck, ohne dass es jemandem auffiele."""
-    from cortex.agent import MODES as AGENT_MODES
+    from aquaticy.agent import MODES as AGENT_MODES
 
     assert set(MODES) == set(AGENT_MODES)
     assert "pro" in MODES

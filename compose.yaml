@@ -1,48 +1,48 @@
-# cortex im Container -- isoliert vom System, ohne Netzbeschraenkung.
+# aquaticy im Container -- isoliert vom System, ohne Netzbeschraenkung.
 #
-#   docker compose run --rm cortex                    # Chat
-#   docker compose run --rm cortex "deine Frage"      # einmalig
-#   docker compose run --rm cortex search "test"      # nur Suche
+#   docker compose run --rm aquaticy                    # Chat
+#   docker compose run --rm aquaticy "deine Frage"      # einmalig
+#   docker compose run --rm aquaticy search "test"      # nur Suche
 #
 # Mit eigener Suchmaschine (SearXNG, kein API-Key noetig):
 #   docker compose --profile searxng up -d searxng
-#   docker compose --profile searxng run --rm cortex
+#   docker compose --profile searxng run --rm aquaticy
 
 services:
-  cortex:
+  aquaticy:
     build:
       context: .
-      target: ${CORTEX_IMAGE_TARGET:-browser}
-    image: cortex:local
+      target: ${AQUATICY_IMAGE_TARGET:-browser}
+    image: aquaticy:local
     # Laeuft unter der UID des Host-Nutzers, damit Exporte in ./exports
-    # dem richtigen Benutzer gehoeren. `cortex-box` setzt die Werte; ohne
+    # dem richtigen Benutzer gehoeren. `aquaticy-box` setzt die Werte; ohne
     # Wrapper gilt der eingebaute Benutzer (UID 1000).
-    user: "${CORTEX_UID:-1000}:${CORTEX_GID:-1000}"
+    user: "${AQUATICY_UID:-1000}:${AQUATICY_GID:-1000}"
     # Keys und Voreinstellungen kommen aus der .env im Projektverzeichnis.
     env_file:
       - path: .env
         required: false
     environment:
-      CORTEX_DATA_DIR: /data
-      # Wird nur benutzt, wenn CORTEX_SEARCH_BACKEND=searxng gesetzt ist.
-      CORTEX_SEARXNG_URL: ${CORTEX_SEARXNG_URL:-http://searxng:8080}
+      AQUATICY_DATA_DIR: /data
+      # Wird nur benutzt, wenn AQUATICY_SEARCH_BACKEND=searxng gesetzt ist.
+      AQUATICY_SEARXNG_URL: ${AQUATICY_SEARXNG_URL:-http://searxng:8080}
     volumes:
       # Cache und Verlauf ueberleben den Container.
-      - cortex-data:/data
+      - aquaticy-data:/data
       # Exporte landen im Projektverzeichnis unter ./exports.
       - ./exports:/work
     stdin_open: true
     tty: true
     init: true
-    # Volles Netz nach draussen -- ohne das kann cortex nicht recherchieren.
+    # Volles Netz nach draussen -- ohne das kann aquaticy nicht recherchieren.
     # Isoliert wird das Dateisystem, nicht die Verbindung.
     #
-    # Fuer Heimnetz und Home Assistant braucht cortex die Netzwerkkarte des
+    # Fuer Heimnetz und Home Assistant braucht aquaticy die Netzwerkkarte des
     # Rechners: aus Dockers eigenem Bruecken-Netz ist das Heimnetz nicht zu
-    # sehen, `cortex lan` und `connect-ha` faenden dort schlicht nichts.
-    #   CORTEX_NETWORK=host docker compose run --rm cortex
+    # sehen, `aquaticy lan` und `connect-ha` faenden dort schlicht nichts.
+    #   AQUATICY_NETWORK=host docker compose run --rm aquaticy
     # Ohne die Variable bleibt es beim abgeschotteten Bruecken-Netz.
-    network_mode: ${CORTEX_NETWORK:-bridge}
+    network_mode: ${AQUATICY_NETWORK:-bridge}
     security_opt:
       - no-new-privileges:true
     # Chromium legt seine Shared-Memory-Segmente hier ab.
@@ -63,4 +63,4 @@ services:
       - no-new-privileges:true
 
 volumes:
-  cortex-data:
+  aquaticy-data:

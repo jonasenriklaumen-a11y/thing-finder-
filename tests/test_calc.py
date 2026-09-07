@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cortex.calc import CalcError, calculate, calculate_pretty, normalize_numbers
+from aquaticy.calc import CalcError, calculate, calculate_pretty, normalize_numbers
 
 
 @pytest.mark.parametrize(

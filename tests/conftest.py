@@ -22,7 +22,7 @@ def fixture_html() -> callable:
 @pytest.fixture
 def settings(tmp_path: Path):
     """Settings, die nichts ausserhalb von tmp_path anfassen."""
-    from cortex.config import Settings
+    from aquaticy.config import Settings
 
     return Settings(
         model="mistral/mistral-large-latest",

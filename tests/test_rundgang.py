@@ -34,7 +34,7 @@ def _browser_da() -> bool:
 @pytest.mark.skipif(not _browser_da(), reason="Playwright oder Browser fehlen")
 def test_the_walkthrough_finds_nothing_to_complain_about() -> None:
     umgebung = dict(os.environ)
-    umgebung.pop("CORTEX_DATA_DIR", None)   # das Skript legt sich ein eigenes an
+    umgebung.pop("AQUATICY_DATA_DIR", None)   # das Skript legt sich ein eigenes an
     fertig = subprocess.run(
         [sys.executable, str(SKRIPT)],
         capture_output=True,

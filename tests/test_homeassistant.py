@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from cortex.homeassistant import (
+from aquaticy.homeassistant import (
     ALLOWED_DOMAINS,
     PROTECTED_DOMAINS,
     HomeAssistant,
@@ -185,7 +185,7 @@ def test_the_protected_domains_cover_what_matters() -> None:
 # -- Zwischenspeicher -----------------------------------------------------
 def test_repeated_reads_hit_the_instance_once(ha: HomeAssistant) -> None:
     """Der Agent fragt in einer Runde gern dreimal -- das reicht einmal."""
-    from cortex.homeassistant import _states_cache
+    from aquaticy.homeassistant import _states_cache
 
     _states_cache.clear()
     ha.domains()
@@ -197,7 +197,7 @@ def test_repeated_reads_hit_the_instance_once(ha: HomeAssistant) -> None:
 
 def test_a_stale_cache_is_refused(ha: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ein Licht kann in zehn Sekunden ausgehen -- so lange und nicht laenger."""
-    import cortex.homeassistant as module
+    import aquaticy.homeassistant as module
 
     module._states_cache.clear()
     ha.states()
@@ -213,8 +213,8 @@ def test_a_stale_cache_is_refused(ha: HomeAssistant, monkeypatch: pytest.MonkeyP
 
 
 def test_switching_something_invalidates_the_cache(ha: HomeAssistant) -> None:
-    """Sonst meldet cortex direkt nach dem Schalten noch den alten Zustand."""
-    from cortex.homeassistant import _states_cache
+    """Sonst meldet aquaticy direkt nach dem Schalten noch den alten Zustand."""
+    from aquaticy.homeassistant import _states_cache
 
     _states_cache.clear()
     ha.states()
@@ -225,7 +225,7 @@ def test_switching_something_invalidates_the_cache(ha: HomeAssistant) -> None:
 
 
 def test_fresh_bypasses_the_cache(ha: HomeAssistant) -> None:
-    from cortex.homeassistant import _states_cache
+    from aquaticy.homeassistant import _states_cache
 
     _states_cache.clear()
     ha.states()

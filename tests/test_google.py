@@ -12,8 +12,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cortex import google
-from cortex.google import Google, GoogleError, NotConnected, Tokens, TokenStore
+from aquaticy import google
+from aquaticy.google import Google, GoogleError, NotConnected, Tokens, TokenStore
 
 
 def _b64(text: str) -> str:
@@ -371,7 +371,7 @@ def test_the_account_is_remembered_when_connecting(
 def test_the_stored_file_is_json_shaped(store: TokenStore) -> None:
     """Damit ein spaeteres Feld nicht die ganze Datei unlesbar macht."""
     store.save(Tokens(refresh_token="rt", email="a@b.de"))
-    from cortex.memory import Cipher
+    from aquaticy.memory import Cipher
 
     raw = Cipher(store._key_path).decrypt(store.path.read_text(encoding="utf-8"))
     assert json.loads(raw)["email"] == "a@b.de"

@@ -1,16 +1,16 @@
-# Cortex
+# Aquaticy
 
-**Cortex** ist der Rechercheagent, mit dem man chatten kann — er durchsucht
+**Aquaticy** ist der Rechercheagent, mit dem man chatten kann — er durchsucht
 eigenständig das Internet, liest die gefundenen Seiten und gibt die Ergebnisse
 ausgewertet zurück, mit Quelle zu jeder Angabe. **Und er kennt dein Zuhause:** er sieht
 ins eigene Netz, liest Home Assistant und — wenn du es erlaubst — deinen Kalender und
 dein Postfach. Also auch Fragen, deren Antwort im Web gar nicht stehen kann.
 
-Ein Befehl, drei Wege: im Terminal (`cortex`), im Browser (`cortex web`) und vom Handy
-aus (`cortex web --lan`) — überall derselbe Agent mit denselben Einstellungen.
+Ein Befehl, drei Wege: im Terminal (`aquaticy`), im Browser (`aquaticy web`) und vom Handy
+aus (`aquaticy web --lan`) — überall derselbe Agent mit denselben Einstellungen.
 
 ```
-$ cortex
+$ aquaticy
 
 > Finde mir gute Cafés in Mönchengladbach mit WLAN
 
@@ -34,19 +34,19 @@ $ cortex
 ## Quickstart in 3 Minuten
 
 ```bash
-# 1. Installieren (aus diesem Repo -- Cortex liegt noch nicht auf PyPI)
+# 1. Installieren (aus diesem Repo -- Aquaticy liegt noch nicht auf PyPI)
 git clone https://github.com/jonasenriklaumen-a11y/thing-finder-
 cd thing-finder-
 uv tool install .
 
 # 2. Einrichten -- fragt nach Modell und API-Key, testet beide
-cortex setup
+aquaticy setup
 
 # 3. Loslegen -- im Terminal
-cortex
+aquaticy
 
 # ... oder im Browser (oeffnet sich von selbst)
-cortex web
+aquaticy web
 ```
 
 **Aktualisieren** — beide Befehle müssen *im Repo-Verzeichnis* laufen, nicht im
@@ -56,32 +56,39 @@ Home-Verzeichnis:
 cd ~/thing-finder-          # dorthin, wo du geklont hast
 git pull
 uv tool install . --force --reinstall
-cortex --version            # zeigt, ob die neue Version aktiv ist
+aquaticy --version            # zeigt, ob die neue Version aktiv ist
 ```
 
 > Voraussetzungen: Python 3.11+ und [uv](https://docs.astral.sh/uv/). Sobald das Paket
-> veröffentlicht ist, genügt `uv tool install cortex`. Zum Entwickeln stattdessen
-> `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run cortex ...` aufrufen.
+> veröffentlicht ist, genügt `uv tool install aquaticy`. Zum Entwickeln stattdessen
+> `uv venv && uv pip install -e ".[dev]"` und alles mit `uv run aquaticy ...` aufrufen.
+
+### Umstieg von Cortex (vor 9.2.3)
+
+Mit 9.2.3 heißt das Programm nicht mehr Cortex, sondern **Aquaticy** — derselbe Agent,
+neuer Name, neuer Befehl. Bestehende Einstellungen ziehen nicht von selbst mit. Ein
+Durchlauf reicht:
+
+1. **Alte Installation entfernen** (`uv tool uninstall cortex`), sonst liegen zwei
+   Programme nebeneinander.
+2. **Datenordner umbenennen** — darin stecken Verlauf, Merkzettel, der verschlüsselte
+   Speicher und die Google-Anmeldung. Verschiebe den alten versteckten Ordner in
+   deinem Home-Verzeichnis von `~/.cortex` nach `~/.aquaticy` und den Ordner unter
+   `~/.config` von `~/.config/cortex` nach `~/.config/aquaticy`.
+3. **Die `.env` anpassen**: alle Schlüssel, die früher mit `CORTEX_…` begannen, heißen
+   jetzt `AQUATICY_…`. Die Namen der Anbieter-Schlüssel (`MISTRAL_API_KEY`,
+   `NVIDIA_NIM_API_KEY`, `GOOGLE_CLIENT_ID` …) bleiben unverändert.
+
+Wenn dir das zu fummelig ist: `aquaticy setup` legt eine frische `.env` an und fragt
+dich durch. Verlauf und Merkzettel sind dann weg, alles andere ist in zwei Minuten
+wieder eingerichtet.
 
 ### Umstieg von einer Version vor 7.5
 
-Mit 7.5 heißt alles einheitlich Cortex — das Programm, der Ordner mit deinen Daten und
-die Namen in der `.env`. Bestehende Einstellungen ziehen nicht von selbst mit. Ein
-Durchlauf reicht:
-
-1. **Alte Installation entfernen** (`uv tool uninstall <alter-name>`), sonst liegen
-   zwei Programme nebeneinander.
-2. **Datenordner umbenennen** — darin stecken Verlauf, Merkzettel, der verschlüsselte
-   Speicher und die Google-Anmeldung. Verschiebe den alten versteckten Ordner in
-   deinem Home-Verzeichnis nach `~/.cortex` und den Ordner unter `~/.config` nach
-   `~/.config/cortex`.
-3. **Die `.env` anpassen**: alle Schlüssel, die früher mit dem alten Namen begannen,
-   heißen jetzt `CORTEX_…`. Die Namen der Anbieter-Schlüssel (`MISTRAL_API_KEY`,
-   `NVIDIA_NIM_API_KEY`, `GOOGLE_CLIENT_ID` …) bleiben unverändert.
-
-Wenn dir das zu fummelig ist: `cortex setup` legt eine frische `.env` an und fragt
-dich durch. Verlauf und Merkzettel sind dann weg, alles andere ist in zwei Minuten
-wieder eingerichtet.
+Mit 7.5 hieß alles einheitlich Cortex — das Programm, der Ordner mit den Daten und die
+Namen in der `.env`. Wer noch auf einem Stand von davor ist, richtet am einfachsten
+gleich neu ein: `aquaticy setup` fragt Modell und Suchmaschine ab und schreibt eine
+frische `.env`. Alte, noch ältere Konfigurationsnamen versteht Aquaticy nicht mehr.
 
 ### Windows
 
@@ -91,25 +98,25 @@ Alles läuft auch unter Windows — in **PowerShell**:
 # uv installieren, falls noch nicht vorhanden
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-git clone --branch claude/cortex-ai-web-agent-yogr3j `
+git clone --branch claude/aquaticy-ai-web-agent-yogr3j `
   https://github.com/jonasenriklaumen-a11y/thing-finder-.git
 cd thing-finder-
 uv tool install .
 uv tool update-shell        # danach PowerShell neu öffnen
 
-cortex install-model        # holt Ollama per winget und lädt die Modelle
+aquaticy install-model        # holt Ollama per winget und lädt die Modelle
 ```
 
 Unterschiede zu Linux und macOS:
 
 * Ollama kommt per `winget install Ollama.Ollama`; ohne winget lädst du den Installer von
-  [ollama.com/download](https://ollama.com/download) und startest `cortex install-model`
+  [ollama.com/download](https://ollama.com/download) und startest `aquaticy install-model`
   danach erneut.
-* Pfade mit Backslash und Anführungszeichen: `cortex --image "C:\Users\du\Bilder"`
+* Pfade mit Backslash und Anführungszeichen: `aquaticy --image "C:\Users\du\Bilder"`
 * Pfeiltasten-History im Chat gibt es nur mit `pip install pyreadline3`.
 * Der Ollama-Server läuft im Hintergrund, ohne dass ein Konsolenfenster aufgeht.
 
-`cortex setup` fragt genau zwei Dinge ab:
+`aquaticy setup` fragt genau zwei Dinge ab:
 
 | Was | Wo bekommt man es | Pflicht? |
 |---|---|---|
@@ -117,21 +124,21 @@ Unterschiede zu Linux und macOS:
 | Suchmaschine | **Nichts.** Die offene Metasuche ist Standard und braucht weder Key noch Konto. | nein |
 
 Beide werden direkt mit einem Probe-Request getestet, bevor die `.env` geschrieben wird
-(nach `~/.config/cortex/.env`, Rechte `600`).
+(nach `~/.config/aquaticy/.env`, Rechte `600`).
 
 Ohne Chat, für einen einzelnen Durchlauf:
 
 ```bash
-cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
+aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 ```
 
 ## Beispiel-Session
 
 ```
-$ cortex --location "Mönchengladbach" --lang de
+$ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 9.2.2                                      │
+│ Aquaticy AI 9.2.3                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -166,7 +173,7 @@ $ cortex --location "Mönchengladbach" --lang de
   ...
 
 > /export html
-  Gespeichert: cortex-20260822-2043-ich-suche-einen-laptop.html
+  Gespeichert: aquaticy-20260822-2043-ich-suche-einen-laptop.html
 ```
 
 ## Kernprinzip
@@ -183,7 +190,7 @@ so oft er will:
 4. `calculate(expression)` — exakte Arithmetik (auch `1.099,99`), damit Preisvergleiche
    nie auf Kopfrechnen kleiner Modelle beruhen.
 5. `remember(text)` — schreibt auf einen dauerhaften Merkzettel, aber nur auf
-   ausdrückliche Bitte („merk dir …"). Anzeigen mit `/notes` bzw. `cortex notes`.
+   ausdrückliche Bitte („merk dir …"). Anzeigen mit `/notes` bzw. `aquaticy notes`.
 
 Ob Instagram, Amazon, ein Branchenbuch oder die Website eines Ladens: Alles sind einfach
 Suchtreffer, die gelesen werden können. Es gibt bewusst keine plattformspezifischen
@@ -218,12 +225,12 @@ Genauigkeit: gekürzt wird nur, wo sonst geraten werden müsste.
 
 ### Subagenten: Teilfragen parallel
 
-Vor jeder Planung schaut cortex kurz auf die Nachricht: **Braucht das überhaupt eine
+Vor jeder Planung schaut aquaticy kurz auf die Nachricht: **Braucht das überhaupt eine
 Recherche?** Offensichtlicher Small-Talk („hallo", „danke") wird per Heuristik erkannt und
 kostet keinen einzigen Modellaufruf. Bei allem anderen liefert **ein einziger Aufruf**
 Entscheidung *und* Teilfragen — auf dem kleinen Subagenten-Modell, mit abgeschaltetem
 Denk-Modus, kleinem Fenster und erzwungenem JSON-Schema. Fällt er aus oder dauert zu
-lange (`CORTEX_PLANNER_TIMEOUT`, Default 20 s), gilt sicherheitshalber „Recherche" —
+lange (`AQUATICY_PLANNER_TIMEOUT`, Default 20 s), gilt sicherheitshalber „Recherche" —
 lieber einmal zu viel geplant als eine echte Frage unbeantwortet.
 
 Warum das schnell ist — vier Hebel:
@@ -240,7 +247,7 @@ kleinem Modell hin- und herladen muss, kostet allein das mehr als alle Aufrufe z
 Jetzt läuft alles vor der eigentlichen Antwort auf dem kleinen Modell. Auch die
 Subagenten arbeiten ohne Denk-Modus — bei vier parallelen summiert sich das.
 
-Recherche-Anfragen zerlegt cortex dann von sich aus in Teilfragen und lässt sie parallel
+Recherche-Anfragen zerlegt aquaticy dann von sich aus in Teilfragen und lässt sie parallel
 bearbeiten, bevor der Hauptagent übernimmt:
 
 ```
@@ -313,17 +320,17 @@ bisherige Gespräch als Zusammenhang mit, damit die Teilfragen für sich verstä
 Der Hauptagent darf zusätzlich jederzeit selbst weitere Teilfragen abgeben
 (`research_subtasks`), wenn ihm im Verlauf etwas fehlt.
 
-**Abschalten** fragt `cortex setup` direkt ab, oder von Hand:
+**Abschalten** fragt `aquaticy setup` direkt ab, oder von Hand:
 
 ```bash
-CORTEX_SUBAGENTS_AUTO=false     # nur noch auf Wunsch des Modells
-CORTEX_MAX_SUBAGENTS=0          # ganz aus, zurück zu zwei Werkzeugen
+AQUATICY_SUBAGENTS_AUTO=false     # nur noch auf Wunsch des Modells
+AQUATICY_MAX_SUBAGENTS=0          # ganz aus, zurück zu zwei Werkzeugen
 ```
 
 #### Eigenes Modell für die Subagenten
 
 Teilfragen sind eng umrissen — dafür reicht ein kleines Modell, das neben dem
-Hauptmodell in den Speicher passt. `cortex install-model` fragt danach; Stand August 2026:
+Hauptmodell in den Speicher passt. `aquaticy install-model` fragt danach; Stand August 2026:
 
 | Modell | ca. Größe | ab VRAM |
 |---|---|---|
@@ -334,7 +341,7 @@ Hauptmodell in den Speicher passt. `cortex install-model` fragt danach; Stand Au
 | `qwen3:4b` | 2,5 GB | 5 GB |
 
 ```bash
-CORTEX_SUBAGENT_MODEL=ollama_chat/qwen3:1.7b   # leer = das kleine des Anbieters
+AQUATICY_SUBAGENT_MODEL=ollama_chat/qwen3:1.7b   # leer = das kleine des Anbieters
 ```
 
 Wichtig ist hier nur eines: Das Modell muss zuverlässig Werkzeuge aufrufen. Klug sein
@@ -345,8 +352,8 @@ Was nicht gefunden wurde, wird als „nicht gefunden" gekennzeichnet — niemals
 
 ## Wer antwortet da eigentlich
 
-Fragt man Cortex, wer er ist, sagt er: *„Ich bin Cortex, ein KI-Assistent von Jonas."*
-Nicht „ich bin ein Modell von Google" oder von sonst jemandem — Cortex ist das
+Fragt man Aquaticy, wer er ist, sagt er: *„Ich bin Aquaticy, ein KI-Assistent von Jonas."*
+Nicht „ich bin ein Modell von Google" oder von sonst jemandem — Aquaticy ist das
 Programm, das Sprachmodell darunter ist ein Bauteil davon, austauschbar über die
 Einstellungen.
 
@@ -357,7 +364,7 @@ antreibt.
 ## Weboberfläche
 
 ```bash
-cortex web
+aquaticy web
 ```
 
 Startet eine Oberfläche im Stil eines Chat-Fensters und öffnet den Browser. Es ist
@@ -367,20 +374,20 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
 
 * **Der Zustand liegt beim Server, nicht im Browser.** Erscheinungsbild,
   Farbschema, Arbeitsweise, Denktiefe und alle Schalter der Modellauswahl merkt
-  sich Cortex selbst — in derselben Datenbank wie den Rest. Das hat drei Gründe.
+  sich Aquaticy selbst — in derselben Datenbank wie den Rest. Das hat drei Gründe.
   **Jedes Gerät zeigt dasselbe:** am Rechner dunkel heißt am Handy dunkel, im
   Code-Modus angefangen heißt auf dem Tablet Code-Modus. **Nichts blinkt:** der
   Zustand steht schon im ausgelieferten HTML, die Seite kommt also von der ersten
   Zeile an richtig an, statt hell zu erscheinen und dann dunkel zu werden.
   **Und der Browser entscheidet nichts.** Was er schickt, ist ein Vorschlag; was
   gilt, prüft der Server gegen eine Liste erlaubter Werte
-  (`cortex/uistate.py`). Ein erfundener Modus, ein unbekanntes Feld, die
+  (`aquaticy/uistate.py`). Ein erfundener Modus, ein unbekanntes Feld, die
   Zeichenkette `"false"` als Wahrheitswert — nichts davon kommt durch. Im Browser
   bleibt genau eine Sache gespeichert: das Zugangswort für `--lan`, denn das
   *ist* der Ausweis und kann nirgendwo anders liegen.
 * **Was du im Formular einträgst, wird geprüft, bevor es gespeichert wird.**
   Buchstaben in einem Zahlenfeld, eine Zahl außerhalb ihres Bereichs, eine
-  Auswahl, die es nicht gibt: Cortex sagt, welches Feld gemeint ist, und
+  Auswahl, die es nicht gibt: Aquaticy sagt, welches Feld gemeint ist, und
   schreibt *nichts*. Vorher nahm er alles an, meldete „gespeichert", und die
   Einstellung tat trotzdem nichts — das merkt man erst Tage später.
 * **Handy, Tablet und großer Bildschirm** haben jeweils eigene Maße. Das Tablet
@@ -399,7 +406,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Dracula wie ein Fremdkörper aus (im Standardschema ist sie ohnehin grün).
 * **Hell oder dunkel**, in acht Farbschemata — unter *Erscheinungsbild* unten links
   (siehe weiter unten). Die Versionsnummer steht klein in der Kopfzeile.
-* **Einstellungen** öffnet ein Formular mit *allem*, was auch `cortex setup` fragt.
+* **Einstellungen** öffnet ein Formular mit *allem*, was auch `aquaticy setup` fragt.
   Der Kopf bleibt beim Scrollen stehen und trägt eine Marke je Abschnitt — ein Klick
   springt hin, statt durch das ganze Formular zu scrollen. Ein Test hält den Inhalt
   dauerhaft in Deckung mit dem Terminal: kommt dort eine Frage dazu, schlägt er fehl,
@@ -414,7 +421,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   direkt übernommen. Bis zu 5 Dateien à 25 MB. Ein gescanntes PDF ohne Textebene sagt
   das offen — geraten wird nichts.
 * **Rückfragen statt Raten.** Fehlt eine Angabe, ohne die die Antwort auf gut Glück
-  raten würde, *muss* Cortex fragen — in einem kleinen Fenster über dem Chat, mit
+  raten würde, *muss* Aquaticy fragen — in einem kleinen Fenster über dem Chat, mit
   anklickbaren Antworten oder einem Feld zum Selberschreiben. <kbd>Esc</kbd> heißt
   „überspringen". Das gilt vor allem für den **Ort** (Wetter, Öffnungszeiten, Preise
   vor Ort), den **Zeitraum**, das **Budget**, welches von mehreren gleichnamigen
@@ -433,7 +440,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Neueste oben, ab dem zweiten Tag nach *Heute*, *Gestern*, *Letzte 7 Tage* gruppiert.
   **Ein Chat bleibt ein Chat**, auch wenn du zwischendurch etwas umstellst:
   wer mitten im Gespräch das Modell wechselt oder eine Einstellung speichert,
-  will ein anderes Modell — kein anderes Gespräch. Cortex baut sich dafür intern
+  will ein anderes Modell — kein anderes Gespräch. Aquaticy baut sich dafür intern
   neu auf, kehrt danach aber in denselben Chat zurück und kennt den Verlauf noch.
   Ein neuer Chat beginnt nur, wenn du ihn beginnst: über **Neuer Chat** oder
   indem du zwischen *Normal* und *Code* wechselst (dazu unten mehr).
@@ -455,7 +462,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   gearbeitet wird. Im Code- und im Pro-Modus ist das nicht das eingestellte,
   sondern das stärkste erreichbare Modell — früher stand oben trotzdem das alte,
   man sah also nicht, dass ein anderes antwortet. Und man hat dort jetzt die
-  **Wahl**: in Code und Pro stellt Cortex die **drei stärksten** Modelle zur
+  **Wahl**: in Code und Pro stellt Aquaticy die **drei stärksten** Modelle zur
   Auswahl (und nur die — alles andere wäre eine Wahl, die gleich wieder
   überstimmt wird), im Standardmodus wie bisher alle. Was man dort im Code- oder
   Pro-Modus wählt, landet als *Code-Modell* in den Einstellungen und lässt das
@@ -476,7 +483,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
 * **Weggehen ist erlaubt.** Eine Anfrage lebt nicht mehr in ihrer Verbindung: der
   Lauf gehört dem Server. Wer die Seite verlässt, das Handy sperrt oder kurz in
-  eine andere App wechselt, reißt nur die Leitung ab — Cortex arbeitet weiter.
+  eine andere App wechselt, reißt nur die Leitung ab — Aquaticy arbeitet weiter.
   Beim Zurückkommen hängt sich die Seite von selbst wieder an und lässt den
   ganzen Verlauf ab dem ersten Ereignis nachwachsen (`[Weiter] Die Anfrage lief
   weiter, während du weg warst.`). Auch eine Antwort, die in der Zwischenzeit
@@ -487,7 +494,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   der Browser hört auf zuzuhören *und* der Agent hört auf zu arbeiten. Was bis
   dahin da war, bleibt stehen. Danach ist der Knopf wieder das Anhängen.
 * **Drei Arbeitsweisen**, umschaltbar unten neben *Anhängen*:
-  **Normal** ist ein Gespräch — Cortex antwortet selbst, in normaler Länge, und
+  **Normal** ist ein Gespräch — Aquaticy antwortet selbst, in normaler Länge, und
   sucht, wenn die Frage es braucht (alles Aktuelle, Örtliche, Preise, Zahlen,
   Versionen) oder wenn du ihn darum bittest („such mal", „stimmt das?"). Kein
   Bericht, keine Vorrecherche im Hintergrund, keine Agenten: eine Runde zum
@@ -542,7 +549,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   beim Prüfen mit. Deshalb kostet die Gegenprobe hier kaum Zeit, während sie im
   Standardmodus die Zeit verdoppelt. Der Prüfer antwortet mit einem Wort —
   **BESTÄTIGT**, **ABWEICHUNG** oder **UNKLAR** — und seinen Quellen; bei einer
-  Abweichung nennt Cortex in der Antwort **beide** Angaben mit ihrer Quelle.
+  Abweichung nennt Aquaticy in der Antwort **beide** Angaben mit ihrer Quelle.
   Die vier laufen **nur mit dem Schalter**: die Denktiefe schaltet niemanden
   ein, sie sagt nur, wie lange das Modell überlegt.
 
@@ -562,7 +569,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   dass es läuft — und bei Änderungen nur die geänderten Stellen statt der ganzen
   Datei. Fehlt Sprache, Version oder Zielsystem, fragt er, statt zu raten. Im Chat
   bekommt jeder Codeblock eine Kopfzeile mit der Sprache und einen **Kopieren**-Knopf.
-  Cortex nimmt dafür **automatisch das stärkste Modell, das er erreichen kann**
+  Aquaticy nimmt dafür **automatisch das stärkste Modell, das er erreichen kann**
   — beim Programmieren ist ein schwaches Modell am teuersten: Code, der falsch
   aussieht, erkennt man; Code, der falsch *ist*, nicht. Welches es war, steht in
   den Zwischenschritten; wer ein bestimmtes will, trägt es unter *Einstellungen
@@ -574,7 +581,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Was ein Modus ausblendet, entscheidet dabei der Server und nicht der Browser —
   und ein ausgeblendeter Schalter überschreibt den gespeicherten Stand nicht: ein
   Ausflug in den Code-Modus macht das abgeschaltete Web nicht dauerhaft wieder an.
-  Angeschaltet bekommt Cortex eine abgeschottete Maschine, in der er seinen Code
+  Angeschaltet bekommt Aquaticy eine abgeschottete Maschine, in der er seinen Code
   **wirklich ausführt**, statt zu behaupten, er laufe: ein Prozessorkern, 1 GB
   Arbeitsspeicher, 4 GB Platte unter `/work`, Python — und **kein Netz**. Er
   schreibt die Datei hinein, startet sie, liest die Ausgabe und behebt, was
@@ -582,7 +589,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Zwischenschritten.
 
   **Wie das abgesichert ist.** Code aus einem Sprachmodell ist fremder Code; er
-  läuft nie auf deinem Rechner — auch nicht „nur kurz". Cortex nimmt die stärkste
+  läuft nie auf deinem Rechner — auch nicht „nur kurz". Aquaticy nimmt die stärkste
   Abschottung, die er findet, und **fällt niemals auf den Rechner selbst zurück**:
   1. **gVisor** (`runsc`) — ein Kern im Nutzerraum beantwortet die Systemaufrufe,
      der echte Kernel wird nicht angefasst.
@@ -599,7 +606,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Schlüssel sehen die Werkstatt nie) und **kein** Verzeichnis deines Rechners.
   Dateien gehen nur durch das Werkzeug hinein und heraus.
 
-  **Nachschlagen geht weiter.** Die Werkstatt hat kein Netz — Cortex davor schon:
+  **Nachschlagen geht weiter.** Die Werkstatt hat kein Netz — Aquaticy davor schon:
   er darf die Signatur einer Bibliothek im Web nachlesen und den Code dann in der
   Werkstatt ausprobieren. Der Schalter *Im Web suchen* gehört zum Standardmodus; im
   Code-Modus ist Nachschlagen immer erlaubt, damit ein „aus" von nebenan es nicht
@@ -609,18 +616,18 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   `/work/eingang` — auch ein Bild oder ein Zip, also alles, was der Textweg nicht
   hergibt. Umgekehrt zeigt der Knopf 🗀 in der Kopfzeile (nur im Code-Modus mit
   eingeschalteter Werkstatt), was gerade unter `/work` liegt, mit Größe und einem
-  Knopf zum Herunterladen. Cortex selbst sieht dieselbe Liste über `vm_files` und
+  Knopf zum Herunterladen. Aquaticy selbst sieht dieselbe Liste über `vm_files` und
   kann dir deshalb sagen, wie die Datei heißt, die er gebaut hat.
 
   **Danach bleibt nichts.** 20 Minuten nach der letzten Nachricht werden Behälter und
   Datenträger gelöscht — die nächste Frage baut eine neue, leere Werkstatt. Beim
-  Beenden von Cortex ebenso, und beim Start räumt er weg, was ein Absturz
-  hinterlassen hat. Feineinstellung über `CORTEX_VM_IMAGE`,
-  `CORTEX_VM_IDLE_MINUTES`, `CORTEX_VM_MEMORY_MB`, `CORTEX_VM_DISK_GB`,
-  `CORTEX_VM_CPUS`.
+  Beenden von Aquaticy ebenso, und beim Start räumt er weg, was ein Absturz
+  hinterlassen hat. Feineinstellung über `AQUATICY_VM_IMAGE`,
+  `AQUATICY_VM_IDLE_MINUTES`, `AQUATICY_VM_MEMORY_MB`, `AQUATICY_VM_DISK_GB`,
+  `AQUATICY_VM_CPUS`.
 * **Im Web suchen an oder aus**, oben in der Modellauswahl — an ist der Normalfall.
   Im Code-Modus gibt es diesen Schalter nicht: dort zählt die Werkstatt.
-  Ausgeschaltet geht Cortex nicht mehr hinaus: Suche, Seitenabruf und Agenten werden
+  Ausgeschaltet geht Aquaticy nicht mehr hinaus: Suche, Seitenabruf und Agenten werden
   ihm gar nicht erst angeboten (ein Werkzeug anzubieten und den Aufruf dann abzulehnen
   kostet nur Runden). Er antwortet dann aus seinem eigenen Wissen, aus dem Gespräch,
   aus **angehängten Dateien** und aus seinem Speicher — und sagt dazu, woher er es hat
@@ -637,7 +644,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   geht selten gut: das Modell wechselt, der Systemtext wechselt, und die halbe
   Unterhaltung davor passt nicht mehr zu dem, was jetzt gefragt ist.
 * **Denken an oder aus**, in der Modellauswahl (nur im Standardmodus) — aus ist der
-  Normalfall. Angeschaltet denkt Cortex sichtbar nach, bevor er antwortet: du siehst
+  Normalfall. Angeschaltet denkt Aquaticy sichtbar nach, bevor er antwortet: du siehst
   zu, wie er sich die Antwort zurechtlegt, Wort für Wort in einer Zeile über der
   Antwort. Ausgeschaltet kommt nur das Ergebnis. Auf die Antwort selbst hat der
   Schalter keinen Einfluss — sie wird davon weder besser noch langsamer, und er
@@ -651,7 +658,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
 * **Strukturieren an oder aus**, in der Modellauswahl oben — aus ist der Normalfall.
   (Der Schalter hieß einmal „Denken". Gedacht wird immer; was er umlegt, ist die
   Zerlegung.)
-  Angeschaltet wird Cortex vom Gesprächspartner zum Rechercheagenten: er zerlegt
+  Angeschaltet wird Aquaticy vom Gesprächspartner zum Rechercheagenten: er zerlegt
   die Frage in Teilfragen, schickt für jede einen Agenten los und schreibt aus
   deren Funden eine ausführliche Antwort mit Quellen, Vergleich, Fazit und einem
   Abschnitt „Nicht gefunden". **Die Agenten teilen sich dabei eine Liste der
@@ -663,7 +670,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   die Werkstatt). Im **Pro-Modus** bedeutet er etwas anderes, und das steht auch dran:
   dort schickt er die vier Prüfer mit, die nebenher gegenlesen (siehe oben). Im
   Standardmodus ist er die klassische zweite Runde: ist er an, wird nach der Antwort
-  garantiert noch einmal gesucht — Cortex holt die frischen Treffer selbst, bevor
+  garantiert noch einmal gesucht — Aquaticy holt die frischen Treffer selbst, bevor
   das Modell wieder zu Wort kommt, und lässt dabei jede Seite aus, die beim ersten
   Mal dran war. (Vorher konnte das Modell die Aufforderung überlesen und seine
   alte Antwort einfach noch einmal hinschreiben.) Findet die zweite Runde etwas
@@ -694,26 +701,26 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   System „weniger Bewegung" eingestellt hat, bekommt gar keine. Fortschritts-
   oder Statusbalken gibt es bewusst nicht.
 * **Einstellungen im Gespräch ändern:** „Mach den Hintergrund weiß", „such lieber
-  auf Englisch", „nimm weniger Teilfragen" — das erledigt Cortex direkt, statt dich
+  auf Englisch", „nimm weniger Teilfragen" — das erledigt Aquaticy direkt, statt dich
   ins Formular zu schicken. Änderbar sind Erscheinungsbild, Farbschema, Ort,
   Sprache, Land, Suchmaschine, Formulierungen je Suche, Subagenten, Werkzeug-Budget, Kontextfenster,
   Browser-Fallback und das Modell.
 
-  **Nicht änderbar sind Zugangsdaten und alles, was Cortex mehr Zugriff gäbe:**
+  **Nicht änderbar sind Zugangsdaten und alles, was Aquaticy mehr Zugriff gäbe:**
   Schalten im Haus, Mail und Kalender, Schreibrechte im Lager, Netzzugriff,
   Gedächtnis. Das ist kein Misstrauen, sondern Bauweise: Wer Rechte vergibt, darf
   nicht derselbe sein, der sie bekommt — sonst wäre die dreistufige Rechteauswahl beim
   Lager eine Verabredung statt einer Grenze, und ein Satz im Chat würde genügen, um
   sie aufzuheben. Diese Schalter bleiben im Formular.
 * **Mitlesen** unter *Einstellungen → Mitlesen*: Der Schalter „Aktionen mitlesen"
-  zeigt während der Antwort, was Cortex AI gerade tut — jede Suchanfrage im
+  zeigt während der Antwort, was Aquaticy AI gerade tut — jede Suchanfrage im
   Wortlaut, jeden Werkzeugaufruf mit seinen Argumenten und was zurückkam. Die
   Denkschritte gehören ausdrücklich **nicht** dazu; die schaltet *Denken* in der
   Modellauswahl ein. Der Schalter wirkt sofort und auch rückwirkend auf die
   Antwort, die schon dasteht: die Zeilen sind die ganze Zeit da, sie werden nur
   ein- und ausgeblendet.
 * **Verbindung testen** im Feld *Suche*: schickt eine winzige Anfrage ans Modell und
-  eine Testsuche los — dasselbe, was `cortex setup` am Ende macht. Geprüft wird, was
+  eine Testsuche los — dasselbe, was `aquaticy setup` am Ende macht. Geprüft wird, was
   gerade im Formular steht, nicht der gespeicherte Stand; so sieht man vor dem
   Speichern, ob ein Schlüssel stimmt.
 * **Auslastung** unter *Einstellungen → Auslastung*: Der Haken „Auslastung des
@@ -732,7 +739,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   zustandslos, genau so rechnen die Anbieter auch ab) plus die Antwort und die
   Argumente der Werkzeugaufrufe. **Ein Limit gibt es bewusst nicht:** der Zähler soll
   zeigen, nicht bremsen. *Zähler zurücksetzen* leert ihn.
-* **Aufträge** unter *Einstellungen → Aufträge*: Fragen, die Cortex AI von selbst
+* **Aufträge** unter *Einstellungen → Aufträge*: Fragen, die Aquaticy AI von selbst
   stellt — stündlich, täglich oder wöchentlich zu einer festen Uhrzeit. Die Antwort
   landet als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
   **leuchtet dort, bis du sie geöffnet hast**: ein ruhig pulsierender Punkt und ein
@@ -754,25 +761,25 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   im Ordner nimmt er das neueste.
 
 ```bash
-cortex web --port 9000     # anderer Port, falls 8765 belegt ist
-cortex web --no-open       # ohne Browser zu öffnen
+aquaticy web --port 9000     # anderer Port, falls 8765 belegt ist
+aquaticy web --no-open       # ohne Browser zu öffnen
 ```
 
 Der Server läuft auf der Standardbibliothek, braucht also keine zusätzliche
 Abhängigkeit. Beenden mit <kbd>Strg</kbd>+<kbd>C</kbd>.
 
-### Vom Handy oder Tablet: `cortex web --lan`
+### Vom Handy oder Tablet: `aquaticy web --lan`
 
 ```bash
-cortex web --lan
+aquaticy web --lan
 ```
 
-Damit hört cortex auf allen Netzwerkkarten und nennt dir jede Adresse, unter der
+Damit hört aquaticy auf allen Netzwerkkarten und nennt dir jede Adresse, unter der
 er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 9.2.2                                                   │
+│ Aquaticy AI 9.2.3                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -783,20 +790,20 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 ```
 
 **Mehr als Adresse und Port braucht es nicht** — keine Anmeldung, kein Zugangswort,
-nichts einzutippen. Die Adressen ermittelt cortex selbst, du musst nichts
+nichts einzutippen. Die Adressen ermittelt aquaticy selbst, du musst nichts
 nachschlagen. Die Tailscale-Adresse erscheint nur, wenn Tailscale auch läuft.
 
 Wer den Zugang trotzdem einschränken will, vergibt ein Wort:
 
 ```bash
-cortex web --lan --token familie   # dann nur mit ?token=familie in der Adresse
-cortex web --host 192.168.1.44     # gezielt eine Netzwerkkarte
+aquaticy web --lan --token familie   # dann nur mit ?token=familie in der Adresse
+aquaticy web --host 192.168.1.44     # gezielt eine Netzwerkkarte
 ```
 
 Das Wort hängt hinten an der Adresse. Nur der erste Aufruf braucht es — danach
-merkt es sich der Browser, und cortex nimmt es aus der Adresszeile heraus. Es darf
+merkt es sich der Browser, und aquaticy nimmt es aus der Adresszeile heraus. Es darf
 nur ASCII enthalten (also `gruen`, nicht `grün`): der Browser schickt es als
-HTTP-Kopfzeile mit, und die verträgt keine Umlaute. cortex sagt es dir beim Start,
+HTTP-Kopfzeile mit, und die verträgt keine Umlaute. aquaticy sagt es dir beim Start,
 falls das Wort nicht taugt.
 
 **Wenn das andere Gerät die Seite nicht lädt:** meist blockt die Firewall des
@@ -809,7 +816,7 @@ Alle Geräte teilen sich **eine** Sitzung — der Gesprächsverlauf ist also der
 egal von wo du weiterfragst. Fragt ein zweites Gerät, während noch eine Recherche
 läuft, sieht es „[Warte] Ein anderes Gerät fragt gerade" und kommt danach dran.
 Ins offene Internet stellt `--lan` nichts: dafür bräuchte es zusätzlich eine
-Portfreigabe im Router. Über Tailscale erreichst du cortex auch von unterwegs,
+Portfreigabe im Router. Über Tailscale erreichst du aquaticy auch von unterwegs,
 ohne eine solche Freigabe — genau dafür ist es da.
 
 ## Chat-Interface
@@ -822,7 +829,7 @@ ohne eine solche Freigabe — genau dafür ist es da.
 | `/export html\|md\|csv` | Recherche dieser Sitzung speichern |
 | `/image <pfad>` | Bild beschreiben lassen, danach damit recherchieren |
 | `/history` | frühere Recherchen anzeigen |
-| `/notes` | Merkzettel anzeigen (pflegen: `cortex notes --delete N`) |
+| `/notes` | Merkzettel anzeigen (pflegen: `aquaticy notes --delete N`) |
 | `/clear` | Gesprächsverlauf verwerfen |
 | `/help` | Übersicht |
 | `/quit` | beenden (auch <kbd>Strg</kbd>+<kbd>D</kbd>) |
@@ -830,7 +837,7 @@ ohne eine solche Freigabe — genau dafür ist es da.
 Der Kontext bleibt über mehrere Turns erhalten, Nachfragen wie „nur die mit 4+ Sternen"
 funktionieren also.
 
-**Umgekehrt fragt cortex auch selbst nach.** Ist etwas Entscheidendes offen — Budget,
+**Umgekehrt fragt aquaticy auch selbst nach.** Ist etwas Entscheidendes offen — Budget,
 Ort, welches von mehreren Dingen gemeint ist —, stellt er *eine* Rückfrage und wartet
 auf die Antwort. Im Terminal tippst du sie ein (oder die Nummer einer angebotenen
 Möglichkeit), Enter allein überspringt. Er fragt höchstens zweimal je Anfrage und nur,
@@ -840,36 +847,36 @@ schreibt sie in die Antwort.
 ### Flags
 
 ```bash
-cortex --location "Mönchengladbach" --lang de   # Ortsfilter vorgeben
-cortex --model mistral/mistral-large-latest     # Modell für diese Sitzung
-cortex --image foto.jpg                         # Bild als Ausgangspunkt
-cortex --max-calls 30                           # Werkzeug-Budget ändern
-cortex --no-stream                              # Antwort am Stück statt gestreamt
-cortex --download-images                        # Bilder beim Export mitspeichern
+aquaticy --location "Mönchengladbach" --lang de   # Ortsfilter vorgeben
+aquaticy --model mistral/mistral-large-latest     # Modell für diese Sitzung
+aquaticy --image foto.jpg                         # Bild als Ausgangspunkt
+aquaticy --max-calls 30                           # Werkzeug-Budget ändern
+aquaticy --no-stream                              # Antwort am Stück statt gestreamt
+aquaticy --download-images                        # Bilder beim Export mitspeichern
 ```
 
 ### Weitere Unterbefehle
 
 ```bash
-cortex search "cafés mönchengladbach"    # nur web_search, ohne LLM
-cortex fetch https://example.de/         # nur fetch_page, ohne LLM
-cortex cache                             # Cache-Statistik, --clear leert ihn
-cortex history                           # vergangene Recherchen
-cortex export html -n 3                  # letzte 3 Recherchen exportieren
-cortex config                            # aktive Konfiguration prüfen
-cortex install-model                     # lokales Modell einrichten (ohne Key)
-cortex install-browser                   # Playwright-Fallback aktivieren
-cortex web                               # Oberflaeche im Browser starten
-cortex web --lan                         # auch vom Handy im heimischen Netz
-cortex lan                               # Geraete im eigenen Netz anzeigen
-cortex connect-ha                        # Home Assistant verbinden
-cortex google                            # Gmail und Kalender verbinden (lesend)
-cortex google --aendern                  # dazu Termine ändern und Entwürfe schreiben
+aquaticy search "cafés mönchengladbach"    # nur web_search, ohne LLM
+aquaticy fetch https://example.de/         # nur fetch_page, ohne LLM
+aquaticy cache                             # Cache-Statistik, --clear leert ihn
+aquaticy history                           # vergangene Recherchen
+aquaticy export html -n 3                  # letzte 3 Recherchen exportieren
+aquaticy config                            # aktive Konfiguration prüfen
+aquaticy install-model                     # lokales Modell einrichten (ohne Key)
+aquaticy install-browser                   # Playwright-Fallback aktivieren
+aquaticy web                               # Oberflaeche im Browser starten
+aquaticy web --lan                         # auch vom Handy im heimischen Netz
+aquaticy lan                               # Geraete im eigenen Netz anzeigen
+aquaticy connect-ha                        # Home Assistant verbinden
+aquaticy google                            # Gmail und Kalender verbinden (lesend)
+aquaticy google --aendern                  # dazu Termine ändern und Entwürfe schreiben
 ```
 
-## Der Speicher: was Cortex AI behält
+## Der Speicher: was Aquaticy AI behält
 
-Ohne Speicher fängt jedes Gespräch bei null an. Mit Speicher merkt sich Cortex AI, was
+Ohne Speicher fängt jedes Gespräch bei null an. Mit Speicher merkt sich Aquaticy AI, was
 länger gilt — Wohnort, Vorlieben, laufende Vorhaben — und findet es beim nächsten Mal
 wieder.
 
@@ -885,7 +892,7 @@ wieder.
 ```
 
 **Persönliches merkt er sich von selbst.** Sagst du beiläufig „ich heiße Jonas",
-„ich wohne in Bremen", „Kaffee mag ich nicht", legt Cortex das ab, ohne dass du
+„ich wohne in Bremen", „Kaffee mag ich nicht", legt Aquaticy das ab, ohne dass du
 darum bitten musst — solche Sätze kommen nebenbei und kehren nicht wieder; wer sie
 nicht mitschreibt, fragt in zwei Wochen noch einmal danach. Er sagt in einem
 Halbsatz dazu, dass er es sich gemerkt hat (heimlich mitschreiben wäre unhöflich),
@@ -902,14 +909,14 @@ ausdrückliche Bitte („merk dir …"), dafür hängt sein Inhalt an *jedem* Ge
 
 Vier Regeln bestimmen den Aufbau:
 
-* **Nur Text.** Cortex AI legt ab, was es selbst formuliert hat. Bilder und Dateien
+* **Nur Text.** Aquaticy AI legt ab, was es selbst formuliert hat. Bilder und Dateien
   kommen ausschließlich von dir und liegen getrennt.
 * **Verschlüsselt.** Die Notizen stehen nicht im Klartext in der Datenbank. Wer die
   Datei kopiert — aus einem Backup, von einem verlorenen Laptop — liest ohne Schlüssel
   nichts.
 * **Höchstens 400 MB**, zusammen mit Verlauf und hochgeladenen Dateien. Wird es eng,
   fliegen zuerst alte Uploads raus: ein Bild liegt meist noch woanders, eine Notiz nicht.
-* **Abschaltbar** unter *Einstellungen → Speicher*, oder mit `CORTEX_MEMORY=false`.
+* **Abschaltbar** unter *Einstellungen → Speicher*, oder mit `AQUATICY_MEMORY=false`.
 
 ```bash
 /memory            # was liegt drin, wie voll ist es
@@ -937,7 +944,7 @@ Benutzerkonto sitzt — der liest den Schlüssel einfach mit.
 Wer auch das abdecken will, setzt eine Passphrase:
 
 ```bash
-CORTEX_MEMORY_KEY="ein langes Passwort" cortex web
+AQUATICY_MEMORY_KEY="ein langes Passwort" aquaticy web
 ```
 
 Dann wird der Schlüssel bei jedem Start neu abgeleitet und liegt nirgends auf der
@@ -946,7 +953,7 @@ Platte. Der Preis: ohne die Passphrase ist der Speicher unwiederbringlich weg.
 ## Die Lagerverwaltung
 
 „Wo liegt das Ladekabel", „habe ich noch 4×40er Schrauben", „was ist alles im
-Keller" — dafür gibt es kein Suchergebnis im Web. Cortex kann diese Fragen aus der
+Keller" — dafür gibt es kein Suchergebnis im Web. Aquaticy kann diese Fragen aus der
 [Lagerverwaltung](https://github.com/jonasenriklaumen-a11y/storage-system) beantworten,
 wenn sie im selben Netz läuft: **Räume → Möbel → Artikel**, jeder Artikel mit einer
 eindeutigen Nummer wie `B42`.
@@ -962,9 +969,9 @@ ab und trägt die Adresse ein; **Testen** sagt, was dort steht. Von Hand geht au
 > `version`). Auf Port 3000 läuft in vielen Haushalten irgendein anderer
 > Entwicklungsserver.
 
-### Was Cortex dort darf
+### Was Aquaticy dort darf
 
-Drei Stufen, einzustellen unter *Was Cortex dort darf*:
+Drei Stufen, einzustellen unter *Was Aquaticy dort darf*:
 
 | Stufe | Was geht |
 |---|---|
@@ -984,7 +991,7 @@ der Oberfläche.
 
 > **Und eine Ehrlichkeit dazu:** Die Lagerverwaltung selbst kennt keine Anmeldung — sie
 > ist fürs Heimnetz gebaut, wer drin ist, darf schreiben. „Nur lesen" ist damit eine
-> Fessel für Cortex, **kein Schloss am Server**. Wer ihn über das Heimnetz hinaus
+> Fessel für Aquaticy, **kein Schloss am Server**. Wer ihn über das Heimnetz hinaus
 > erreichbar macht, braucht davor einen Reverse Proxy mit Anmeldung.
 
 ### Was danach geht
@@ -1000,7 +1007,7 @@ der Oberfläche.
 ```
 
 Vier Werkzeuge: `storage_find` (Nummer oder Name), `storage_browse` (Räume → Möbel →
-Artikel), `storage_add` und `storage_edit`. Beim Ändern des Bestands nimmt Cortex
+Artikel), `storage_add` und `storage_edit`. Beim Ändern des Bestands nimmt Aquaticy
 bewusst die *relative* Änderung (`delta`), nicht den gesetzten Wert: Wenn zwei Leute
 gleichzeitig eine Schraube entnehmen, kommen so beide Entnahmen an — ein gesetzter Wert
 würde eine davon überschreiben.
@@ -1008,7 +1015,7 @@ würde eine davon überschreiben.
 ## Gmail und Google Kalender
 
 „Wann ist mein Zahnarzttermin", „ist die Rechnung schon gekommen", „was habe ich
-Donnerstag vor" — dafür muss niemand das Web durchsuchen. Cortex AI kann direkt in
+Donnerstag vor" — dafür muss niemand das Web durchsuchen. Aquaticy AI kann direkt in
 deinem Kalender und deinem Postfach nachsehen, wenn du es erlaubst.
 
 Die Angaben helfen auch bei einer Recherche: Steht der Termin in Hamburg, sucht er für
@@ -1016,7 +1023,7 @@ Hamburg. Nennt die Bestellbestätigung eine Modellnummer, sucht er danach.
 
 **Standardmäßig nur lesen.** Angefragt werden ausschließlich die Leserechte
 `gmail.readonly` und `calendar.readonly`. Damit ist technisch ausgeschlossen, dass
-Cortex AI eine Mail verschickt, beantwortet, löscht oder einen Termin ändert — Google
+Aquaticy AI eine Mail verschickt, beantwortet, löscht oder einen Termin ändert — Google
 lässt es schlicht nicht zu. Bittest du ihn trotzdem darum, sagt er, dass er das nicht
 kann.
 
@@ -1024,7 +1031,7 @@ kann.
 *Ändern erlaubt* und verbindest danach neu, kommen genau zwei Rechte dazu:
 `calendar.events` (Termine anlegen und ändern) und `gmail.compose` (**Entwürfe**
 schreiben). Bewusst **nicht** `gmail.send`: ein Entwurf lässt sich noch lesen, bevor er
-hinausgeht, eine verschickte Mail nicht zurückholen. Cortex verschickt nichts und
+hinausgeht, eine verschickte Mail nicht zurückholen. Aquaticy verschickt nichts und
 löscht nichts — dafür holt er sich die Rechte gar nicht erst. Und vor jeder einzelnen
 Änderung fragt er in einem Fenster nach; sagst du nein, passiert nichts. Läuft gerade
 niemand davor (etwa bei einem Auftrag, siehe unten), wird ebenfalls nichts geändert.
@@ -1039,7 +1046,7 @@ umständlicher, als es ist, und es ist kostenlos.
 
 1. **Projekt anlegen.** Auf [console.cloud.google.com](https://console.cloud.google.com/)
    anmelden, oben links auf die Projektauswahl, *Neues Projekt*. Der Name ist egal,
-   zum Beispiel „Cortex".
+   zum Beispiel „Aquaticy".
 2. **Die beiden APIs einschalten.** *APIs und Dienste → Bibliothek*, nach `Gmail API`
    suchen, **Aktivieren**. Dasselbe mit `Google Calendar API`. Ohne diesen Schritt
    antwortet Google später mit „has not been used in project".
@@ -1055,18 +1062,18 @@ umständlicher, als es ist, und es ist kostenlos.
 5. **Verbinden.** Zwei Wege, beide gleichwertig:
 
 ```bash
-cortex google            # fragt nach ID und Secret, führt durch die Anmeldung
-cortex google --aendern  # dasselbe, aber mit Schreibrechten (siehe oben)
+aquaticy google            # fragt nach ID und Secret, führt durch die Anmeldung
+aquaticy google --aendern  # dasselbe, aber mit Schreibrechten (siehe oben)
 ```
 
    Oder in der Weboberfläche: *Einstellungen → Gmail & Kalender*, Haken setzen,
    Client-ID und Secret einfügen, **speichern**, dann **Verbinden**. Du landest bei
-   Google, stimmst zu, und bist zurück. Soll Cortex auch ändern dürfen, setz vorher
+   Google, stimmst zu, und bist zurück. Soll Aquaticy auch ändern dürfen, setz vorher
    den Haken *Ändern erlaubt* — er entscheidet, welche Rechte angefragt werden.
    Schaltest du ihn später um, musst du einmal neu verbinden.
 
 > **Vom Handy aus?** Google erlaubt für Desktop-Anwendungen nur `localhost` als
-> Rückweg. Sitzt dein Browser auf einem anderen Gerät als Cortex, zeigt er nach der
+> Rückweg. Sitzt dein Browser auf einem anderen Gerät als Aquaticy, zeigt er nach der
 > Zustimmung eine Fehlerseite — das ist normal. Kopiere die komplette Adresse aus der
 > Adresszeile und füge sie in das Feld unter *Verbinden* ein; der Code steht darin.
 
@@ -1113,29 +1120,29 @@ nach, statt sie zu erfinden.
 ### Was mit deinen Daten passiert
 
 * **Die Anmeldedaten bleiben auf deinem Rechner.** Access- und Refresh-Token liegen
-  verschlüsselt in `~/.cortex/google.json` (dieselbe Fernet-Schlüsseldatei wie beim
+  verschlüsselt in `~/.aquaticy/google.json` (dieselbe Fernet-Schlüsseldatei wie beim
   Speicher, Rechte 600). Der Browser bekommt sie nie zu sehen — nur, *ob* ein Konto
   verbunden ist und welche Adresse es hat.
 * **Nichts aus deinem Postfach geht an eine Suchmaschine.** Der Agent hat die
   ausdrückliche Anweisung, niemals Namen, Adressen, Nummern oder Betreffs aus Mails
   und Terminen in eine Suchanfrage zu setzen — die ginge an einen fremden Dienst. Er
   sucht mit allgemeinen Begriffen; das Persönliche bleibt im Gespräch.
-* **Beenden jederzeit:** `cortex google --trennen` oder der Knopf *Trennen* in den
+* **Beenden jederzeit:** `aquaticy google --trennen` oder der Knopf *Trennen* in den
   Einstellungen löscht die Anmeldedaten. Den Zugriff selbst entziehst du zusätzlich
   unter [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
 ## Zuhause: Heimnetz und Home Assistant
 
 Manche Fragen kann kein Suchtreffer beantworten. „Welche Geräte hängen hier im Netz",
-„läuft mein Drucker noch", „wie warm ist es im Wohnzimmer" — dafür sieht cortex selbst
+„läuft mein Drucker noch", „wie warm ist es im Wohnzimmer" — dafür sieht aquaticy selbst
 nach.
 
 ### Das eigene Netz
 
 ```bash
-cortex lan                      # zeigt, was erreichbar ist
-cortex lan --thorough           # alle bekannten Ports statt der zwölf häufigsten
-cortex lan --subnet 10.0.0.0/24
+aquaticy lan                      # zeigt, was erreichbar ist
+aquaticy lan --thorough           # alle bekannten Ports statt der zwölf häufigsten
+aquaticy lan --subnet 10.0.0.0/24
 ```
 
 ```
@@ -1150,24 +1157,24 @@ Im Chat geht dasselbe in Worten: *„welche Geräte hängen in meinem Netz"*, *�
 192.168.1.23 noch da"*. Zwei Grenzen sind fest verdrahtet:
 
 * **Nur private Netze** — 10.x, 172.16–31.x, 192.168.x und das Tailnet (100.64/10).
-  Fremde Adressen lehnt cortex ab, in jeder Schreibweise. Höchstens 512 Adressen am
+  Fremde Adressen lehnt aquaticy ab, in jeder Schreibweise. Höchstens 512 Adressen am
   Stück, ein `/16` also nicht.
-* **Nur die Frage „antwortet da etwas"** — cortex klopft an, liest den Titel einer
+* **Nur die Frage „antwortet da etwas"** — aquaticy klopft an, liest den Titel einer
   Weboberfläche und geht weiter. Keine Passwortversuche, keine Schwachstellensuche.
   Ein Gerät, das nicht antwortet, heißt „nicht erreichbar", nie „existiert nicht": es
   kann auch schlafen.
 
-Abschalten: `CORTEX_LAN_ENABLED=false` oder der Haken in den Einstellungen.
+Abschalten: `AQUATICY_LAN_ENABLED=false` oder der Haken in den Einstellungen.
 
 ### Home Assistant
 
-**cortex bringt kein Home Assistant mit und startet keins.** Er sucht das, das bei dir
+**aquaticy bringt kein Home Assistant mit und startet keins.** Er sucht das, das bei dir
 schon läuft, und meldet sich dort mit einem langlebigen Zugriffstoken an — genau wie
-jede andere App, der du Zugriff gibst. Deine Installation bleibt unangetastet; cortex
+jede andere App, der du Zugriff gibst. Deine Installation bleibt unangetastet; aquaticy
 ist nur ein weiterer Client.
 
 ```bash
-cortex connect-ha
+aquaticy connect-ha
 ```
 
 Das sucht die Instanz selbst im Netz (erst die üblichen Namen wie `homeassistant.local`,
@@ -1186,10 +1193,10 @@ und Token in die `.env`. Eine Minute, dann kannst du fragen:
 ```
 
 In der Weboberfläche geht dasselbe unter **Einstellungen → Zuhause & Netz**: „Suchen"
-findet die Instanz, „Testen" prüft das Token und sagt dir, wie viele Geräte cortex
+findet die Instanz, „Testen" prüft das Token und sagt dir, wie viele Geräte aquaticy
 sieht.
 
-**Schalten ist standardmäßig aus.** Ohne Haken sieht cortex nur nach. Mit Haken darf er
+**Schalten ist standardmäßig aus.** Ohne Haken sieht aquaticy nur nach. Mit Haken darf er
 Licht, Steckdosen, Szenen und Medien bedienen — und selbst dann fragt er bei
 **Schlössern, Alarmanlagen, Toren, Rollläden, Heizung und Saugrobotern** jedes Mal
 nach, bevor er etwas tut. Ein missverstandener Halbsatz soll nicht die Haustür
@@ -1202,17 +1209,17 @@ Assistant selbst: dasselbe Menü, Token löschen, fertig.
 
 ### Im Container: die Netzwerkkarte des Rechners
 
-Läuft cortex im Container, hängt er in Dockers eigenem Brücken-Netz — von dort ist dein
-Heimnetz **nicht** zu sehen, `cortex lan` und `connect-ha` fänden schlicht nichts.
+Läuft aquaticy im Container, hängt er in Dockers eigenem Brücken-Netz — von dort ist dein
+Heimnetz **nicht** zu sehen, `aquaticy lan` und `connect-ha` fänden schlicht nichts.
 Deshalb:
 
 ```bash
-./cortex-box --lan                              # Wrapper, setzt es selbst
-CORTEX_NETWORK=host docker compose run --rm cortex
+./aquaticy-box --lan                              # Wrapper, setzt es selbst
+AQUATICY_NETWORK=host docker compose run --rm aquaticy
 docker run --network host ...                   # ohne Compose
 ```
 
-Merkt cortex, dass er im Container nur das Container-Netz sieht, sagt er es von sich aus,
+Merkt aquaticy, dass er im Container nur das Container-Netz sieht, sagt er es von sich aus,
 statt dich rätseln zu lassen.
 
 ## Was sich nicht finden lässt
@@ -1220,13 +1227,13 @@ statt dich rätseln zu lassen.
 Das härteste Suchproblem ist nicht die große Frage, sondern die kleine: der
 Fahrradladen in der Nebenstraße, die Werkstatt ohne Website, der Verein, dessen
 Programm nur als PDF existiert. Suchmaschinen kennen sie nicht oder erst auf
-Seite vier, weil niemand für sie optimiert. Dagegen hat Cortex drei Mittel.
+Seite vier, weil niemand für sie optimiert. Dagegen hat Aquaticy drei Mittel.
 
 **Die Karte.** `local_places` fragt **OpenStreetMap** statt einer Suchmaschine —
 erst den Ort (Nominatim), dann die Umgebung (Overpass). Zurück kommen Name,
 Adresse, Telefon, Öffnungszeiten und, wenn es eine gibt, die **Website**:
 eingetragen von Leuten vor Ort, nicht von einer Marketingabteilung. Was dabei
-herauskommt, liest Cortex danach ganz normal mit `fetch_page`. Für alles
+herauskommt, liest Aquaticy danach ganz normal mit `fetch_page`. Für alles
 Örtliche ist das der beste erste Griff, nicht der letzte.
 
 Beide Dienste gehören der OpenStreetMap Foundation und sind gespendete
@@ -1295,7 +1302,7 @@ offensichtlich außerhalb liegen, sortiert der Agent aus. Vorgebbar per Flag ode
 Slash-Befehl:
 
 ```bash
-cortex --location "Mönchengladbach" --lang de
+aquaticy --location "Mönchengladbach" --lang de
 ```
 ```
 /location Köln
@@ -1304,47 +1311,47 @@ cortex --location "Mönchengladbach" --lang de
 ## Bild als Eingabe
 
 ```bash
-cortex --image foto.jpg              # eine Datei
-cortex --image ~/hallo1234           # ein Ordner -- cortex sucht das Bild darin
-cortex --image ~/hallo1234 "wo kann ich das kaufen?"
+aquaticy --image foto.jpg              # eine Datei
+aquaticy --image ~/hallo1234           # ein Ordner -- aquaticy sucht das Bild darin
+aquaticy --image ~/hallo1234 "wo kann ich das kaufen?"
 ```
 
-Zeigt der Pfad auf einen **Ordner**, nimmt cortex das einzige Bild darin; sind es mehrere,
+Zeigt der Pfad auf einen **Ordner**, nimmt aquaticy das einzige Bild darin; sind es mehrere,
 listet er sie auf (neueste zuerst) und fragt, welches gemeint ist.
 
 Ein Vision-Modell beschreibt, was auf dem Bild zu sehen ist (Produkt, Logo, Schild,
 Text), daraus werden Suchbegriffe — danach läuft die normale Recherche. Im Chat geht
 dasselbe mit `/image pfad.jpg`.
 
-Es wird nichts hochgeladen: cortex liest die Datei von deiner Platte. Zuständig ist
-`CORTEX_VISION_MODEL`; ist das leer, wird das Hauptmodell gefragt — und **Textmodelle
+Es wird nichts hochgeladen: aquaticy liest die Datei von deiner Platte. Zuständig ist
+`AQUATICY_VISION_MODEL`; ist das leer, wird das Hauptmodell gefragt — und **Textmodelle
 können keine Bilder sehen**. Ein lokales Vision-Modell richtest du so ein:
 
 ```bash
-cortex install-model --vision-only
+aquaticy install-model --vision-only
 ```
 
-Welches Modell gerade zuständig ist, zeigt `cortex config` in der Zeile „Vision-Modell".
+Welches Modell gerade zuständig ist, zeigt `aquaticy config` in der Zeile „Vision-Modell".
 
 ## Im Container laufen lassen
 
-Wer cortex nicht direkt aufs System installieren will, lässt es in einem Container
+Wer aquaticy nicht direkt aufs System installieren will, lässt es in einem Container
 laufen. Der isoliert das **Dateisystem**, nicht die Verbindung: das Netz bleibt
 uneingeschränkt offen, sonst könnte der Agent nicht recherchieren.
 
 ```bash
-./cortex-box --setup            # einmalig: fragt Modell und Key ab, schreibt ./.env
-./cortex-box                    # Chat
-./cortex-box "deine Frage"      # einmalige Recherche
-./cortex-box search "test"      # nur die Suche, ohne LLM
+./aquaticy-box --setup            # einmalig: fragt Modell und Key ab, schreibt ./.env
+./aquaticy-box                    # Chat
+./aquaticy-box "deine Frage"      # einmalige Recherche
+./aquaticy-box search "test"      # nur die Suche, ohne LLM
 ```
 
 Oder direkt mit Compose, ohne den Wrapper:
 
 ```bash
-docker compose run --rm cortex                 # Chat
-docker compose run --rm cortex "deine Frage"
-docker compose build cortex                    # nach Codeänderungen
+docker compose run --rm aquaticy                 # Chat
+docker compose run --rm aquaticy "deine Frage"
+docker compose build aquaticy                    # nach Codeänderungen
 ```
 
 ### Was der Container sieht — und was nicht
@@ -1353,22 +1360,22 @@ docker compose build cortex                    # nach Codeänderungen
 |---|---|
 | **Netz** | vollständig offen, keine Einschränkung — nötig für Suche und Seitenabruf |
 | **Dateisystem** | nur `/data` (Cache + Verlauf, Docker-Volume) und `/work` (→ `./exports`) |
-| **Benutzer** | nicht `root`, sondern `cortex` (UID 1000) |
+| **Benutzer** | nicht `root`, sondern `aquaticy` (UID 1000) |
 | **Rechte** | `no-new-privileges`, keine Zugriffe aufs Home-Verzeichnis des Hosts |
 | **Keys** | kommen aus `./.env`, werden als Umgebungsvariablen hineingereicht |
 
 Exporte (`/export html`) landen in `./exports` und sind damit direkt auf dem Host
-lesbar. Cache und Verlauf überleben im Volume `cortex-data`.
+lesbar. Cache und Verlauf überleben im Volume `aquaticy-data`.
 
 ### Zwei Varianten des Images
 
 ```bash
-docker compose build cortex                                  # mit Chromium (Default)
-CORTEX_IMAGE_TARGET=slim docker compose build cortex         # ohne, ~700 MB kleiner
+docker compose build aquaticy                                  # mit Chromium (Default)
+AQUATICY_IMAGE_TARGET=slim docker compose build aquaticy         # ohne, ~700 MB kleiner
 ```
 
 Das `browser`-Image bringt Chromium für den JavaScript-Fallback (Stufe 3) mit. Darin
-läuft Chromium ohne seine eigene Sandbox (`CORTEX_BROWSER_NO_SANDBOX=1`) — die Isolation
+läuft Chromium ohne seine eigene Sandbox (`AQUATICY_BROWSER_NO_SANDBOX=1`) — die Isolation
 übernimmt der Container. Bei einer normalen Installation aufs System bleibt die
 Browser-Sandbox aktiv.
 
@@ -1378,8 +1385,8 @@ Zusammen mit SearXNG geht auch die Suche über keinen fremden Dienst mehr:
 
 ```bash
 docker compose --profile searxng up -d searxng
-echo 'CORTEX_SEARCH_BACKEND=searxng' >> .env
-docker compose --profile searxng run --rm cortex
+echo 'AQUATICY_SEARCH_BACKEND=searxng' >> .env
+docker compose --profile searxng run --rm aquaticy
 ```
 
 Die mitgelieferte `docker/searxng/settings.yml` hat die JSON-Ausgabe bereits aktiviert.
@@ -1389,13 +1396,13 @@ Ersetze darin vor dem ersten Start den `secret_key` durch etwas Eigenes
 ## Suchmaschine — ohne API-Key
 
 Die Suche kostet nichts und braucht **kein Konto**. Standard ist eine offene Metasuche:
-`cortex` fragt über [`ddgs`](https://pypi.org/project/ddgs/) mehrere freie Suchmaschinen
+`aquaticy` fragt über [`ddgs`](https://pypi.org/project/ddgs/) mehrere freie Suchmaschinen
 per HTML ab und mischt die Treffer. Fällt eine aus (Rate-Limit, Umbau), übernehmen die
 anderen — genau deshalb ist die Metasuche robuster als eine einzelne Engine.
 
 ### Wie gesucht wird: mehrere Formulierungen statt einer
 
-Eine einzige Formulierung findet nur, was zufällig genau so im Netz steht. Cortex AI
+Eine einzige Formulierung findet nur, was zufällig genau so im Netz steht. Aquaticy AI
 stellt dieselbe Frage deshalb mehrfach anders und führt die Trefferlisten zusammen —
 in der Fachsprache *query fan-out* mit *Reciprocal Rank Fusion*. Drei Regeln aus der
 Literatur stecken darin:
@@ -1404,7 +1411,7 @@ Literatur stecken darin:
    gebrauchtes Lastenrad in Bremen?" wird zusätzlich „kostet gebrauchtes Lastenrad
    Bremen". Drei bis sechs inhaltstragende Wörter, das Hauptthema in jeder Variante.
 2. **Zwei bis drei Formulierungen, nicht mehr.** Ab der vierten nehmen die Treffer
-   nicht mehr zu, nur noch die Streuung. `CORTEX_SEARCH_VARIANTS=1` schaltet es ab.
+   nicht mehr zu, nur noch die Streuung. `AQUATICY_SEARCH_VARIANTS=1` schaltet es ab.
 3. **Gemischt wird über die Plätze, nicht über Punktzahlen.** Jeder Treffer bekommt je
    Liste `1/(60+Platz)` gutgeschrieben; was mehrere Anfragen übereinstimmend weit oben
    haben, steht am Ende vorn. Punktzahlen verschiedener Engines lassen sich nicht
@@ -1423,10 +1430,10 @@ Verfügbar ohne Key: `duckduckgo`, `mojeek`, `startpage`, `brave`, `yahoo`, `wik
 
 ```bash
 # alle offenen Engines (Default, nichts zu tun)
-CORTEX_SEARCH_BACKEND=duckduckgo
+AQUATICY_SEARCH_BACKEND=duckduckgo
 
 # gezielt einschränken, wenn eine Engine bei dir zickt
-CORTEX_SEARCH_ENGINES=duckduckgo,mojeek
+AQUATICY_SEARCH_ENGINES=duckduckgo,mojeek
 ```
 
 ### Eigene Instanz: SearXNG
@@ -1443,8 +1450,8 @@ In der `settings.yml` der Instanz muss unter `search.formats` der Eintrag `json`
 (sonst antwortet sie mit HTML oder 403). Dann:
 
 ```bash
-CORTEX_SEARCH_BACKEND=searxng
-CORTEX_SEARXNG_URL=http://localhost:8080
+AQUATICY_SEARCH_BACKEND=searxng
+AQUATICY_SEARXNG_URL=http://localhost:8080
 ```
 
 Öffentliche SearXNG-Instanzen funktionieren auch, haben die JSON-Ausgabe aber oft
@@ -1457,19 +1464,19 @@ sind eingebaut, brauchen aber einen Key. Nur sinnvoll, wenn dir die offenen Engi
 zuverlässig genug sind:
 
 ```bash
-CORTEX_SEARCH_BACKEND=brave
+AQUATICY_SEARCH_BACKEND=brave
 BRAVE_API_KEY=...
 ```
 
 Testen lässt sich jedes Backend ohne LLM:
 
 ```bash
-cortex search "cafés mönchengladbach" -n 5
+aquaticy search "cafés mönchengladbach" -n 5
 ```
 
 ## Tempo
 
-Zwei Dinge bestimmen, wie lange eine Antwort dauert: wie oft Cortex das Modell fragen
+Zwei Dinge bestimmen, wie lange eine Antwort dauert: wie oft Aquaticy das Modell fragen
 muss, und wie lange das Modell je Frage braucht. Das zweite gehört dem Anbieter — ein
 Modell mit 550 Milliarden Parametern antwortet nun einmal langsamer als ein kleines auf
 der eigenen Grafikkarte. Am ersten lässt sich etwas machen, und das ist hier gemacht:
@@ -1491,7 +1498,7 @@ der eigenen Grafikkarte. Am ersten lässt sich etwas machen, und das ist hier ge
   Sie zerlegt die Frage und lässt die Teile parallel recherchieren; das ist
   gründlicher, verdoppelt aber die Wartezeit. Sie hängt jetzt am Schalter *Denken*:
   aus heißt Gespräch, an heißt Recherche. Dauerhaft abschalten geht weiterhin unter
-  *Subagenten* oder mit `CORTEX_SUBAGENTS_AUTO=false`.
+  *Subagenten* oder mit `AQUATICY_SUBAGENTS_AUTO=false`.
 * **Der Denkaufwand richtet sich nach der Aufgabe.** Ein Gespräch bekommt
   `reasoning_effort=low`, eine Recherche `medium`, der Code-Modus `high` — dort
   kostet ein Fehler am meisten, weil er erst beim Ausführen auffällt. Anbieter, die
@@ -1501,25 +1508,25 @@ der eigenen Grafikkarte. Am ersten lässt sich etwas machen, und das ist hier ge
   zwischengespeicherten Prefix weg und zahlt ihn noch einmal — an Geld und an Zeit.
 
 Bleibt es zäh, liegt es am Modell, nicht am Weg dorthin: ein kleineres Modell desselben
-Anbieters oder ein lokales über `cortex install-model` ist dann der wirksamste Hebel.
+Anbieters oder ein lokales über `aquaticy install-model` ist dann der wirksamste Hebel.
 
 ## Stabilität
 
-Lokale Modelle scheitern anders als Cloud-Modelle. cortex fängt die drei häufigsten Fälle
+Lokale Modelle scheitern anders als Cloud-Modelle. aquaticy fängt die drei häufigsten Fälle
 ab:
 
 * **Kontextüberlauf — die häufigste Ursache für „er vergisst die letzte Frage".**
   Läuft das Fenster über, wirft der Anbieter *still* den **Anfang** weg: erst den
   Systemprompt, dann die früheren Fragen. Das Gespräch wirkt dann wie zurückgesetzt.
-  cortex beugt zweifach vor:
+  aquaticy beugt zweifach vor:
 
   1. **Ein ausreichend großes Fenster anfordern.** Ollama nimmt sonst seinen Default von
-     2048–4096 Token — nach einer recherchierten Antwort ist der schon voll. cortex
-     schickt `num_ctx` mit (`CORTEX_CONTEXT_TOKENS`, Default 16384). Bei Cloud-Anbietern
+     2048–4096 Token — nach einer recherchierten Antwort ist der schon voll. aquaticy
+     schickt `num_ctx` mit (`AQUATICY_CONTEXT_TOKENS`, Default 16384). Bei Cloud-Anbietern
      entfällt das, die kennen den Parameter nicht.
   2. **Selbst kürzen statt gekürzt werden — und zwar in der richtigen Reihenfolge.**
      Geopfert wird von hinten nach vorn nach Wert: zuerst ältere Werkzeug-Ausgaben →
-     Platzhalter (`CORTEX_KEEP_FULL_RESULTS`, Default 4), dann ältere Vorrecherche-Blöcke
+     Platzhalter (`AQUATICY_KEEP_FULL_RESULTS`, Default 4), dann ältere Vorrecherche-Blöcke
      (die wiederholten sich sonst jeden Turn), dann die verbliebenen Suchergebnisse, dann
      ältere Antworten — und **erst ganz zuletzt die Fragen des Nutzers**. Ein Suchergebnis
      von vorletzter Runde ist ersetzbar, deine Frage nicht: die steht nirgendwo sonst.
@@ -1529,17 +1536,17 @@ ab:
      angehängte Datei bekommt höchstens gut ein Drittel des Budgets — sonst passt bei
      einem kleinen Fenster schon ein einziges Ergebnis samt Systemprompt nicht mehr hinein,
      und dem Kürzen bliebe nur noch das Gespräch selbst. Obergrenze ist zusätzlich
-     `CORTEX_MAX_TOOL_CHARS` (Default 8000).
+     `AQUATICY_MAX_TOOL_CHARS` (Default 8000).
 
   Passt dein Modell mehr, dreh auf — `gemma4:12b` kann 128k, kostet aber VRAM:
 
   ```bash
-  CORTEX_CONTEXT_TOKENS=32768
+  AQUATICY_CONTEXT_TOKENS=32768
   ```
-* **Abgestürzter Runner.** Bei `model runner has unexpectedly stopped` entlädt cortex alle
+* **Abgestürzter Runner.** Bei `model runner has unexpectedly stopped` entlädt aquaticy alle
   Modelle und versucht es erneut, statt den Durchlauf zu verlieren.
 * **Wackelige Verbindung.** Timeouts, 502/503 und Rate-Limits werden bis zu
-  `CORTEX_LLM_RETRIES` mal wiederholt (Default 3, mit wachsender Wartezeit). Ein falscher
+  `AQUATICY_LLM_RETRIES` mal wiederholt (Default 3, mit wachsender Wartezeit). Ein falscher
   API-Key wird *nicht* wiederholt — das würde nur Zeit kosten.
 
 Dazu: Ein Werkzeug, das eine Ausnahme wirft, beendet den Durchlauf nicht mehr, sondern
@@ -1548,7 +1555,7 @@ meldet den Fehler an das Modell, das dann eine andere Quelle nimmt.
 ## Verhalten beim Seitenabruf
 
 * `robots.txt` wird respektiert (einmal je Origin geholt und zwischengespeichert)
-* ehrlicher User-Agent, der cortex benennt
+* ehrlicher User-Agent, der aquaticy benennt
 * maximal 1 Request pro Sekunde und Domain, Timeout 15 s
 * bei Fehler oder Blockade: überspringen und mit dem nächsten Treffer weitermachen,
   nicht abbrechen
@@ -1558,12 +1565,12 @@ meldet den Fehler an das Modell, das dann eine andere Quelle nimmt.
 ## Cookie-Banner und Pop-ups
 
 Der Punkt, an dem die meisten simplen Crawler scheitern: Statt des Seiteninhalts wird der
-Text des Cookie-Dialogs extrahiert. cortex löst das in drei Stufen.
+Text des Cookie-Dialogs extrahiert. aquaticy löst das in drei Stufen.
 
 **Stufe 1 — gar nicht erst hinklicken (Standardfall).** `fetch_page` holt reines HTML
 ohne JavaScript-Ausführung. Consent-Banner sind dann meist nur inaktive DOM-Knoten oder
 werden gar nicht erst eingebaut. Vor der Textextraktion fliegen sie per Selektor-Blockliste
-raus (`cortex/selectors.yaml`, ohne Codeänderung erweiterbar), danach übernimmt
+raus (`aquaticy/selectors.yaml`, ohne Codeänderung erweiterbar), danach übernimmt
 trafilatura die restliche Boilerplate-Entfernung. Absätze, die im Wesentlichen aus
 Consent-Formulierungen bestehen, werden zusätzlich aus dem Text gestrichen.
 
@@ -1576,8 +1583,8 @@ gescheitert. Unterschieden wird zwischen `blocked`, `consent_required`, `paywall
 JavaScript nichts liefern:
 
 ```bash
-uv tool install --with playwright cortex
-cortex install-browser
+uv tool install --with playwright aquaticy
+aquaticy install-browser
 ```
 
 Dort wird auf Netzruhe gewartet, dann die **Ablehnen**-Schaltfläche der bekannten
@@ -1636,7 +1643,7 @@ class Product(BaseModel):
 ```
 
 **Zu Amazon & Co.:** Amazon, Zalando und ähnliche Plattformen blocken einfache
-HTTP-Abrufe aggressiv (403, Captcha-Seite). cortex baut dafür **keine Umgehung**, sondern
+HTTP-Abrufe aggressiv (403, Captcha-Seite). aquaticy baut dafür **keine Umgehung**, sondern
 erkennt Blockade-Antworten und markiert den Treffer als `blocked`. Der Agent weicht dann
 auf frei lesbare Quellen aus — Herstellerseiten, Testberichte (Notebookcheck, Heise,
 Chip), Preisvergleiche (Geizhals) und kleinere Shops, die für Specs ohnehin die besseren
@@ -1666,45 +1673,45 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 
 | Variable | Bedeutung | Default |
 |---|---|---|
-| `CORTEX_MODEL` | LiteLLM-Modell-ID | `mistral/mistral-large-latest` |
-| `CORTEX_VISION_MODEL` | Modell für `--image` | wie `CORTEX_MODEL` |
-| `CORTEX_API_BASE` | eigene Basis-URL (Ollama, eigene NIM, Proxy) | — |
-| `CORTEX_API_KEY` | Key für Anbieter ohne eigenen Eintrag | — |
-| `CORTEX_SEARCH_BACKEND` | `duckduckgo`, `searxng`, `brave`, `tavily` | `duckduckgo` |
-| `CORTEX_SEARCH_ENGINES` | Engines der Metasuche einschränken | alle |
-| `CORTEX_SEARCH_VARIANTS` | Formulierungen je Suche (`1` = aus) | `3` |
-| `CORTEX_SEARXNG_URL` | Adresse der SearXNG-Instanz | — |
-| `CORTEX_LOCATION` | Standard-Ortsfilter | — |
-| `CORTEX_LANG` / `CORTEX_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
-| `CORTEX_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
-| `CORTEX_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus; im Pro-Modus bis 44 bei Mistral, bis 12 bei NVIDIA) | `12` |
-| `CORTEX_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
-| `CORTEX_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
-| `CORTEX_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
-| `CORTEX_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
-| `CORTEX_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | das schnelle kleine des Anbieters |
-| `CORTEX_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
-| `CORTEX_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud: alle |
-| `CORTEX_RPM` | Anfragen je Minute an den Anbieter | NVIDIA `40`, Mistral `240` |
-| `CORTEX_PARALLEL_CALLS` | gleichzeitig offene Anfragen | NVIDIA `4`, Mistral `8` |
-| `CORTEX_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
-| `CORTEX_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
-| `CORTEX_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |
-| `CORTEX_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
-| `CORTEX_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
-| `CORTEX_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
-| `CORTEX_STORAGE_URL` | Adresse der Lagerverwaltung im Netz | — |
-| `CORTEX_STORAGE_ACCESS` | `off`, `read` oder `write` | `read` |
-| `CORTEX_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |
-| `CORTEX_GOOGLE_WRITE` | Termine anlegen/ändern und Entwürfe schreiben dürfen (nie verschicken) | `false` |
+| `AQUATICY_MODEL` | LiteLLM-Modell-ID | `mistral/mistral-large-latest` |
+| `AQUATICY_VISION_MODEL` | Modell für `--image` | wie `AQUATICY_MODEL` |
+| `AQUATICY_API_BASE` | eigene Basis-URL (Ollama, eigene NIM, Proxy) | — |
+| `AQUATICY_API_KEY` | Key für Anbieter ohne eigenen Eintrag | — |
+| `AQUATICY_SEARCH_BACKEND` | `duckduckgo`, `searxng`, `brave`, `tavily` | `duckduckgo` |
+| `AQUATICY_SEARCH_ENGINES` | Engines der Metasuche einschränken | alle |
+| `AQUATICY_SEARCH_VARIANTS` | Formulierungen je Suche (`1` = aus) | `3` |
+| `AQUATICY_SEARXNG_URL` | Adresse der SearXNG-Instanz | — |
+| `AQUATICY_LOCATION` | Standard-Ortsfilter | — |
+| `AQUATICY_LANG` / `AQUATICY_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
+| `AQUATICY_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
+| `AQUATICY_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus; im Pro-Modus bis 44 bei Mistral, bis 12 bei NVIDIA) | `12` |
+| `AQUATICY_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
+| `AQUATICY_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
+| `AQUATICY_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
+| `AQUATICY_CONTEXT_TOKENS` | Kontextfenster für lokale Modelle (`0` = Ollama-Default) | `16384` |
+| `AQUATICY_SUBAGENT_MODEL` | leichtes Modell für die Subagenten | das schnelle kleine des Anbieters |
+| `AQUATICY_SUBAGENT_BUDGET` | Werkzeug-Budget je Subagent | `6` |
+| `AQUATICY_SUBAGENT_PARALLEL` | gleichzeitige Subagenten (`0` = automatisch) | lokal `2`, Cloud: alle |
+| `AQUATICY_RPM` | Anfragen je Minute an den Anbieter | NVIDIA `40`, Mistral `240` |
+| `AQUATICY_PARALLEL_CALLS` | gleichzeitig offene Anfragen | NVIDIA `4`, Mistral `8` |
+| `AQUATICY_LLM_RETRIES` | Versuche bei transienten Fehlern | `3` |
+| `AQUATICY_MAX_TOOL_CHARS` | Zeichen je Werkzeug-Ergebnis | `8000` |
+| `AQUATICY_KEEP_FULL_RESULTS` | ungekürzte Ergebnisse im Verlauf | `4` |
+| `AQUATICY_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
+| `AQUATICY_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
+| `AQUATICY_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
+| `AQUATICY_STORAGE_URL` | Adresse der Lagerverwaltung im Netz | — |
+| `AQUATICY_STORAGE_ACCESS` | `off`, `read` oder `write` | `read` |
+| `AQUATICY_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |
+| `AQUATICY_GOOGLE_WRITE` | Termine anlegen/ändern und Entwürfe schreiben dürfen (nie verschicken) | `false` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | eigene Google-Anwendung | — |
 
 ### Ganz ohne API-Key: lokales Modell
 
-Ein Befehl, und cortex richtet sich ein Modell auf deinem Rechner ein:
+Ein Befehl, und aquaticy richtet sich ein Modell auf deinem Rechner ein:
 
 ```bash
-cortex install-model
+aquaticy install-model
 ```
 
 Der Befehl macht der Reihe nach:
@@ -1722,8 +1729,8 @@ Der Befehl macht der Reihe nach:
 Danach steht in der `.env`:
 
 ```bash
-CORTEX_MODEL=ollama_chat/qwen2.5:7b
-CORTEX_API_BASE=http://localhost:11434
+AQUATICY_MODEL=ollama_chat/qwen2.5:7b
+AQUATICY_API_BASE=http://localhost:11434
 ```
 
 Zum Schluss fragt er, ob du **auch Bilder** als Eingabe nutzen willst, und richtet dafür
@@ -1733,10 +1740,10 @@ und muss die Farbe nennen. Ein Textmodell fällt dabei durch und wird nicht eing
 Ein bestimmtes Modell direkt:
 
 ```bash
-cortex install-model --model qwen2.5:14b                  # nur Text
-cortex install-model --vision-model llava:7b              # Text + Bild
-cortex install-model --vision-only --vision-model llava:7b  # nur Bild nachrüsten
-cortex install-model --model qwen2.5:7b --no-vision       # ohne Bild
+aquaticy install-model --model qwen2.5:14b                  # nur Text
+aquaticy install-model --vision-model llava:7b              # Text + Bild
+aquaticy install-model --vision-only --vision-model llava:7b  # nur Bild nachrüsten
+aquaticy install-model --model qwen2.5:7b --no-vision       # ohne Bild
 ```
 
 Mit `--yes` läuft alles ohne Rückfragen — ein Vision-Modell wird dann nur geladen, wenn
@@ -1776,16 +1783,16 @@ Modell im Speicher liegt. Stand August 2026:
 | `gemma3:12b` | 8,1 GB | 12 GB |
 
 > **Namensfalle:** Das offizielle `gemma3` kann in Ollama Bilder ansehen, aber **keine
-> Werkzeuge aufrufen** — als Hauptmodell ist es damit unbrauchbar, cortex führt es
+> Werkzeuge aufrufen** — als Hauptmodell ist es damit unbrauchbar, aquaticy führt es
 > deshalb nur bei den Vision-Modellen. Erst `gemma4` bringt beides mit.
 
-cortex liest den VRAM per `nvidia-smi` aus und schlägt danach vor — ohne GPU rechnet er
+aquaticy liest den VRAM per `nvidia-smi` aus und schlägt danach vor — ohne GPU rechnet er
 mit 70 % des Arbeitsspeichers, weil auf der CPU nicht alles nutzbar ist. Passt ein
 Modell, das beides kann, wird kein zweites geladen.
 
 **Die Hardware empfiehlt, sie entscheidet nicht.** Die Liste zeigt immer alle Modelle,
 und du kannst jedes davon wählen — oder einen beliebigen Namen aus dem Ollama-Katalog
-eintippen. Passt eines rechnerisch nicht, sagt cortex das als Hinweis und lädt es
+eintippen. Passt eines rechnerisch nicht, sagt aquaticy das als Hinweis und lädt es
 trotzdem: Ein Modell läuft notfalls teilweise auf der CPU, das ist langsam, aber deine
 Entscheidung.
 
@@ -1793,13 +1800,13 @@ Jedes andere Ollama-Modell mit Werkzeug-Unterstützung geht auch — `--model` n
 Namen aus dem [Ollama-Katalog](https://ollama.com/library).
 
 > **Das Präfix muss `ollama_chat/` lauten, nicht `ollama/`.** Nur ersteres reicht
-> Werkzeuge durch; mit `ollama/` bleibt der Agent stumm. `cortex install-model` schreibt
+> Werkzeuge durch; mit `ollama/` bleibt der Agent stumm. `aquaticy install-model` schreibt
 > automatisch das richtige.
 
 #### Wenn der Speicher knapp wird
 
 Text- und Vision-Modell gleichzeitig im VRAM sprengen viele Grafikkarten — der
-Ollama-Runner stirbt dann mit `model runner has unexpectedly stopped`. cortex entlädt
+Ollama-Runner stirbt dann mit `model runner has unexpectedly stopped`. aquaticy entlädt
 deshalb vor jedem Test alle laufenden Modelle und erkennt diesen Absturz als das, was er
 ist: ein Speicherproblem, kein Urteil über das Modell. Er bietet dann automatisch ein
 kleineres an.
@@ -1823,16 +1830,16 @@ Aufruf geht noch an einen fremden Dienst.
 Da LiteLLM als LLM-Schicht dient, ist der Anbieter austauschbar:
 
 ```bash
-cortex --model mistral/mistral-large-latest             # Mistral
-cortex --model nvidia_nim/meta/llama-3.3-70b-instruct   # NVIDIA NIM
-cortex --model ollama_chat/qwen2.5:7b                   # lokal, siehe oben
+aquaticy --model mistral/mistral-large-latest             # Mistral
+aquaticy --model nvidia_nim/meta/llama-3.3-70b-instruct   # NVIDIA NIM
+aquaticy --model ollama_chat/qwen2.5:7b                   # lokal, siehe oben
 ```
 
-Cortex ist auf **zwei** Anbieter eingerichtet: [Mistral](https://console.mistral.ai/api-keys/)
+Aquaticy ist auf **zwei** Anbieter eingerichtet: [Mistral](https://console.mistral.ai/api-keys/)
 und [NVIDIA NIM](https://build.nvidia.com/). Das ist eine Entscheidung, keine
 Sparmaßnahme. Eine Liste mit dreizehn Anbietern sieht großzügig aus, bedeutet aber
 dreizehnmal „irgendein Standardmodell, ungetestet, mit unbekannten Grenzen". Zwei
-Anbieter kann man kennen — und danach richtet sich Cortex dann auch: welches Modell
+Anbieter kann man kennen — und danach richtet sich Aquaticy dann auch: welches Modell
 wofür, wie schnell es antwortet, wie viele Anfragen pro Minute es verträgt.
 
 | Anbieter | Modell-Präfix | Key | Freikontingent |
@@ -1841,7 +1848,7 @@ wofür, wie schnell es antwortet, wie viele Anfragen pro Minute es verträgt.
 | [NVIDIA NIM](https://build.nvidia.com/) | `nvidia_nim/` | `NVIDIA_NIM_API_KEY` | offene Modelle, 40 Anfragen/Minute |
 | Ollama (lokal) | `ollama_chat/` | — | kostet nichts, verlässt den Rechner nicht |
 
-Je Anbieter kennt Cortex **drei Rollen**, und wählt selbst die passende:
+Je Anbieter kennt Aquaticy **drei Rollen**, und wählt selbst die passende:
 
 | Rolle | Wofür | Mistral | NVIDIA NIM |
 |---|---|---|---|
@@ -1852,7 +1859,7 @@ Je Anbieter kennt Cortex **drei Rollen**, und wählt selbst die passende:
 Ein 70B-Modell für „such mir die Öffnungszeiten" kostet Sekunden, und die summieren
 sich mit jedem der vierundvierzig Agenten — deshalb laufen die Agenten auf dem kleinen
 Modell und nur die Antwort auf dem großen. Wer es anders will, trägt unter
-`CORTEX_SUBAGENT_MODEL` bzw. `CORTEX_CODE_MODEL` sein eigenes ein.
+`AQUATICY_SUBAGENT_MODEL` bzw. `AQUATICY_CODE_MODEL` sein eigenes ein.
 
 #### Tempo: Takt halten statt gegen die Wand laufen
 
@@ -1861,7 +1868,7 @@ Folgendes: die ersten vierzig kommen durch, alles Weitere bekommt ein 429 zurüc
 abgelehnte Anfrage wird wiederholt, die Wiederholungen laufen wieder in dieselbe Grenze
 — und aus einer Recherche werden Minuten, in denen sichtbar nichts passiert.
 
-Cortex hält das Maß deshalb selbst ein (`cortex/pace.py`): zwischen zwei Aufrufen an
+Aquaticy hält das Maß deshalb selbst ein (`aquaticy/pace.py`): zwischen zwei Aufrufen an
 denselben Anbieter liegen mindestens `60 / rpm` Sekunden, und mehr als eine Handvoll
 Anfragen sind nie gleichzeitig offen. Prozessweit, denn die Grenze gilt für den
 Schlüssel, nicht für den einzelnen Agenten. Lokale Modelle und selbst eingetragene
@@ -1869,22 +1876,22 @@ Anbieter werden nicht gebremst.
 
 | Variable | Bedeutung | Default |
 |---|---|---|
-| `CORTEX_RPM` | Anfragen pro Minute, für alle Anbieter | NVIDIA 40, Mistral 240 |
-| `CORTEX_PARALLEL_CALLS` | gleichzeitig offene Anfragen | NVIDIA 4, Mistral 8 |
+| `AQUATICY_RPM` | Anfragen pro Minute, für alle Anbieter | NVIDIA 40, Mistral 240 |
+| `AQUATICY_PARALLEL_CALLS` | gleichzeitig offene Anfragen | NVIDIA 4, Mistral 8 |
 
 Wer einen größeren Vertrag hat, hebt beides an.
 
 **Wichtig: Das Modell muss Tool-Calling (Function Calling) beherrschen.** Ohne das kann
 der Agent weder suchen noch Seiten lesen — er antwortet dann aus dem Gedächtnis statt aus
-dem Web, was genau das ist, was cortex vermeiden soll.
+dem Web, was genau das ist, was aquaticy vermeiden soll.
 
-Jeden weiteren LiteLLM-Anbieter nutzt du über den Notausgang `CORTEX_API_KEY` — die
-Rollen und Grenzen oben gelten dann nicht, Cortex kennt sie für ein fremdes Modell ja
+Jeden weiteren LiteLLM-Anbieter nutzt du über den Notausgang `AQUATICY_API_KEY` — die
+Rollen und Grenzen oben gelten dann nicht, Aquaticy kennt sie für ein fremdes Modell ja
 nicht:
 
 ```bash
-CORTEX_MODEL=irgendein_anbieter/modell
-CORTEX_API_KEY=dein-key
+AQUATICY_MODEL=irgendein_anbieter/modell
+AQUATICY_API_KEY=dein-key
 ```
 
 #### NVIDIA NIM im Detail
@@ -1893,39 +1900,39 @@ CORTEX_API_KEY=dein-key
 und einen Key (`nvapi-...`). Modell auswählen, „Get API Key" klicken, dann:
 
 ```bash
-CORTEX_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct
+AQUATICY_MODEL=nvidia_nim/meta/llama-3.3-70b-instruct
 NVIDIA_NIM_API_KEY=nvapi-...
 ```
 
 Die Modell-ID ist genau die von build.nvidia.com, mit `nvidia_nim/` davor. Vergisst du
-das Kürzel, ergänzt cortex es selbst — kopierst du `nvidia/nemotron-3-ultra-550b-a55b`
+das Kürzel, ergänzt aquaticy es selbst — kopierst du `nvidia/nemotron-3-ultra-550b-a55b`
 von der Seite, wird daraus beim Speichern `nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b`.
 Am schnellsten geht es in der Weboberfläche: *Einstellungen → Modell → Anbieter: NVIDIA
 NIM*, Schlüssel einfügen, **Modell speichern**. Mehr braucht es nicht.
 
 Achte darauf, ein Modell zu wählen, das in der Modellkarte Tool-Calling aufführt — nicht
 alle dort angebotenen Modelle können das. Eine eigene, selbst gehostete NIM-Instanz
-erreichst du über `CORTEX_API_BASE=http://dein-host:8000/v1`.
+erreichst du über `AQUATICY_API_BASE=http://dein-host:8000/v1`.
 
 ### Wenn nach dem Anbieterwechsel „404 page not found" kommt
 
-Der Klassiker: In der `.env` steht noch `CORTEX_API_BASE=http://localhost:11434` vom
+Der Klassiker: In der `.env` steht noch `AQUATICY_API_BASE=http://localhost:11434` vom
 lokalen Modell, das Modell zeigt aber längst zu NVIDIA oder Mistral. Die Anfrage geht
 dann an Ollama statt an den Anbieter, und Ollama antwortet mit genau diesem Satz.
 
-cortex lässt eine Basis-URL auf dem Ollama-Port (11434) deshalb weg, sobald das Modell
+aquaticy lässt eine Basis-URL auf dem Ollama-Port (11434) deshalb weg, sobald das Modell
 zu einem anderen Anbieter gehört. Jede andere Adresse bleibt stehen — ein LiteLLM-Proxy
 oder ein eigenes NIM im Heimnetz ist ein völlig legitimer Weg zu einem Cloud-Modell und
 wird nicht angefasst.
 
-SQLite (`~/.cortex/cortex.sqlite3`) hält den Response-Cache (TTL 24 h), den Verlauf
+SQLite (`~/.aquaticy/aquaticy.sqlite3`) hält den Response-Cache (TTL 24 h), den Verlauf
 vergangener Recherchen, den Merkzettel, den verschlüsselten Speicher, die Aufträge,
 den Token-Zähler und den Zustand der Oberfläche.
 
 ## Aufbau
 
 ```
-cortex/
+aquaticy/
   cli.py         # Chat-Loop, Slash-Befehle, Unterbefehle
   agent.py       # LLM-Loop mit Tool-Calling
   tools.py       # web_search + fetch_page
@@ -1954,8 +1961,8 @@ cortex/
   selectors.yaml # Selektor- und Marker-Listen, ohne Code erweiterbar
 
 Dockerfile       # zwei Ziele: slim (ohne Browser) und browser (mit Chromium)
-compose.yaml     # cortex plus optionales SearXNG
-cortex-box       # Wrapper: ./cortex-box "deine Frage"
+compose.yaml     # aquaticy plus optionales SearXNG
+aquaticy-box       # Wrapper: ./aquaticy-box "deine Frage"
 ```
 
 ## Entwicklung

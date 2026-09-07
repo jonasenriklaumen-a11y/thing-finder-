@@ -8,14 +8,14 @@ from collections.abc import Iterator
 
 import pytest
 
-from cortex import pace
+from aquaticy import pace
 
 
 @pytest.fixture(autouse=True)
 def _sauber(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Kein Taktgeber aus einem anderen Test, keine Umgebung von aussen."""
-    monkeypatch.delenv("CORTEX_RPM", raising=False)
-    monkeypatch.delenv("CORTEX_PARALLEL_CALLS", raising=False)
+    monkeypatch.delenv("AQUATICY_RPM", raising=False)
+    monkeypatch.delenv("AQUATICY_PARALLEL_CALLS", raising=False)
     pace.forget_gates()
     yield
     pace.forget_gates()
@@ -90,7 +90,7 @@ def test_the_known_providers_have_limits() -> None:
 
 
 def test_local_and_unknown_providers_are_never_throttled() -> None:
-    """Ollama laeuft auf dem eigenen Rechner, und Fremdes kennt Cortex nicht."""
+    """Ollama laeuft auf dem eigenen Rechner, und Fremdes kennt Aquaticy nicht."""
     assert pace.limits_for("ollama_chat") == (0, 0)
     assert pace.limits_for("fremd") == (0, 0)
     assert pace.limits_for("") == (0, 0)
@@ -100,15 +100,15 @@ def test_local_and_unknown_providers_are_never_throttled() -> None:
 
 
 def test_bigger_contracts_can_raise_the_limits(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CORTEX_RPM", "600")
-    monkeypatch.setenv("CORTEX_PARALLEL_CALLS", "32")
+    monkeypatch.setenv("AQUATICY_RPM", "600")
+    monkeypatch.setenv("AQUATICY_PARALLEL_CALLS", "32")
     assert pace.limits_for("nvidia_nim") == (600, 32)
     gate = pace.gate_for("nvidia_nim/meta/llama-3.3-70b-instruct")
     assert (gate.rpm, gate.parallel) == (600, 32)
 
 
 def test_nonsense_in_the_environment_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CORTEX_RPM", "viele")
+    monkeypatch.setenv("AQUATICY_RPM", "viele")
     assert pace.limits_for("nvidia_nim") == (40, 4)
 
 
@@ -122,7 +122,7 @@ def test_every_call_to_a_provider_shares_one_gate() -> None:
 
 def test_changed_limits_replace_the_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     alt = pace.gate_for("mistral/mistral-large-latest")
-    monkeypatch.setenv("CORTEX_RPM", "600")
+    monkeypatch.setenv("AQUATICY_RPM", "600")
     neu = pace.gate_for("mistral/mistral-large-latest")
     assert neu is not alt
     assert neu.rpm == 600

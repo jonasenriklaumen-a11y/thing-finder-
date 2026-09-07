@@ -9,12 +9,12 @@ from typing import Any
 import httpx
 import pytest
 
-from cortex import agent as agent_module
-from cortex.agent import Agent, _parse_spec_json
-from cortex.config import Settings
-from cortex.fetch import Fetcher, RobotsPolicy
-from cortex.models import SearchResult
-from cortex.tools import Toolbox
+from aquaticy import agent as agent_module
+from aquaticy.agent import Agent, _parse_spec_json
+from aquaticy.config import Settings
+from aquaticy.fetch import Fetcher, RobotsPolicy
+from aquaticy.models import SearchResult
+from aquaticy.tools import Toolbox
 
 
 # ---------------------------------------------------------------------------
@@ -76,16 +76,16 @@ def toolbox(settings: Settings, fixture_html) -> Toolbox:
             200, text=fixture_html("plain_article.html"), headers={"content-type": "text/html"}
         )
 
-    fetcher = Fetcher("cortex-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
+    fetcher = Fetcher("aquaticy-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "aquaticy-test/0.1")
     return Toolbox(settings, cache=None, fetcher=fetcher)
 
 
 @pytest.fixture(autouse=True)
 def _stub_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "cortex.tools.search_web",
+        "aquaticy.tools.search_web",
         lambda query, **kwargs: [
             SearchResult(title="Café Sonntag", url="https://cafe-sonntag.de/", snippet="WLAN")
         ],
@@ -325,7 +325,7 @@ def test_clear_resets_history(
 def test_history_is_written_to_the_cache(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
-    from cortex.cache import Cache
+    from aquaticy.cache import Cache
 
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Antwort")))
     cache = Cache(tmp_path / "c.sqlite3")
@@ -404,7 +404,7 @@ def test_a_crashed_runner_frees_memory_and_retries(
     monkeypatch.setattr("litellm.completion", crashing)
     monkeypatch.setattr("time.sleep", lambda seconds: None)
     monkeypatch.setattr(
-        "cortex.local_model.free_memory", lambda *a, **k: freed.append("frei") or ["qwen3:8b"]
+        "aquaticy.local_model.free_memory", lambda *a, **k: freed.append("frei") or ["qwen3:8b"]
     )
     result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     assert result.answer == "zweiter Versuch"
@@ -431,7 +431,7 @@ def test_old_tool_results_are_trimmed(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Sonst laeuft bei lokalen Modellen der Kontext ueber."""
-    from cortex.agent import TRIMMED_NOTE
+    from aquaticy.agent import TRIMMED_NOTE
 
     settings.keep_full_results = 2
     settings.max_tool_calls = 6
@@ -489,10 +489,10 @@ def test_subagent_results_reach_the_parent(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Quellen der Subagenten muessen in der Gesamtbilanz auftauchen."""
-    from cortex.subagents import SubagentResult
+    from aquaticy.subagents import SubagentResult
 
     monkeypatch.setattr(
-        "cortex.subagents.run_subagents",
+        "aquaticy.subagents.run_subagents",
         lambda tasks, *a, **k: [
             SubagentResult(
                 task=task,
@@ -534,7 +534,7 @@ def _planner_llm(monkeypatch: pytest.MonkeyPatch, tasks: list[str], *answers: st
     """
     import json as _json
 
-    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("aquaticy.agent.Agent._needs_research", lambda self, q: True)
     queue = [_message(content=_json.dumps(tasks))] + [
         _message(content=answer) for answer in answers
     ]
@@ -551,7 +551,7 @@ def test_every_question_is_split_automatically(
 
     seen: list[list[str]] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: seen.append(tasks)
         or [{"task": getattr(t, "text", t), "summary": "ok"} for t in tasks],
     )
@@ -565,7 +565,7 @@ def test_every_question_is_split_automatically(
     assert result.answer == "Endantwort"
     # Die Vorrecherche steht dem Hauptagenten zur Verfuegung -- als Text,
     # nicht als JSON.
-    from cortex.agent import PRE_RESEARCH_PREFIX
+    from aquaticy.agent import PRE_RESEARCH_PREFIX
 
     blob = next(
         str(m.get("content", ""))
@@ -583,7 +583,7 @@ def test_auto_research_can_be_switched_off(
     monkeypatch.setattr("litellm.completion", llm)
     called: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents", lambda self, tasks: called.append(tasks) or []
+        "aquaticy.agent.Agent._run_subagents", lambda self, tasks: called.append(tasks) or []
     )
     result = Agent(settings, cache=None, toolbox=toolbox).ask("Frage", stream=False)
     assert called == []
@@ -595,9 +595,9 @@ def test_a_failed_plan_does_not_stop_the_run(
 ) -> None:
     """Scheitert die Planung, macht der Hauptagent einfach selbst weiter."""
     settings.subagents_auto = True
-    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("aquaticy.agent.Agent._needs_research", lambda self, q: True)
     monkeypatch.setattr(
-        "cortex.subagents.plan_subtasks",
+        "aquaticy.subagents.plan_subtasks",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Planer weg")),
     )
     llm = ScriptedLLM(_message(content="trotzdem geantwortet"))
@@ -611,15 +611,15 @@ def test_follow_up_questions_get_the_conversation_as_context(
 ) -> None:
     """'nur die mit 4+ Sternen' ist ohne Vorgeschichte nicht recherchierbar."""
     settings.subagents_auto = True
-    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("aquaticy.agent.Agent._needs_research", lambda self, q: True)
     contexts: list[str] = []
 
     def fake_plan(question, settings_arg, context="", limit=4):
         contexts.append(context)
         return [question]
 
-    monkeypatch.setattr("cortex.subagents.plan_subtasks", fake_plan)
-    monkeypatch.setattr("cortex.agent.Agent._run_subagents", lambda self, tasks: [])
+    monkeypatch.setattr("aquaticy.subagents.plan_subtasks", fake_plan)
+    monkeypatch.setattr("aquaticy.agent.Agent._run_subagents", lambda self, tasks: [])
     llm = ScriptedLLM(_message(content="erste"), _message(content="zweite"))
     monkeypatch.setattr("litellm.completion", llm)
 
@@ -638,7 +638,7 @@ def test_subagent_calls_count_towards_the_budget(
     settings.max_tool_calls = 10
     _planner_llm(monkeypatch, ["A"], "fertig")
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: [{"task": "A", "summary": "ok", "tool_calls": 5}],
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -683,7 +683,7 @@ def test_history_stores_the_question_not_the_budget_prompt(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
     """Am Budget-Limit wurde vorher der Budget-Hinweis als Frage gespeichert."""
-    from cortex.cache import Cache
+    from aquaticy.cache import Cache
 
     settings.max_tool_calls = 1
     llm = ScriptedLLM(
@@ -701,7 +701,7 @@ def test_planner_sees_the_location_filter(
 ) -> None:
     """Mit --location muessen auch die Teilfragen den Ort kennen."""
     settings.subagents_auto = True
-    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("aquaticy.agent.Agent._needs_research", lambda self, q: True)
     settings.location = "Mönchengladbach"
     seen: dict[str, str] = {}
 
@@ -710,8 +710,8 @@ def test_planner_sees_the_location_filter(
         seen["context"] = context
         return [question]
 
-    monkeypatch.setattr("cortex.subagents.plan_subtasks", spy_plan)
-    monkeypatch.setattr("cortex.agent.Agent._run_subagents", lambda self, tasks: [])
+    monkeypatch.setattr("aquaticy.subagents.plan_subtasks", spy_plan)
+    monkeypatch.setattr("aquaticy.agent.Agent._run_subagents", lambda self, tasks: [])
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="ok")))
     Agent(settings, cache=None, toolbox=toolbox).ask("Cafés mit WLAN", stream=False)
     assert "Mönchengladbach" in seen["context"]
@@ -721,7 +721,7 @@ def test_planner_context_hides_internal_messages(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Vorrecherche-Blob und Budget-Hinweis sind Regie, kein Gespraech."""
-    from cortex.agent import BUDGET_PROMPT, PRE_RESEARCH_PREFIX
+    from aquaticy.agent import BUDGET_PROMPT, PRE_RESEARCH_PREFIX
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent.messages += [
@@ -743,7 +743,7 @@ def test_planner_context_hides_internal_messages(
 # Kaputtes Tool-Call-JSON (Ollama/Gemma) -- Regression zu "Extra data"
 # ---------------------------------------------------------------------------
 def test_split_json_objects() -> None:
-    from cortex.agent import split_json_objects
+    from aquaticy.agent import split_json_objects
 
     assert split_json_objects('{"a": 1}') == ['{"a": 1}']
     assert split_json_objects('{"a": 1}{"b": 2}') == ['{"a": 1}', '{"b": 2}']
@@ -755,7 +755,7 @@ def test_split_json_objects() -> None:
 
 def test_repair_splits_concatenated_calls() -> None:
     """Zwei zusammengeklebte Objekte werden zwei eigene Aufrufe."""
-    from cortex.agent import repair_tool_calls
+    from aquaticy.agent import repair_tool_calls
 
     repaired = repair_tool_calls(
         [
@@ -776,7 +776,7 @@ def test_repair_splits_concatenated_calls() -> None:
 
 
 def test_repair_dedupes_repeated_chunks_and_fixes_garbage() -> None:
-    from cortex.agent import repair_tool_calls
+    from aquaticy.agent import repair_tool_calls
 
     repaired = repair_tool_calls(
         [
@@ -851,7 +851,7 @@ def test_poisoned_history_is_healed_before_sending(
 
 
 def test_json_errors_are_not_retried_as_connection_problems() -> None:
-    from cortex.agent import is_transient
+    from aquaticy.agent import is_transient
 
     assert not is_transient("APIConnectionError: Extra data: line 1 column 73 (char 72)")
     assert not is_transient("json.decoder.JSONDecodeError: Expecting value")
@@ -927,7 +927,7 @@ def test_system_prompt_carries_todays_date(settings: Settings, toolbox: Toolbox)
 def test_notes_are_injected_into_the_system_prompt(
     settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
-    from cortex.cache import Cache
+    from aquaticy.cache import Cache
 
     cache = Cache(tmp_path / "c.sqlite3")
     cache.add_note("Budget fuer den Laptop: 1200 Euro")
@@ -941,7 +941,7 @@ def test_notes_are_injected_into_the_system_prompt(
 def test_memory_tool_is_offered_only_with_a_cache(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox, tmp_path
 ) -> None:
-    from cortex.cache import Cache
+    from aquaticy.cache import Cache
 
     llm = ScriptedLLM(_message(content="ok"))
     monkeypatch.setattr("litellm.completion", llm)
@@ -974,7 +974,7 @@ def test_small_talk_skips_planning_without_any_llm_call(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._auto_research",
+        "aquaticy.agent.Agent._auto_research",
         lambda self, q, b: researched.append(q) or 0,
     )
     result = Agent(settings, cache=None, toolbox=toolbox).ask(greeting, stream=False)
@@ -1003,7 +1003,7 @@ def test_ambiguous_messages_ask_the_small_model_with_a_time_limit(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "aquaticy.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask(
         "das zweite klingt gut, oder was meinst du?", stream=False
@@ -1036,7 +1036,7 @@ def test_one_call_covers_triage_and_planning(
     monkeypatch.setattr("litellm.completion", completion)
     seen: list[list[str]] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: seen.append(tasks)
         or [{"task": getattr(t, "text", t), "summary": "ok"} for t in tasks],
     )
@@ -1059,7 +1059,7 @@ def test_research_verdict_starts_the_planner(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "aquaticy.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask(
         "welche kaffeemuehle bis 150 euro", stream=False
@@ -1082,7 +1082,7 @@ def test_triage_failure_defaults_to_research(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "aquaticy.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask("irgendeine frage", stream=False)
     assert researched == ["irgendeine frage"]
@@ -1101,7 +1101,7 @@ def test_unclear_triage_answers_default_to_research(
     monkeypatch.setattr("litellm.completion", completion)
     researched: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
+        "aquaticy.agent.Agent._auto_research", lambda self, q, b: researched.append(q) or 0
     )
     Agent(settings, cache=None, toolbox=toolbox).ask("hmm schwierig", stream=False)
     assert researched == ["hmm schwierig"]
@@ -1109,7 +1109,7 @@ def test_unclear_triage_answers_default_to_research(
 
 def test_real_questions_are_never_smalltalk() -> None:
     """Die Heuristik darf keine echten Fragen schlucken."""
-    from cortex.agent import SMALL_TALK_RE
+    from aquaticy.agent import SMALL_TALK_RE
 
     for question in (
         "hallo, welche cafés in köln haben wlan?",
@@ -1142,7 +1142,7 @@ def test_agent_requests_the_large_context_from_ollama(
 # Kontext ueber mehrere Turns
 # ---------------------------------------------------------------------------
 def _bare_agent(context_tokens: int) -> Agent:
-    from cortex.config import Settings as RealSettings
+    from aquaticy.config import Settings as RealSettings
 
     agent = Agent.__new__(Agent)
     agent.settings = RealSettings(model="ollama_chat/x", context_tokens=context_tokens)
@@ -1156,15 +1156,15 @@ def test_pre_research_blocks_do_not_pile_up(
     """Jeder Turn hinterliess einen Vorrecherche-Block von mehreren Kilobyte,
     der nie gekuerzt wurde -- nach zwei Turns lief jedes kleine Fenster ueber
     und der Anbieter warf den Anfang weg."""
-    from cortex.agent import PRE_RESEARCH_PREFIX, TRIMMED_RESEARCH
+    from aquaticy.agent import PRE_RESEARCH_PREFIX, TRIMMED_RESEARCH
 
     settings.subagents_auto = True
-    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("aquaticy.agent.Agent._needs_research", lambda self, q: True)
     monkeypatch.setattr(
-        "cortex.subagents.plan_subtasks", lambda q, s, context="", limit=4: [q]
+        "aquaticy.subagents.plan_subtasks", lambda q, s, context="", limit=4: [q]
     )
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: [{"task": tasks[0], "summary": "Ergebnis. " * 200}],
     )
     monkeypatch.setattr(
@@ -1266,7 +1266,7 @@ def test_earlier_questions_survive_a_normal_conversation(
 def test_the_normal_mode_asks_for_thorough_answers() -> None:
     """Der Prompt hat frueher zur Knappheit gedraengt ("knapp", "hoechstens
     ein Satz") -- genau das machte die Antworten duenn."""
-    from cortex.agent import ANSWER_PROMPT
+    from aquaticy.agent import ANSWER_PROMPT
 
     assert "ausfuehrlich" in ANSWER_PROMPT.lower()
     assert "GROSSZUEGIG" in ANSWER_PROMPT
@@ -1280,7 +1280,7 @@ def test_the_normal_mode_asks_for_thorough_answers() -> None:
 
 
 def test_budget_prompt_still_wants_everything() -> None:
-    from cortex.agent import BUDGET_PROMPT
+    from aquaticy.agent import BUDGET_PROMPT
 
     assert "vollstaendig" in BUDGET_PROMPT
     assert "Nicht gefunden:" in BUDGET_PROMPT
@@ -1289,7 +1289,7 @@ def test_budget_prompt_still_wants_everything() -> None:
 def test_findings_are_plain_text_not_json() -> None:
     """JSON kostet ein Achtel mehr Zeichen und liest sich fuer kleine
     Modelle schlechter."""
-    from cortex.agent import format_findings
+    from aquaticy.agent import format_findings
 
     text = format_findings(
         [
@@ -1308,7 +1308,7 @@ def test_findings_are_plain_text_not_json() -> None:
 
 
 def test_findings_report_failed_subtasks() -> None:
-    from cortex.agent import format_findings
+    from aquaticy.agent import format_findings
 
     text = format_findings([{"task": "Bewertungen", "error": "Modell weg"}])
     assert "nicht beantwortet" in text and "Modell weg" in text
@@ -1318,12 +1318,12 @@ def test_pre_research_reaches_the_agent_as_text(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     settings.subagents_auto = True
-    monkeypatch.setattr("cortex.agent.Agent._needs_research", lambda self, q: True)
+    monkeypatch.setattr("aquaticy.agent.Agent._needs_research", lambda self, q: True)
     monkeypatch.setattr(
-        "cortex.subagents.plan_subtasks", lambda q, s, context="", limit=4: ["Teil A"]
+        "aquaticy.subagents.plan_subtasks", lambda q, s, context="", limit=4: ["Teil A"]
     )
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: [
             {"task": "Teil A", "summary": "Ausfuehrliches Ergebnis.",
              "sources": ["https://a.de"]}
@@ -1374,8 +1374,8 @@ def test_ask_instructions_follow_the_handler(settings: Settings) -> None:
 
 def test_setting_the_handler_keeps_the_notes_in_the_prompt(tmp_path) -> None:
     """Der Merkzettel steht hinter dem Systemprompt -- er darf nicht verschwinden."""
-    from cortex.cache import Cache
-    from cortex.config import Settings as S
+    from aquaticy.cache import Cache
+    from aquaticy.config import Settings as S
 
     settings = S(
         model="mistral/mistral-large-latest", data_dir=tmp_path / "d", subagents_auto=False
@@ -1433,10 +1433,10 @@ def test_a_long_tool_result_is_shortened_for_reading_along(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Mitlesen soll erkennbar machen, was zurueckkam -- nicht die halbe Seite."""
-    from cortex import agent as agent_module
+    from aquaticy import agent as agent_module
 
     monkeypatch.setattr(
-        "cortex.tools.search_web",
+        "aquaticy.tools.search_web",
         lambda query, **kwargs: [
             SearchResult(title="T" * 400, url=f"https://a.de/{i}", snippet="S" * 400)
             for i in range(20)
@@ -1646,7 +1646,7 @@ def test_without_anyone_to_ask_the_prompt_stays_honest(
 # ---------------------------------------------------------------------------
 def test_a_pure_question_is_recognised() -> None:
     """Nicht "kommt ein Fragezeichen vor" -- was bleibt ohne die Fragesaetze."""
-    from cortex.agent import is_only_a_question as frage
+    from aquaticy.agent import is_only_a_question as frage
 
     assert frage("Für welchen Ort soll ich das Wetter nachsehen?")
     assert frage("Ich sehe gern nach. Für welchen Ort?")
@@ -1655,7 +1655,7 @@ def test_a_pure_question_is_recognised() -> None:
 
 def test_an_answer_with_a_question_at_the_end_is_an_answer() -> None:
     """Wer etwas gesagt hat und dann nachfragt, hat geantwortet."""
-    from cortex.agent import is_only_a_question as frage
+    from aquaticy.agent import is_only_a_question as frage
 
     assert not frage(
         "Das Wetter morgen in Bremen: 12 Grad, bewölkt, etwas Regen am Nachmittag. "
@@ -1789,11 +1789,11 @@ def test_the_screen_is_cleared_before_the_second_try(
 # ---------------------------------------------------------------------------
 # Wer ist das hier eigentlich
 # ---------------------------------------------------------------------------
-def test_the_agent_introduces_itself_as_cortex(settings: Settings, toolbox: Toolbox) -> None:
-    """Auf "wer bist du" kommt Cortex von Jonas, nicht der Anbieter."""
+def test_the_agent_introduces_itself_as_aquaticy(settings: Settings, toolbox: Toolbox) -> None:
+    """Auf "wer bist du" kommt Aquaticy von Jonas, nicht der Anbieter."""
     agent = Agent(settings, cache=None, toolbox=toolbox)
     prompt = agent.messages[0]["content"]
-    assert "Ich bin Cortex, ein KI-Assistent von Jonas." in prompt
+    assert "Ich bin Aquaticy, ein KI-Assistent von Jonas." in prompt
     for vendor in ("Google", "OpenAI", "Anthropic", "Meta", "NVIDIA"):
         assert vendor in prompt, f"{vendor} wird ausdruecklich ausgeschlossen"
 
@@ -1810,12 +1810,12 @@ def test_a_question_about_identity_needs_no_research(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Wer bist du? -- dafuer muss niemand das Web durchsuchen."""
-    llm = ScriptedLLM(_message(content="Ich bin Cortex, ein KI-Assistent von Jonas."))
+    llm = ScriptedLLM(_message(content="Ich bin Aquaticy, ein KI-Assistent von Jonas."))
     monkeypatch.setattr("litellm.completion", llm)
     settings.subagents_auto = False
     agent = Agent(settings, cache=None, toolbox=toolbox)
     result = agent.ask("wer bist du?", stream=False)
-    assert "Cortex" in result.answer
+    assert "Aquaticy" in result.answer
     assert result.tool_calls == 0
 
 
@@ -1895,14 +1895,14 @@ def test_a_question_to_the_user_never_runs_in_parallel(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Eine Rueckfrage wartet auf einen Menschen -- das gehoert nicht in einen Pool."""
-    from cortex.agent import PARALLEL_SAFE
+    from aquaticy.agent import PARALLEL_SAFE
 
     assert "ask_user" not in PARALLEL_SAFE
 
 
 def test_writing_and_switching_stay_sequential() -> None:
     """Notizen und Schaltbefehle veraendern etwas -- Reihenfolge zaehlt."""
-    from cortex.agent import PARALLEL_SAFE
+    from aquaticy.agent import PARALLEL_SAFE
 
     for name in ("remember", "save_memory", "ha_call", "lan_scan", "research"):
         assert name not in PARALLEL_SAFE, name
@@ -2116,7 +2116,7 @@ def test_the_mode_can_change_between_two_questions(
 
 def test_an_unknown_mode_falls_back_to_normal(settings: Settings, toolbox: Toolbox) -> None:
     """Lieber ausfuehrlich als versehentlich knapp."""
-    from cortex.agent import clean_mode
+    from aquaticy.agent import clean_mode
 
     assert clean_mode("quatsch") == "normal"
     assert clean_mode("") == "normal"
@@ -2126,12 +2126,12 @@ def test_an_unknown_mode_falls_back_to_normal(settings: Settings, toolbox: Toolb
 def test_the_identity_survives_the_code_mode(settings: Settings, toolbox: Toolbox) -> None:
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent._apply_mode("code")
-    assert "Ich bin Cortex" in agent.messages[0]["content"]
+    assert "Ich bin Aquaticy" in agent.messages[0]["content"]
 
 
 def test_the_code_mode_still_demands_sources(settings: Settings, toolbox: Toolbox) -> None:
     """Erfundene Funktionsnamen sehen richtig aus und laufen nicht."""
-    from cortex.agent import CODE_PROMPT
+    from aquaticy.agent import CODE_PROMPT
 
     assert "Quelle" in CODE_PROMPT
     assert "Erfundene Funktionsnamen" in CODE_PROMPT
@@ -2147,10 +2147,10 @@ def test_without_thinking_there_is_no_planning_call(
     planned: list[str] = []
     for name in ("plan_request", "plan_subtasks"):
         monkeypatch.setattr(
-            f"cortex.subagents.{name}",
+            f"aquaticy.subagents.{name}",
             lambda *args, **kwargs: planned.append("geplant") or (True, ["a", "b"]),
         )
-    monkeypatch.setattr("cortex.subagents.run_subagents", lambda tasks, *a, **k: [])
+    monkeypatch.setattr("aquaticy.subagents.run_subagents", lambda tasks, *a, **k: [])
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -2172,7 +2172,7 @@ def test_without_thinking_no_agent_runs_at_all(
         seen.append(list(tasks))
         return []
 
-    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    monkeypatch.setattr("aquaticy.subagents.run_subagents", fake_run)
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -2194,7 +2194,7 @@ def test_a_greeting_starts_no_agent_even_without_thinking(
     """
     gestartet: list[list[str]] = []
     monkeypatch.setattr(
-        "cortex.subagents.run_subagents",
+        "aquaticy.subagents.run_subagents",
         lambda tasks, *a, **k: gestartet.append(list(tasks)) or [],
     )
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Hallo!")))
@@ -2210,10 +2210,10 @@ def test_an_empty_pre_research_is_not_pushed_into_the_context(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Ein leeres Blatt mit der Aufforderung, daraus zu schreiben, waere fatal."""
-    from cortex.subagents import SubagentResult
+    from aquaticy.subagents import SubagentResult
 
     monkeypatch.setattr(
-        "cortex.subagents.run_subagents",
+        "aquaticy.subagents.run_subagents",
         lambda tasks, *a, **k: [
             SubagentResult(task=task, summary="", error="nichts gefunden")
             for task in tasks
@@ -2232,7 +2232,7 @@ def test_an_empty_pre_research_is_not_pushed_into_the_context(
 
 
 def test_findings_count_as_useful_when_something_is_in_them() -> None:
-    from cortex.agent import useful_findings
+    from aquaticy.agent import useful_findings
 
     assert not useful_findings([])
     assert not useful_findings([{"task": "a", "error": "weg"}])
@@ -2302,7 +2302,7 @@ def test_thinking_can_be_turned_back_on(
     monkeypatch.setattr(
         "litellm.completion", ScriptedLLM(_message(content="A"), _message(content="B"))
     )
-    monkeypatch.setattr("cortex.subagents.run_subagents", lambda tasks, *a, **k: [])
+    monkeypatch.setattr("aquaticy.subagents.run_subagents", lambda tasks, *a, **k: [])
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent.ask("erste", stream=False, structured=False)
     assert agent.structured is False
@@ -2438,11 +2438,11 @@ def test_without_the_web_nothing_is_researched_in_advance(
 ) -> None:
     gestartet: list[list[str]] = []
     monkeypatch.setattr(
-        "cortex.subagents.run_subagents",
+        "aquaticy.subagents.run_subagents",
         lambda tasks, *a, **k: gestartet.append(list(tasks)) or [],
     )
     monkeypatch.setattr(
-        "cortex.subagents.plan_request", lambda *a, **k: (True, ["a", "b"])
+        "aquaticy.subagents.plan_request", lambda *a, **k: (True, ["a", "b"])
     )
     monkeypatch.setattr("litellm.completion", ScriptedLLM(_message(content="Fertig.")))
 
@@ -2524,20 +2524,20 @@ def test_a_missing_runtime_is_an_answer_not_a_crash(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     """Ohne Abschottung sagt das Werkzeug, was fehlt -- und fuehrt nichts aus."""
-    monkeypatch.setattr("cortex.sandbox.find_runtime", lambda: None)
+    monkeypatch.setattr("aquaticy.sandbox.find_runtime", lambda: None)
     antwort = toolbox.vm_run("echo hallo")
     assert "error" in antwort
     assert "fuehre ich nichts aus" in antwort["error"]
 
 
 # ---------------------------------------------------------------------------
-# Was Cortex sich von selbst merkt
+# Was Aquaticy sich von selbst merkt
 # ---------------------------------------------------------------------------
 def test_personal_notes_stand_in_the_system_prompt(
     settings: Settings, tmp_path
 ) -> None:
     """Ein Name ist nichts, wonach man sucht -- er soll einfach dastehen."""
-    from cortex.memory import Memory
+    from aquaticy.memory import Memory
 
     settings.memory_enabled = True
     toolbox = Toolbox(settings, cache=None)
@@ -2557,7 +2557,7 @@ def test_a_saved_name_is_there_in_the_next_conversation(
 ) -> None:
     """Der ganze Weg: Modell legt ab -- naechster Chat weiss es.
 
-    Genau das war die Frage: "speichert sich Cortex das, wenn ich schreibe,
+    Genau das war die Frage: "speichert sich Aquaticy das, wenn ich schreibe,
     ich heisse Jonas?" Hier steht die Antwort als Test.
     """
     settings.memory_enabled = True
@@ -2605,7 +2605,7 @@ def test_code_mode_runs_on_the_strongest_model(
 ) -> None:
     """Beim Programmieren kostet ein schwaches Modell am meisten."""
     monkeypatch.setattr(
-        "cortex.system.strongest_model",
+        "aquaticy.system.strongest_model",
         lambda _s, purpose="work": "mistral/mistral-large-latest",
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -2620,7 +2620,7 @@ def test_code_mode_runs_on_the_strongest_model(
 
 def test_a_hand_picked_code_model_wins(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Wer selbst eins eintraegt, bekommt seins -- ohne Rangliste."""
-    from cortex.system import strongest_model
+    from aquaticy.system import strongest_model
 
     monkeypatch.setenv("MISTRAL_API_KEY", "sk-mist-test")
     settings = Settings(model="ollama_chat/llama3.1", code_model="fremd/eigenes-modell")
@@ -2638,7 +2638,7 @@ def test_code_mode_takes_the_coding_model_and_pro_the_workhorse(
         gefragt.append(purpose)
         return "mistral/codestral-latest" if purpose == "code" else "mistral/mistral-large-latest"
 
-    monkeypatch.setattr("cortex.system.strongest_model", fake)
+    monkeypatch.setattr("aquaticy.system.strongest_model", fake)
     agent = Agent(settings, cache=None, toolbox=toolbox)
 
     agent._apply_mode("code")
@@ -2656,11 +2656,11 @@ def test_code_mode_takes_the_coding_model_and_pro_the_workhorse(
 def test_the_strongest_model_follows_the_available_providers(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cortex.system import strongest_model
+    from aquaticy.system import strongest_model
 
     for name in ("NVIDIA_NIM_API_KEY", "MISTRAL_API_KEY"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
+    monkeypatch.setattr("aquaticy.local_model.installed_models", lambda *a, **k: [])
     settings = Settings(model="ollama_chat/llama3.1")
     assert strongest_model(settings) == ""
 
@@ -2675,15 +2675,15 @@ def test_the_strongest_model_follows_the_available_providers(
 def test_without_any_cloud_key_the_biggest_local_model_wins(
     monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cortex.system import PROVIDER_KEYS, strongest_model
+    from aquaticy.system import PROVIDER_KEYS, strongest_model
 
     for key_name in PROVIDER_KEYS.values():
         monkeypatch.delenv(key_name, raising=False)
     monkeypatch.setattr(
-        "cortex.local_model.installed_models", lambda *a, **k: ["klein:3b", "gross:70b"]
+        "aquaticy.local_model.installed_models", lambda *a, **k: ["klein:3b", "gross:70b"]
     )
     monkeypatch.setattr(
-        "cortex.local_model.model_size_gb",
+        "aquaticy.local_model.model_size_gb",
         lambda name, base=None: 2.0 if name.startswith("klein") else 40.0,
     )
     assert strongest_model(Settings()) == "ollama_chat/gross:70b"
@@ -2767,7 +2767,7 @@ def test_the_second_round_locks_out_the_sources_of_the_first(
         seen.append(set(toolbox.avoid_domains))
         return [SearchResult(title="T", url="https://cafe-sonntag.de/", snippet="S")]
 
-    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    monkeypatch.setattr("aquaticy.tools.search_web", fake_search)
     llm = ScriptedLLM(
         _message(tool_calls=[_tool_call("web_search", {"query": "cafés"}, "c1")]),
         _message(tool_calls=[_tool_call("fetch_page", {"url": "https://cafe-sonntag.de/"}, "c2")]),
@@ -2791,7 +2791,7 @@ def test_the_lockout_is_lifted_afterwards(
 ) -> None:
     """Sonst faende die naechste Frage die besten Quellen nicht mehr."""
     monkeypatch.setattr(
-        "cortex.tools.search_web",
+        "aquaticy.tools.search_web",
         lambda query, **kwargs: [SearchResult(title="T", url="https://a.de/1", snippet="S")],
     )
     llm = ScriptedLLM(
@@ -2824,7 +2824,7 @@ def test_a_failed_second_round_keeps_the_first_answer(
 ) -> None:
     """Die erste Antwort steht schon -- sie darf nicht mitgerissen werden."""
     monkeypatch.setattr(
-        "cortex.tools.search_web",
+        "aquaticy.tools.search_web",
         lambda query, **kwargs: [SearchResult(title="T", url="https://a.de/1", snippet="S")],
     )
     calls = {"n": 0}
@@ -2870,7 +2870,7 @@ def test_a_cancelled_run_skips_the_second_round(
 
 def test_the_second_round_prompt_forbids_inventing_a_correction() -> None:
     """Sonst erfindet das Modell einen Widerspruch, damit die Runde etwas hergibt."""
-    from cortex.agent import RECHECK_PROMPT
+    from aquaticy.agent import RECHECK_PROMPT
 
     assert "Erfinde keine Korrektur" in RECHECK_PROMPT
     assert "ANDEREN Quellen" in RECHECK_PROMPT
@@ -2879,7 +2879,7 @@ def test_the_second_round_prompt_forbids_inventing_a_correction() -> None:
 
 def test_every_call_is_counted(settings: Settings, toolbox: Toolbox, tmp_path: Any) -> None:
     """Was hinausgeht und was zurueckkommt landet im Zaehler."""
-    from cortex.usage import UsageLog
+    from aquaticy.usage import UsageLog
 
     settings.data_dir = tmp_path
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -2901,7 +2901,7 @@ def test_the_pro_mode_runs_on_the_strongest_model(
 ) -> None:
     """Wer Pro waehlt, bittet um das Beste, was da ist."""
     monkeypatch.setattr(
-        "cortex.system.strongest_model",
+        "aquaticy.system.strongest_model",
         lambda _s, purpose="work": "mistral/mistral-large-latest",
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -2916,7 +2916,7 @@ def test_the_pro_mode_runs_on_the_strongest_model(
 
 def test_the_pro_mode_may_send_more_agents(settings: Settings, toolbox: Toolbox) -> None:
     """Zwoelf sind der Alltag, vierundzwanzig die Obergrenze im Pro-Modus."""
-    from cortex.agent import PRO_SUBAGENTS
+    from aquaticy.agent import PRO_SUBAGENTS
 
     settings.max_subagents = 12
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -2934,10 +2934,10 @@ def test_nvidia_gets_a_smaller_pro_squad(
 ) -> None:
     """NVIDIA vertraegt im Freikontingent nur vierzig Anfragen pro Minute --
     vierundvierzig Agenten waeren dort getaktet, aber trotzdem langsam."""
-    from cortex.agent import PRO_SUBAGENTS_NVIDIA
+    from aquaticy.agent import PRO_SUBAGENTS_NVIDIA
 
     monkeypatch.setattr(
-        "cortex.system.strongest_model",
+        "aquaticy.system.strongest_model",
         lambda _s, purpose="work": "nvidia_nim/meta/llama-3.3-70b-instruct",
     )
     settings.model = "nvidia_nim/meta/llama-3.3-70b-instruct"
@@ -3014,7 +3014,7 @@ def test_the_pro_mode_writes_like_the_standard_mode(
     assert "sei ausfuehrlich" in pro, "der Antwortteil des Standardmodus"
     # Der Pro-Teil kommt dazu, er ersetzt nichts: nimmt man ihn heraus,
     # steht Zeichen fuer Zeichen der Standardmodus da.
-    from cortex.agent import PRO_PROMPT
+    from aquaticy.agent import PRO_PROMPT
 
     zusatz = PRO_PROMPT % {"agents": agent.agent_limit}
     assert zusatz in pro
@@ -3057,7 +3057,7 @@ def test_the_pro_mode_arrives_at_the_agents(
         gesehen["tasks"] = tasks
         return []
 
-    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    monkeypatch.setattr("aquaticy.subagents.run_subagents", fake_run)
     settings.max_subagents = 12
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent._apply_mode("pro")
@@ -3071,7 +3071,7 @@ def test_the_pro_mode_arrives_at_the_agents(
 # ---------------------------------------------------------------------------
 def test_the_checkers_need_a_reason(settings: Settings, toolbox: Toolbox) -> None:
     """Zwei Wege zu den vier Pruefern -- und im Standardmodus keiner davon."""
-    from cortex.agent import PRO_CHECKERS
+    from aquaticy.agent import PRO_CHECKERS
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent.recheck = True
@@ -3119,7 +3119,7 @@ def test_the_thinking_depth_does_not_hire_anybody(
 ) -> None:
     """Die Denktiefe sagt, wie lange das Modell ueberlegt -- nicht, wie viele
     Agenten losziehen. Das entscheidet der Master."""
-    from cortex.agent import PRO_SUBAGENTS
+    from aquaticy.agent import PRO_SUBAGENTS
 
     settings.max_subagents = 12
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -3135,7 +3135,7 @@ def test_the_pro_mode_gives_every_agent_more_budget(
 ) -> None:
     """Sechs Aufrufe reichen fuer eine Suche und drei Seiten; mit acht bleibt
     Luft, einer Quelle noch einen Schritt weit zu folgen."""
-    from cortex.agent import PRO_BUDGET
+    from aquaticy.agent import PRO_BUDGET
 
     settings.subagent_budget = 6
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -3158,7 +3158,7 @@ def test_the_checkers_reach_the_agents(
         gesehen.update(kwargs)
         return []
 
-    monkeypatch.setattr("cortex.subagents.run_subagents", fake_run)
+    monkeypatch.setattr("aquaticy.subagents.run_subagents", fake_run)
     settings.max_subagents = 12
     settings.subagent_budget = 6
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -3173,7 +3173,7 @@ def test_the_checkers_reach_the_agents(
 def test_a_check_note_lands_next_to_its_finding() -> None:
     """Der Vermerk gehoert an das, was er prueft -- sonst muss das Modell
     zuordnen, wozu er gehoerte."""
-    from cortex.agent import format_findings
+    from aquaticy.agent import format_findings
 
     text = format_findings(
         [
@@ -3237,7 +3237,7 @@ def test_the_master_hands_out_the_assignments(
 ) -> None:
     settings.subagents_auto = True
     monkeypatch.setattr(
-        "cortex.system.strongest_model",
+        "aquaticy.system.strongest_model",
         lambda _s, purpose="work": "mistral/mistral-large-latest",
     )
     _master_llm(
@@ -3253,7 +3253,7 @@ def test_the_master_hands_out_the_assignments(
     )
     gesehen: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: gesehen.append(list(tasks))
         or [{"task": t.text, "summary": "gefunden", "sources": ["https://a.de"]} for t in tasks],
     )
@@ -3291,7 +3291,7 @@ def test_thin_results_are_sent_back_out(
     )
     runden: list[list[str]] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: runden.append([t.text for t in tasks])
         or [{"task": t.text, "summary": "etwas", "sources": ["https://a.de"]} for t in tasks],
     )
@@ -3320,7 +3320,7 @@ def test_a_good_first_round_is_not_repeated(
     )
     runden: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: runden.append(tasks)
         or [{"task": t.text, "summary": "viel", "sources": ["https://a.de"]} for t in tasks],
     )
@@ -3347,7 +3347,7 @@ def test_a_failing_master_falls_back_to_the_small_planner(
     monkeypatch.setattr("litellm.completion", completion)
     gesehen: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: gesehen.append(list(tasks))
         or [{"task": t.text, "summary": "ok"} for t in tasks],
     )
@@ -3366,7 +3366,7 @@ def test_a_failing_master_falls_back_to_the_small_planner(
 def test_max_fills_the_crew_and_only_in_the_pro_mode(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
-    from cortex.agent import strip_max
+    from aquaticy.agent import strip_max
 
     assert strip_max("/max Was kostet das?") == ("Was kostet das?", True)
     assert strip_max("/MAX  Frage") == ("Frage", True)
@@ -3382,7 +3382,7 @@ def test_max_fills_the_crew_and_only_in_the_pro_mode(
     )
     gesehen: list[Any] = []
     monkeypatch.setattr(
-        "cortex.agent.Agent._run_subagents",
+        "aquaticy.agent.Agent._run_subagents",
         lambda self, tasks: gesehen.append(list(tasks))
         or [{"task": t.text, "summary": "ok"} for t in tasks],
     )
@@ -3403,12 +3403,12 @@ def test_the_strong_model_reaches_the_agents(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
     monkeypatch.setattr(
-        "cortex.system.strongest_model",
+        "aquaticy.system.strongest_model",
         lambda _s, purpose="work": "mistral/mistral-large-latest",
     )
     gesehen: dict[str, Any] = {}
     monkeypatch.setattr(
-        "cortex.subagents.run_subagents",
+        "aquaticy.subagents.run_subagents",
         lambda tasks, s, **kwargs: gesehen.update(kwargs) or [],
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
@@ -3418,7 +3418,7 @@ def test_the_strong_model_reaches_the_agents(
     assert gesehen["strong_model"] == "mistral/mistral-large-latest"
 
     # Ohne starkes Modell gibt es auch keine starken Agenten.
-    monkeypatch.setattr("cortex.system.strongest_model", lambda _s, purpose="work": "")
+    monkeypatch.setattr("aquaticy.system.strongest_model", lambda _s, purpose="work": "")
     agent._code_model.clear()
     assert agent.strong_count == 0
 
@@ -3429,13 +3429,13 @@ def test_the_strong_model_reaches_the_agents(
 def test_the_three_strongest_are_offered(monkeypatch: pytest.MonkeyPatch) -> None:
     """Im Code- und im Pro-Modus soll man wählen können -- aber nur unter den
     stärksten. Ein schwaches Modell ist genau dort am teuersten."""
-    from cortex.config import Settings
-    from cortex.system import strongest_model, strongest_models
+    from aquaticy.config import Settings
+    from aquaticy.system import strongest_model, strongest_models
 
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-x")
     monkeypatch.setenv("MISTRAL_API_KEY", "mistral-x")
-    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: ["gross:70b"])
-    monkeypatch.setattr("cortex.local_model.model_size_gb", lambda *a, **k: 40.0)
+    monkeypatch.setattr("aquaticy.local_model.installed_models", lambda *a, **k: ["gross:70b"])
+    monkeypatch.setattr("aquaticy.local_model.model_size_gb", lambda *a, **k: 40.0)
 
     settings = Settings(model="ollama_chat/klein")
     liste = strongest_models(settings, limit=3)
@@ -3449,8 +3449,8 @@ def test_the_three_strongest_are_offered(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_a_hand_picked_model_leads_the_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cortex.config import Settings
-    from cortex.system import strongest_models
+    from aquaticy.config import Settings
+    from aquaticy.system import strongest_models
 
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-x")
     settings = Settings(model="ollama_chat/klein", code_model="mistral/codestral-latest")
@@ -3460,12 +3460,12 @@ def test_a_hand_picked_model_leads_the_list(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_nothing_reachable_is_an_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cortex.config import Settings
-    from cortex.system import strongest_model, strongest_models
+    from aquaticy.config import Settings
+    from aquaticy.system import strongest_model, strongest_models
 
     for name in ("NVIDIA_NIM_API_KEY", "MISTRAL_API_KEY"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
+    monkeypatch.setattr("aquaticy.local_model.installed_models", lambda *a, **k: [])
     settings = Settings(model="ollama_chat/klein")
     assert strongest_models(settings) == []
     assert strongest_model(settings) == ""
@@ -3475,8 +3475,8 @@ def test_nothing_reachable_is_an_empty_list(monkeypatch: pytest.MonkeyPatch) -> 
 # Zwei Anbieter, drei Rollen je Anbieter
 # ---------------------------------------------------------------------------
 def test_the_provider_tables_cover_the_same_two_providers() -> None:
-    """Cortex ist auf NVIDIA NIM und Mistral spezialisiert -- überall gleich."""
-    from cortex import system
+    """Aquaticy ist auf NVIDIA NIM und Mistral spezialisiert -- überall gleich."""
+    from aquaticy import system
 
     beide = {"nvidia_nim", "mistral"}
     assert set(system.PROVIDER_MODELS) == beide
@@ -3495,8 +3495,8 @@ def test_the_provider_tables_cover_the_same_two_providers() -> None:
 def test_the_agents_run_on_the_small_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ein 70B-Modell für "such die Öffnungszeiten" kostet Sekunden -- und die
     summieren sich mit jedem der vierundvierzig Agenten."""
-    from cortex.config import Settings
-    from cortex.system import fast_model
+    from aquaticy.config import Settings
+    from aquaticy.system import fast_model
 
     settings = Settings(model="nvidia_nim/meta/llama-3.3-70b-instruct")
     assert fast_model(settings) == "nvidia_nim/meta/llama-3.1-8b-instruct"
@@ -3509,7 +3509,7 @@ def test_the_agents_run_on_the_small_model(monkeypatch: pytest.MonkeyPatch) -> N
     settings = Settings(model="mistral/mistral-large-latest", subagent_model="fremd/winzig")
     assert settings.effective_subagent_model == "fremd/winzig"
 
-    # Und wo Cortex kein kleines Modell kennt, bleibt es beim Hauptmodell.
+    # Und wo Aquaticy kein kleines Modell kennt, bleibt es beim Hauptmodell.
     settings = Settings(model="ollama_chat/gemma4:12b")
     assert fast_model(settings) == ""
     assert settings.effective_subagent_model == "ollama_chat/gemma4:12b"
@@ -3518,12 +3518,12 @@ def test_the_agents_run_on_the_small_model(monkeypatch: pytest.MonkeyPatch) -> N
 def test_the_coding_models_are_offered_for_code(monkeypatch: pytest.MonkeyPatch) -> None:
     """Codestral schreibt Code und findet keine Öffnungszeiten -- die Auswahl
     im Code-Modus ist deshalb eine andere als die im Pro-Modus."""
-    from cortex.config import Settings
-    from cortex.system import strongest_models
+    from aquaticy.config import Settings
+    from aquaticy.system import strongest_models
 
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-x")
     monkeypatch.setenv("MISTRAL_API_KEY", "mistral-x")
-    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
+    monkeypatch.setattr("aquaticy.local_model.installed_models", lambda *a, **k: [])
     settings = Settings(model="ollama_chat/klein")
 
     fuers_programmieren = [e["id"] for e in strongest_models(settings, purpose="code")]

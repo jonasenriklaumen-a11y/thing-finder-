@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from selectolax.parser import HTMLParser
 
-from cortex.extract import (
+from aquaticy.extract import (
     extract_product,
     extract_spec_tables,
     has_spec_heading,

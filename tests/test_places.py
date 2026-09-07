@@ -15,8 +15,8 @@ from urllib.parse import unquote_plus
 import httpx
 import pytest
 
-from cortex.config import Settings
-from cortex.places import (
+from aquaticy.config import Settings
+from aquaticy.places import (
     MAX_PLACES,
     Place,
     PlacesError,
@@ -25,13 +25,13 @@ from cortex.places import (
     find_places,
     geocode,
 )
-from cortex.tools import Toolbox
+from aquaticy.tools import Toolbox
 
 
 @pytest.fixture(autouse=True)
 def _kein_warten(monkeypatch: pytest.MonkeyPatch) -> None:
     """Der Takt wird eigens geprueft -- die anderen Tests sollen nicht warten."""
-    monkeypatch.setattr("cortex.places.MIN_INTERVAL", 0.0)
+    monkeypatch.setattr("aquaticy.places.MIN_INTERVAL", 0.0)
 
 
 def _fake_client(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Request]:
@@ -48,7 +48,7 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Request
             timeout=timeout,
         )
 
-    monkeypatch.setattr("cortex.places._client", bauen)
+    monkeypatch.setattr("aquaticy.places._client", bauen)
     return gesehen
 
 
@@ -91,7 +91,7 @@ def test_a_small_shop_comes_back_with_everything_that_matters(
     """Genau das ist der Fall, für den es die Karte gibt: der Laden in der
     Nebenstraße, den keine Suchmaschine kennt."""
     _fake_client(monkeypatch, _antwort)
-    orte, ortsname = find_places("Fahrradladen", "Bremen", "cortex-test/1.0")
+    orte, ortsname = find_places("Fahrradladen", "Bremen", "aquaticy-test/1.0")
 
     assert ortsname == "Bremen, Deutschland"
     assert len(orte) == 1, "Punkte ohne Namen fallen weg"
@@ -106,10 +106,10 @@ def test_a_small_shop_comes_back_with_everything_that_matters(
 def test_the_honest_user_agent_goes_along(monkeypatch: pytest.MonkeyPatch) -> None:
     """Die Nutzungsregel verlangt einen echten Namen -- keine Browser-Tarnung."""
     gesehen = _fake_client(monkeypatch, _antwort)
-    find_places("Cafe", "Bremen", "cortex/9.2 (+https://example.org)")
+    find_places("Cafe", "Bremen", "aquaticy/9.2 (+https://example.org)")
     assert gesehen, "es wurde gar nicht gefragt"
     for anfrage in gesehen:
-        assert anfrage.headers["User-Agent"].startswith("cortex/9.2")
+        assert anfrage.headers["User-Agent"].startswith("aquaticy/9.2")
         assert "Mozilla" not in anfrage.headers["User-Agent"]
 
 
@@ -117,7 +117,7 @@ def test_only_one_place_at_a_time_never_a_grid(monkeypatch: pytest.MonkeyPatch) 
     """Systematische Abfragen sind ausdruecklich verboten. Es geht immer genau
     eine Umgebung zu einer Frage eines Menschen hinaus."""
     gesehen = _fake_client(monkeypatch, _antwort)
-    find_places("Cafe", "Bremen", "cortex-test/1.0", radius_m=3000)
+    find_places("Cafe", "Bremen", "aquaticy-test/1.0", radius_m=3000)
     assert len(gesehen) == 2, "einmal Ort, einmal Umgebung -- mehr nicht"
     abfrage = unquote_plus(gesehen[1].content.decode())
     assert "around:3000" in abfrage
@@ -126,11 +126,11 @@ def test_only_one_place_at_a_time_never_a_grid(monkeypatch: pytest.MonkeyPatch) 
 
 def test_the_radius_stays_within_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
     gesehen = _fake_client(monkeypatch, _antwort)
-    find_places("Cafe", "Bremen", "cortex-test/1.0", radius_m=999_999)
+    find_places("Cafe", "Bremen", "aquaticy-test/1.0", radius_m=999_999)
     assert "around:15000" in unquote_plus(gesehen[1].content.decode())
 
     gesehen.clear()
-    find_places("Cafe", "Bremen", "cortex-test/1.0", radius_m=1)
+    find_places("Cafe", "Bremen", "aquaticy-test/1.0", radius_m=1)
     assert "around:200" in unquote_plus(gesehen[1].content.decode())
 
 
@@ -149,22 +149,22 @@ def test_the_number_of_hits_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     _fake_client(monkeypatch, viele)
-    orte, _ = find_places("Cafe", "Bremen", "cortex-test/1.0")
+    orte, _ = find_places("Cafe", "Bremen", "aquaticy-test/1.0")
     assert len(orte) == MAX_PLACES
 
 
 def test_one_request_per_second(monkeypatch: pytest.MonkeyPatch) -> None:
     """Das Schloss ist modulweit -- es hilft nichts, wenn jeder Agent fuer
     sich hoeflich ist und vierundvierzig gleichzeitig fragen."""
-    monkeypatch.setattr("cortex.places.MIN_INTERVAL", 0.05)
-    monkeypatch.setattr("cortex.places._zuletzt", 0.0)
+    monkeypatch.setattr("aquaticy.places.MIN_INTERVAL", 0.05)
+    monkeypatch.setattr("aquaticy.places._zuletzt", 0.0)
     _fake_client(monkeypatch, _antwort)
 
     zeiten: list[float] = []
     schloss = threading.Lock()
 
     def einer() -> None:
-        find_places("Cafe", "Bremen", "cortex-test/1.0")
+        find_places("Cafe", "Bremen", "aquaticy-test/1.0")
         with schloss:
             zeiten.append(time.monotonic())
 
@@ -199,19 +199,19 @@ def test_the_map_failing_is_not_the_end(monkeypatch: pytest.MonkeyPatch) -> None
 
     _fake_client(monkeypatch, kaputt)
     with pytest.raises(PlacesError):
-        find_places("Cafe", "Bremen", "cortex-test/1.0")
+        find_places("Cafe", "Bremen", "aquaticy-test/1.0")
 
 
 def test_an_unknown_place_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_client(monkeypatch, lambda request: httpx.Response(200, json=[]))
     with pytest.raises(PlacesError, match="kennt die Karte nicht"):
-        geocode("Fantasialand 12", "cortex-test/1.0")
+        geocode("Fantasialand 12", "aquaticy-test/1.0")
 
 
 def test_without_a_place_nothing_goes_out(monkeypatch: pytest.MonkeyPatch) -> None:
     gesehen = _fake_client(monkeypatch, _antwort)
     with pytest.raises(PlacesError):
-        geocode("   ", "cortex-test/1.0")
+        geocode("   ", "aquaticy-test/1.0")
     assert gesehen == [], "ohne Ort wird gar nicht erst gefragt"
 
 
@@ -238,7 +238,7 @@ def test_the_tool_uses_the_location_filter(
         gesehen.update(what=what, where=where, agent=user_agent, **kwargs)
         return [Place(name="Café Klein", website="https://klein.example")], "Bremen"
 
-    monkeypatch.setattr("cortex.places.find_places", fake_find)
+    monkeypatch.setattr("aquaticy.places.find_places", fake_find)
     settings.location = "Bremen"
     box = Toolbox(settings, cache=None)
     payload = box.local_places(what="Café")
@@ -263,7 +263,7 @@ def test_a_broken_map_does_not_break_the_answer(
     def kaputt(*args: Any, **kwargs: Any):
         raise PlacesError("Die Karte antwortet gerade nicht: ReadTimeout")
 
-    monkeypatch.setattr("cortex.places.find_places", kaputt)
+    monkeypatch.setattr("aquaticy.places.find_places", kaputt)
     settings.location = "Bremen"
     box = Toolbox(settings, cache=None)
     payload = box.local_places(what="Café")

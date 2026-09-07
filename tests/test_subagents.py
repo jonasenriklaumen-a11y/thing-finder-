@@ -11,17 +11,17 @@ from typing import Any
 import httpx
 import pytest
 
-from cortex.config import Settings
-from cortex.fetch import Fetcher, RobotsPolicy
-from cortex.models import SearchResult
-from cortex.subagents import SubagentResult, run_subagents
-from cortex.tools import Toolbox
+from aquaticy.config import Settings
+from aquaticy.fetch import Fetcher, RobotsPolicy
+from aquaticy.models import SearchResult
+from aquaticy.subagents import SubagentResult, run_subagents
+from aquaticy.tools import Toolbox
 
 
 @pytest.fixture(autouse=True)
 def _stub_search(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "cortex.tools.search_web",
+        "aquaticy.tools.search_web",
         lambda query, **kwargs: [SearchResult(title="T", url="https://a.de/", snippet="S")],
     )
 
@@ -34,9 +34,9 @@ def _toolbox(settings: Settings, fixture_html) -> Toolbox:
             200, text=fixture_html("plain_article.html"), headers={"content-type": "text/html"}
         )
 
-    fetcher = Fetcher("cortex-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
+    fetcher = Fetcher("aquaticy-test/0.1", timeout=5, delay_seconds=0, enable_browser=False)
     fetcher._client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
-    fetcher.robots = RobotsPolicy(fetcher._client, "cortex-test/0.1")
+    fetcher.robots = RobotsPolicy(fetcher._client, "aquaticy-test/0.1")
     return Toolbox(settings, cache=None, fetcher=fetcher)
 
 
@@ -79,7 +79,7 @@ def test_subagent_uses_its_tools(
         return _reply(content="Ein Café gefunden. Quelle: a.de")
 
     monkeypatch.setattr("litellm.completion", completion)
-    from cortex.subagents import _run_one
+    from aquaticy.subagents import _run_one
 
     result = _run_one("Finde Cafés", settings, None, None, toolbox=_toolbox(settings, fixture_html))
     assert result.tool_calls == 1
@@ -200,7 +200,7 @@ def test_result_serialisation() -> None:
 def test_planner_returns_the_task_list(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from cortex.subagents import plan_subtasks
+    from aquaticy.subagents import plan_subtasks
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -210,7 +210,7 @@ def test_planner_returns_the_task_list(
 
 
 def test_planner_respects_the_limit(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    from cortex.subagents import plan_subtasks
+    from aquaticy.subagents import plan_subtasks
 
     monkeypatch.setattr(
         "litellm.completion", lambda **kwargs: _reply(content='["a","b","c","d","e","f"]')
@@ -222,7 +222,7 @@ def test_planner_falls_back_to_the_question(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     """Unbrauchbare Planung darf den Ablauf nicht aendern."""
-    from cortex.subagents import plan_subtasks
+    from aquaticy.subagents import plan_subtasks
 
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="keine Ahnung"))
     assert plan_subtasks("Meine Frage", settings) == ["Meine Frage"]
@@ -231,7 +231,7 @@ def test_planner_falls_back_to_the_question(
 def test_planner_survives_a_dead_model(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from cortex.subagents import plan_subtasks
+    from aquaticy.subagents import plan_subtasks
 
     def failing(**kwargs: Any):
         raise RuntimeError("weg")
@@ -241,7 +241,7 @@ def test_planner_survives_a_dead_model(
 
 
 def test_planner_gets_the_context(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    from cortex.subagents import plan_subtasks
+    from aquaticy.subagents import plan_subtasks
 
     captured: dict[str, Any] = {}
 
@@ -291,7 +291,7 @@ def test_without_its_own_model_the_small_one_is_used(
 def test_an_unknown_provider_keeps_the_main_model(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    """Kennt Cortex zum Anbieter kein kleines Modell, bleibt es beim großen."""
+    """Kennt Aquaticy zum Anbieter kein kleines Modell, bleibt es beim großen."""
     settings.subagent_model = ""
     settings.model = "fremd/riesenmodell"
     used: list[str] = []
@@ -342,14 +342,14 @@ def test_subagents_share_one_fetcher(
 ) -> None:
     """Die Drossel (1 Request/s je Domain) muss ueber alle Subagenten gelten."""
     created: list[Any] = []
-    from cortex.fetch import Fetcher as RealFetcher
+    from aquaticy.fetch import Fetcher as RealFetcher
 
     class SpyFetcher(RealFetcher):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             created.append(self)
 
-    monkeypatch.setattr("cortex.fetch.Fetcher", SpyFetcher)
+    monkeypatch.setattr("aquaticy.fetch.Fetcher", SpyFetcher)
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="ok"))
     run_subagents(["a", "b", "c"], settings, parallel=2)
     assert len(created) == 1
@@ -425,7 +425,7 @@ def test_the_small_model_falls_back_exactly_once(
 def test_plan_request_returns_decision_and_tasks(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -435,7 +435,7 @@ def test_plan_request_returns_decision_and_tasks(
 
 
 def test_plan_request_detects_chat(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -449,7 +449,7 @@ def test_plan_request_uses_the_small_model_without_thinking(
 ) -> None:
     """Der Planer lief frueher auf dem grossen Modell -- auf einer knappen
     Karte kostete allein der Modellwechsel mehr als der Aufruf."""
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     settings.model = "ollama_chat/gemma4:12b"
     settings.subagent_model = "ollama_chat/qwen3:1.7b"
@@ -474,7 +474,7 @@ def test_plan_request_uses_the_small_model_without_thinking(
 def test_plan_request_survives_garbage(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     for answer in ("kein JSON", "", '{"kaputt":'):
         monkeypatch.setattr(
@@ -490,7 +490,7 @@ def test_plan_request_accepts_a_bare_array(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
     """Manche Modelle ignorieren das Schema und liefern nur die Liste."""
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content='["A", "B"]'))
     assert plan_request("Frage", settings) == (True, ["A", "B"])
@@ -499,7 +499,7 @@ def test_plan_request_accepts_a_bare_array(
 def test_plan_request_respects_the_limit(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     monkeypatch.setattr(
         "litellm.completion",
@@ -532,7 +532,7 @@ def test_subagents_run_without_thinking_mode(
 
 def test_subagent_prompt_asks_for_detail() -> None:
     """Was der Subagent weglaesst, ist fuer den Hauptagenten verloren."""
-    from cortex.subagents import SUBAGENT_PROMPT
+    from aquaticy.subagents import SUBAGENT_PROMPT
 
     assert "ausfuehrlich" in SUBAGENT_PROMPT.lower()
     assert "400 Woerter" in SUBAGENT_PROMPT
@@ -545,8 +545,8 @@ def test_subagent_prompt_asks_for_detail() -> None:
 # ---------------------------------------------------------------------------
 def test_agents_share_one_list_of_claimed_domains(monkeypatch, tmp_path) -> None:
     """Drei Teilfragen zum selben Thema sollen nicht dieselbe Seite lesen."""
-    from cortex.config import Settings
-    from cortex.subagents import SubagentResult, run_subagents
+    from aquaticy.config import Settings
+    from aquaticy.subagents import SubagentResult, run_subagents
 
     gesehen: list[object] = []
 
@@ -555,7 +555,7 @@ def test_agents_share_one_list_of_claimed_domains(monkeypatch, tmp_path) -> None
         toolbox.avoid_domains.add(f"{task}.example")
         return SubagentResult(task=task, summary="ok")
 
-    monkeypatch.setattr("cortex.subagents._run_one", fake_one)
+    monkeypatch.setattr("aquaticy.subagents._run_one", fake_one)
     settings = Settings(data_dir=tmp_path, max_subagents=3)
     run_subagents(["a", "b", "c"], settings, parallel=1)
 
@@ -593,7 +593,7 @@ def test_the_same_task_does_not_run_twice(
 
 def test_the_subagent_is_told_to_ask_three_ways(settings: Settings) -> None:
     """Drei Formulierungen in EINEM Aufruf: mehr Treffer, gleiche Kosten."""
-    from cortex.subagents import SUBAGENT_PROMPT
+    from aquaticy.subagents import SUBAGENT_PROMPT
 
     assert "`queries`" in SUBAGENT_PROMPT
     assert "einen einzigen Aufruf" in SUBAGENT_PROMPT
@@ -606,7 +606,7 @@ def test_many_agents_do_not_start_in_the_same_millisecond(
     Ratenbegrenzung -- und jeder Subagent, der sie abbekommt, faellt aus."""
     import time
 
-    from cortex.subagents import LAUNCH_STAGGER, STAGGER_AFTER
+    from aquaticy.subagents import LAUNCH_STAGGER, STAGGER_AFTER
 
     starts: list[float] = []
 
@@ -614,7 +614,7 @@ def test_many_agents_do_not_start_in_the_same_millisecond(
         starts.append(time.monotonic())
         return SubagentResult(task=task, summary="ok")
 
-    monkeypatch.setattr("cortex.subagents._run_one", fake_one)
+    monkeypatch.setattr("aquaticy.subagents._run_one", fake_one)
     settings.max_subagents = 24
     aufgaben = [f"Teilfrage {nummer}" for nummer in range(8)]
     run_subagents(aufgaben, settings, parallel=8)
@@ -638,7 +638,7 @@ def test_a_handful_of_agents_still_starts_at_once(
         starts.append(time.monotonic())
         return SubagentResult(task=task, summary="ok")
 
-    monkeypatch.setattr("cortex.subagents._run_one", fake_one)
+    monkeypatch.setattr("aquaticy.subagents._run_one", fake_one)
     run_subagents(["a", "b", "c"], settings, parallel=3)
     assert max(starts) - min(starts) < 0.5
 
@@ -648,7 +648,7 @@ def test_a_handful_of_agents_still_starts_at_once(
 # ---------------------------------------------------------------------------
 def test_the_role_comes_out_of_the_task() -> None:
     """Reine Textarbeit -- die Zuordnung darf keine Wartezeit kosten."""
-    from cortex.subagents import role_for
+    from aquaticy.subagents import role_for
 
     assert role_for("Was kostet ein Lastenrad in Bremen?") == "zahlen"
     assert role_for("Welche Probleme und Beschwerden gibt es zum Modell X?") == "gegenstimmen"
@@ -660,7 +660,7 @@ def test_the_role_comes_out_of_the_task() -> None:
 
 
 def test_each_role_says_something_different() -> None:
-    from cortex.subagents import ROLE_EXTRA, ROLE_LABELS
+    from aquaticy.subagents import ROLE_EXTRA, ROLE_LABELS
 
     assert ROLE_EXTRA["standard"] == "", "der Normalfall bleibt, wie er war"
     assert "Preise" in ROLE_EXTRA["zahlen"]
@@ -686,7 +686,7 @@ def test_the_role_reaches_the_agent(monkeypatch: pytest.MonkeyPatch, settings: S
 
 
 def test_an_unknown_role_falls_back(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    from cortex.subagents import _run_one
+    from aquaticy.subagents import _run_one
 
     monkeypatch.setattr("litellm.completion", lambda **kwargs: _reply(content="ok"))
     ergebnis = _run_one("Frage", settings, None, None, role="quatsch")
@@ -777,7 +777,7 @@ def test_nothing_to_check_is_not_checked(
 
 
 def test_the_verdict_is_read_from_the_first_word() -> None:
-    from cortex.subagents import verdict_of
+    from aquaticy.subagents import verdict_of
 
     assert verdict_of("BESTAETIGT — alles stimmt") == "BESTAETIGT"
     assert verdict_of("**ABWEICHUNG**: Preis anders") == "ABWEICHUNG"
@@ -837,7 +837,7 @@ def test_never_more_checkers_than_searchers(
 def test_the_tasks_are_filled_up_to_the_number_of_agents() -> None:
     """Der Planer liefert drei Teilfragen, obwohl zwölf Agenten bereitstehen --
     dann suchen zwölf Agenten zu dritt."""
-    from cortex.subagents import spread_tasks
+    from aquaticy.subagents import spread_tasks
 
     aufgefuellt = spread_tasks(
         "Gute Cafés mit WLAN in Bremen",
@@ -854,13 +854,13 @@ def test_the_tasks_are_filled_up_to_the_number_of_agents() -> None:
 
 
 def test_more_tasks_than_agents_are_cut() -> None:
-    from cortex.subagents import spread_tasks
+    from aquaticy.subagents import spread_tasks
 
     assert len(spread_tasks("Frage", [f"Teil {n}" for n in range(20)], 12)) == 12
 
 
 def test_nothing_is_invented_out_of_nothing() -> None:
-    from cortex.subagents import spread_tasks
+    from aquaticy.subagents import spread_tasks
 
     assert spread_tasks("", [], 12) == []
     assert [task.text for task in spread_tasks("", ["Teil A"], 12)] == ["Teil A"]
@@ -869,7 +869,7 @@ def test_nothing_is_invented_out_of_nothing() -> None:
 def test_the_planner_is_asked_for_the_full_number(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     gesehen: list[str] = []
 
@@ -889,7 +889,7 @@ def test_the_place_lands_in_every_subtask(
 ) -> None:
     """Der Subagent sieht das Gespräch nicht und den Ortsfilter erst recht
     nicht -- für ihn ist die Teilfrage alles, was es gibt."""
-    from cortex.subagents import plan_request
+    from aquaticy.subagents import plan_request
 
     monkeypatch.setattr(
         "litellm.completion",

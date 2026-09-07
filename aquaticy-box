@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# aquaticy im Container starten -- isoliert vom System, mit vollem Netz.
+#
+#   ./aquaticy-box --setup           einmalige Einrichtung (schreibt ./.env)
+#   ./aquaticy-box                   Chat
+#   ./aquaticy-box "deine Frage"     einmalige Recherche
+#   ./aquaticy-box search "test"     nur die Suche, ohne LLM
+#   ./aquaticy-box --build           Image neu bauen, dann starten
+#   ./aquaticy-box --lan ...         mit der Netzwerkkarte des Rechners, damit
+#                                  aquaticy Heimnetz und Home Assistant sieht
+set -euo pipefail
+
+cd "$(dirname "$0")"
+mkdir -p exports
+
+# Unter Linux laeuft der Container unter der eigenen UID, damit Exporte
+# nicht root gehoeren. Docker Desktop (macOS/Windows) regelt das selbst.
+if [[ "$(uname -s)" == "Linux" ]]; then
+    AQUATICY_UID="$(id -u)"
+    AQUATICY_GID="$(id -g)"
+    export AQUATICY_UID AQUATICY_GID
+fi
+
+# Ohne die Netzwerkkarte des Rechners haengt der Container in Dockers
+# eigenem Bruecken-Netz -- von dort ist das Heimnetz nicht zu sehen, und
+# `aquaticy lan` wie `connect-ha` faenden nichts.
+if [[ "${1:-}" == "--lan" ]]; then
+    shift
+    export AQUATICY_NETWORK=host
+fi
+
+case "${1:-}" in
+    --build)
+        shift
+        docker compose build aquaticy
+        ;;
+    --setup)
+        # Der Container darf nur nach /work schreiben; von dort holen wir
+        # die fertige .env ins Projektverzeichnis.
+        docker compose run --rm aquaticy setup --env-file /work/.env
+        if [[ -f exports/.env ]]; then
+            mv exports/.env .env
+            echo "Konfiguration gespeichert in $(pwd)/.env"
+        fi
+        exit 0
+        ;;
+esac
+
+if [[ ! -f .env ]]; then
+    echo "Keine .env gefunden -- richte aquaticy einmalig ein:" >&2
+    echo "  ./aquaticy-box --setup" >&2
+    exit 1
+fi
+
+exec docker compose run --rm aquaticy "$@"

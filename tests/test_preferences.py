@@ -1,4 +1,4 @@
-"""Tests fuer die Einstellungen, die Cortex im Gespraech aendern darf."""
+"""Tests fuer die Einstellungen, die Aquaticy im Gespraech aendern darf."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from cortex import preferences
-from cortex.preferences import BadValue
+from aquaticy import preferences
+from aquaticy.preferences import BadValue
 
 
 # ---------------------------------------------------------------------------
@@ -152,19 +152,19 @@ def test_storing_writes_the_env_and_takes_effect(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     target = tmp_path / ".env"
-    target.write_text("CORTEX_LOCATION=Bremen\n", encoding="utf-8")
-    monkeypatch.setattr("cortex.config.find_env_file", lambda: target)
-    monkeypatch.delenv("CORTEX_LOCATION", raising=False)
+    target.write_text("AQUATICY_LOCATION=Bremen\n", encoding="utf-8")
+    monkeypatch.setattr("aquaticy.config.find_env_file", lambda: target)
+    monkeypatch.delenv("AQUATICY_LOCATION", raising=False)
 
     written = preferences.store(preferences.find("ort"), "Hamburg")
     assert written == target
-    assert "CORTEX_LOCATION=Hamburg" in target.read_text(encoding="utf-8")
+    assert "AQUATICY_LOCATION=Hamburg" in target.read_text(encoding="utf-8")
 
     # Ohne override haette die alte Umgebungsvariable gewonnen und die
     # Aenderung waere erst nach einem Neustart wirksam geworden.
     import os
 
-    assert os.environ["CORTEX_LOCATION"] == "Hamburg"
+    assert os.environ["AQUATICY_LOCATION"] == "Hamburg"
 
 
 def test_every_catalogue_entry_has_a_key_except_the_appearance() -> None:
@@ -174,7 +174,7 @@ def test_every_catalogue_entry_has_a_key_except_the_appearance() -> None:
         if preference.name in browser_only:
             assert preference.key == ""
         else:
-            assert preference.key.startswith("CORTEX_"), preference.name
+            assert preference.key.startswith("AQUATICY_"), preference.name
 
 
 def test_the_palette_is_recognised_however_it_is_written() -> None:
@@ -191,7 +191,7 @@ def test_the_palette_is_recognised_however_it_is_written() -> None:
 
 def test_every_palette_has_a_name_in_the_stylesheet() -> None:
     """Ein Schema ohne Gegenstueck im CSS waere eine Einstellung ins Leere."""
-    from cortex import web
+    from aquaticy import web
 
     html = web.UI_FILE.read_text(encoding="utf-8")
     for value, css_name in preferences.PALETTE_IDS.items():

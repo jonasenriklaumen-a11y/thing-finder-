@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from cortex import sandbox as werkstatt
+from aquaticy import sandbox as werkstatt
 
 
 class FakeRun:
@@ -83,7 +83,7 @@ def test_nothing_of_the_computer_goes_in(box: tuple[werkstatt.Sandbox, FakeRun])
     for mount in mounts:
         quelle = mount.split(":")[0]
         assert not quelle.startswith("/"), f"{mount} reicht ein Verzeichnis des Rechners hinein"
-        assert quelle.startswith("cortex-werkstatt-"), mount
+        assert quelle.startswith("aquaticy-werkstatt-"), mount
 
     umgebung = [zeile[i + 1] for i, teil in enumerate(zeile) if teil == "--env"]
     erlaubt = {"HOME", "PATH", "LANG", "PYTHONDONTWRITEBYTECODE"}
@@ -245,13 +245,13 @@ def test_a_failed_start_leaves_nothing_standing(monkeypatch: pytest.MonkeyPatch)
 def test_forgotten_workshops_are_swept(monkeypatch: pytest.MonkeyPatch) -> None:
     """Nach einem Absturz soll beim naechsten Start nichts liegen bleiben."""
     fake = FakeRun(
-        {"ps": (0, "abc123\ndef456\n", ""), "ls": (0, "cortex-werkstatt-x\nandere\n", "")}
+        {"ps": (0, "abc123\ndef456\n", ""), "ls": (0, "aquaticy-werkstatt-x\nandere\n", "")}
     )
     monkeypatch.setattr(subprocess, "run", fake)
     entfernt = werkstatt.sweep(werkstatt.Runtime("docker", "docker", "Docker"))
     assert entfernt == 2
     geloescht = [zeile for zeile in fake.aufrufe if "volume" in zeile and "rm" in zeile]
-    assert any("cortex-werkstatt-x" in zeile for zeile in geloescht)
+    assert any("aquaticy-werkstatt-x" in zeile for zeile in geloescht)
     assert not any("andere" in zeile for zeile in geloescht), "fremde Datentraeger bleiben"
 
 
@@ -262,7 +262,7 @@ def _laufende(monkeypatch: pytest.MonkeyPatch) -> werkstatt.Sandbox:
     """Eine Werkstatt, die sich fuer laufend haelt -- ohne echten Behaelter."""
     sandkasten = werkstatt.Sandbox(image="python:3.12-slim")
     sandkasten.runtime = werkstatt.Runtime("docker", "docker", "Docker (gehaertet)")
-    sandkasten._name = "cortex-werkstatt-test"
+    sandkasten._name = "aquaticy-werkstatt-test"
     monkeypatch.setattr(sandkasten, "ensure", lambda: sandkasten._name)
     return sandkasten
 

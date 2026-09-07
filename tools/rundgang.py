@@ -165,7 +165,7 @@ class FakeAgent:
         if "frag" in text:
             self.on_event("ask", {"question": "Welches Budget?", "options": ["bis 800 €"]})
             self.ask_handler("Welches Budget?", ["bis 800 €"])
-        # Der Fall, in dem Cortex merkt, dass seine Antwort nur eine Frage
+        # Der Fall, in dem Aquaticy merkt, dass seine Antwort nur eine Frage
         # war: das Angefangene wird verworfen und neu angesetzt.
         if "neuansatz" in text:
             self.on_event("answer_chunk", {"text": "Fuer welchen Ort soll ich nachsehen?"})
@@ -219,10 +219,10 @@ def freier_port() -> int:
 
 def starte_server(agent: FakeAgent) -> int:
     """Startet die Oberflaeche mit dem gestellten Agenten."""
-    os.environ.setdefault("CORTEX_DATA_DIR", tempfile.mkdtemp(prefix="rundgang-"))
-    os.environ.setdefault("CORTEX_MODEL", "mistral/mistral-large-latest")
+    os.environ.setdefault("AQUATICY_DATA_DIR", tempfile.mkdtemp(prefix="rundgang-"))
+    os.environ.setdefault("AQUATICY_MODEL", "mistral/mistral-large-latest")
     os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-rundgang")
-    from cortex import web
+    from aquaticy import web
 
     web.SESSION._agent = agent
     web.SESSION.agent = lambda: agent          # type: ignore[method-assign]
@@ -245,8 +245,8 @@ def starte_server(agent: FakeAgent) -> int:
 
 def lege_chats_an() -> None:
     """Zwei Chats in den Verlauf, damit die Seitenleiste etwas zu zeigen hat."""
-    from cortex.cache import Cache
-    from cortex.config import get_settings
+    from aquaticy.cache import Cache
+    from aquaticy.config import get_settings
 
     settings = get_settings()
     cache = Cache(settings.db_path, settings.cache_ttl_hours)
@@ -715,8 +715,8 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         marken = pg.locator("#secnav button").count()
         abschnitte = pg.locator("#settings fieldset").count()
         log.pruefe(marken == abschnitte, f"{marken} Sprungmarken zu {abschnitte} Abschnitten")
-        for feld in ("CORTEX_MODEL", "CORTEX_CODE_MODEL", "CORTEX_LOCATION",
-                     "CORTEX_LAN_SUBNET", "CORTEX_STORAGE_URL"):
+        for feld in ("AQUATICY_MODEL", "AQUATICY_CODE_MODEL", "AQUATICY_LOCATION",
+                     "AQUATICY_LAN_SUBNET", "AQUATICY_STORAGE_URL"):
             log.pruefe(pg.locator(f'[name="{feld}"]').count() == 1, f"{feld} im Formular")
         pg.click('#secnav button:has-text("Suche")')
         pg.wait_for_timeout(900)
@@ -959,7 +959,7 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
 
         gemerkt = pg.evaluate("() => Object.keys(localStorage)")
         log.pruefe(
-            [name for name in gemerkt if name != "cortex-token"] == [],
+            [name for name in gemerkt if name != "aquaticy-token"] == [],
             f"der Browser haelt nichts fest ausser dem Zugangswort ({gemerkt})",
         )
 
@@ -1057,7 +1057,7 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
                    f"das Kopieren meldet sich: {beschriftung!r}")
 
     if dran("speicher"):
-        log.abschnitt("13. Was Cortex über mich weiß")
+        log.abschnitt("13. Was Aquaticy über mich weiß")
         pg.click("#btn-settings")
         pg.wait_for_selector("#overlay.open", state="visible")
         pg.click("#btn-memory")

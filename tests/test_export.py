@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from cortex.export import Turn, export, to_html, to_markdown
-from cortex.models import Product
+from aquaticy.export import Turn, export, to_html, to_markdown
+from aquaticy.models import Product
 
 
 def _turn() -> Turn:
@@ -209,7 +209,7 @@ def test_image_files_do_not_collide_across_turns(
             ],
         )
 
-    from cortex.export import download_images
+    from aquaticy.export import download_images
 
     mapping = download_images(
         [turn_with("https://cdn.a.de/bild.jpg"), turn_with("https://cdn.b.de/bild.jpg")],

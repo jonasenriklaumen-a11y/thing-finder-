@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cortex import storage
-from cortex.storage import NotAllowed, Storage, StorageError
+from aquaticy import storage
+from aquaticy.storage import NotAllowed, Storage, StorageError
 
 
 def _client(handler) -> httpx.Client:
@@ -233,7 +233,7 @@ def test_an_unreachable_server_is_reported_not_raised_raw() -> None:
 # ---------------------------------------------------------------------------
 def test_discovery_only_accepts_a_real_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Auf Port 3000 laeuft oft ein anderer Entwicklungsserver."""
-    monkeypatch.setattr("cortex.lan.find_port", lambda port, subnet: ["10.0.0.7", "10.0.0.9"])
+    monkeypatch.setattr("aquaticy.lan.find_port", lambda port, subnet: ["10.0.0.7", "10.0.0.9"])
 
     def handler(request: httpx.Request) -> httpx.Response:
         if "10.0.0.9" in str(request.url):
@@ -247,10 +247,10 @@ def test_discovery_only_accepts_a_real_storage(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_discovery_without_a_network_gives_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cortex.lan import NotPrivate
+    from aquaticy.lan import NotPrivate
 
     def boom(port, subnet):
         raise NotPrivate("kein privates Netz")
 
-    monkeypatch.setattr("cortex.lan.find_port", boom)
+    monkeypatch.setattr("aquaticy.lan.find_port", boom)
     assert storage.discover() == []

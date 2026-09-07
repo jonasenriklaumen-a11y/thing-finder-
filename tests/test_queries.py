@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from cortex import queries
-from cortex.models import SearchResult
+from aquaticy import queries
+from aquaticy.models import SearchResult
 
 
 def hit(url: str, title: str = "T", snippet: str = "S") -> SearchResult:
@@ -139,7 +139,7 @@ def test_the_count_is_respected(count: int) -> None:
 # Der Ortsfilter in der Anfrage
 # ---------------------------------------------------------------------------
 def test_the_place_is_the_name_not_the_address() -> None:
-    from cortex.queries import place_of
+    from aquaticy.queries import place_of
 
     assert place_of("Bremen") == "Bremen"
     assert place_of("Bremen, Deutschland") == "Bremen"
@@ -149,7 +149,7 @@ def test_the_place_is_the_name_not_the_address() -> None:
 
 
 def test_the_place_is_added_only_when_it_is_missing() -> None:
-    from cortex.queries import with_place
+    from aquaticy.queries import with_place
 
     assert with_place("Gute Cafés mit WLAN", "Bremen") == "Gute Cafés mit WLAN Bremen"
     # Steht er schon drin, wird nichts angehängt -- "Bremen Bremen" sucht schlechter.
@@ -161,7 +161,7 @@ def test_the_place_is_added_only_when_it_is_missing() -> None:
 
 
 def test_a_place_is_recognised_by_a_part_of_its_name() -> None:
-    from cortex.queries import mentions_place
+    from aquaticy.queries import mentions_place
 
     assert mentions_place("Cafés in bremen", "Bremen") is True
     assert mentions_place("Cafés in Bremen", "Bremen Nord") is True
