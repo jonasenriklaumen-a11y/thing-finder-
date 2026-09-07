@@ -194,3 +194,68 @@ def test_naechster_termin_liegt_nie_in_der_vergangenheit() -> None:
         for stunde in (0, 8, 23):
             wann = datetime.fromtimestamp(next_time(rhythmus, stunde, 0, 3))
             assert wann > jetzt - timedelta(seconds=1)
+
+
+def test_die_antwort_eines_auftrags_leuchtet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein Auftrag stellt seine Frage von selbst -- oft nachts. Die Antwort
+    soll auffallen, ohne dass jemand danach sucht."""
+    gemerkt: list[tuple[str, str]] = []
+
+    class FakeAgent:
+        def __init__(self, settings: Any, cache: Any = None) -> None:
+            self.session_id = "auftrag-7"
+
+        def ask(self, frage: str, **kwargs: Any) -> Any:
+            return type("R", (), {"answer": "Es gibt Neues."})()
+
+        def close(self) -> None: ...
+
+    class FakeCache:
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def mark_unread(self, session_id: str, reason: str = "") -> None:
+            gemerkt.append((session_id, reason))
+
+    monkeypatch.setattr("cortex.agent.Agent", FakeAgent)
+    monkeypatch.setattr("cortex.cache.Cache", FakeCache)
+
+    job = Job(
+        id=1, question="Was ist neu?", rhythm="daily", hour=8, minute=0, weekday=0,
+        enabled=True, structured=True, created_at=0.0, next_run=0.0, last_run=0.0,
+        last_state="", last_chat="",
+    )
+    settings = type("S", (), {"db_path": ":memory:", "cache_ttl_hours": 1})()
+    zustand, _ = auftraege.run_job(job, settings)
+    assert zustand == "fertig"
+    assert gemerkt == [("auftrag-7", "auftrag")]
+
+
+def test_ohne_antwort_leuchtet_nichts(monkeypatch: pytest.MonkeyPatch) -> None:
+    gemerkt: list[str] = []
+
+    class LeererAgent:
+        def __init__(self, settings: Any, cache: Any = None) -> None:
+            self.session_id = "auftrag-8"
+
+        def ask(self, frage: str, **kwargs: Any) -> Any:
+            return type("R", (), {"answer": "   "})()
+
+        def close(self) -> None: ...
+
+    class FakeCache:
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def mark_unread(self, session_id: str, reason: str = "") -> None:
+            gemerkt.append(session_id)
+
+    monkeypatch.setattr("cortex.agent.Agent", LeererAgent)
+    monkeypatch.setattr("cortex.cache.Cache", FakeCache)
+    job = Job(
+        id=1, question="Frage", rhythm="daily", hour=8, minute=0, weekday=0,
+        enabled=True, structured=False, created_at=0.0, next_run=0.0, last_run=0.0,
+        last_state="", last_chat="",
+    )
+    settings = type("S", (), {"db_path": ":memory:", "cache_ttl_hours": 1})()
+    zustand, _ = auftraege.run_job(job, settings)
+    assert zustand == "ohne Antwort"
+    assert gemerkt == []

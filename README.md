@@ -131,7 +131,7 @@ cortex "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ cortex --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Cortex AI 9.2.0                                      │
+│ Cortex AI 9.2.1                                      │
 │ Modell anthropic/claude-sonnet-4-6 · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -450,6 +450,28 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   zwei kleine Knöpfe: *Kopieren* legt den Wortlaut in die Zwischenablage,
   *Als Datei* speichert ihn als Markdown. Kopiert wird der Markdown-Text, nicht das
   gerenderte HTML — damit lässt sich weiterarbeiten.
+* **Die Modellauswahl** oben in der Mitte zeigt, womit gerade **wirklich**
+  gearbeitet wird. Im Code- und im Pro-Modus ist das nicht das eingestellte,
+  sondern das stärkste erreichbare Modell — früher stand oben trotzdem das alte,
+  man sah also nicht, dass ein anderes antwortet. Und man hat dort jetzt die
+  **Wahl**: in Code und Pro stellt Cortex die **drei stärksten** Modelle zur
+  Auswahl (und nur die — alles andere wäre eine Wahl, die gleich wieder
+  überstimmt wird), im Standardmodus wie bisher alle. Was man dort im Code- oder
+  Pro-Modus wählt, landet als *Code-Modell* in den Einstellungen und lässt das
+  Modell des Standardmodus unangetastet.
+
+  Das Fenster **scrollt jetzt als Ganzes**. Vorher scrollte allein die
+  Modellliste, und alles darunter — Denktiefe, die Schalter, der Fuß mit dem Weg
+  zu den Einstellungen — lag außerhalb des Bildschirms, ohne jede Möglichkeit,
+  dorthin zu kommen: man konnte das Modell wählen, aber nicht, was es tun darf.
+* **Ein Auftrag, der geantwortet hat, leuchtet.** Wer sich täglich, stündlich,
+  wöchentlich oder monatlich etwas schicken lässt, sitzt beim Antworten nicht
+  davor. Der Chat in der Seitenleiste bekommt deshalb einen ruhig pulsierenden
+  Punkt und einen kräftigeren Namen, bis man ihn öffnet — danach sieht er aus
+  wie jeder andere. Auf dem Handy, wo die Leiste zu ist, trägt der Knopf zur
+  Leiste den Punkt. Kein Abzeichen mit Zahl: es geht um „da ist was", nicht um
+  „da sind drei". Die Liste sieht einmal pro Minute selbst nach, damit das
+  Leuchten auch ohne Neuladen ankommt.
 * **Merkzettel** und **Neuer Chat** liegen daneben in der Kopfzeile.
 * **Weggehen ist erlaubt.** Eine Anfrage lebt nicht mehr in ihrer Verbindung: der
   Lauf gehört dem Server. Wer die Seite verlässt, das Handy sperrt oder kurz in
@@ -474,8 +496,11 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   ist**, und dahinter steht eine ganze Rechercheeinheit statt einer Handvoll
   Agenten.
 
-  **Der Master.** Im Pro-Modus plant nicht mehr ein kleiner Planer, sondern ein
-  **Master** auf dem starken Modell. Er macht drei Dinge:
+  **Der Master.** Im Pro-Modus plant nicht mehr ein kleiner Planer, sondern der
+  **Master** — und der ist das **Hauptmodell**: dasselbe, das oben in der
+  Kopfzeile steht und am Ende die Antwort schreibt. Nichts Kleines nebenher; wer
+  die Aufträge verteilt und die Rückmeldungen bewertet, muss die Frage so gut
+  verstehen wie der, der sie beantwortet. Er macht drei Dinge:
 
   1. **Beauftragen.** Er entscheidet, wie viele Agenten die Frage braucht —
      bis zu **44** —, und gibt jedem einen eigenen Auftrag *und* eine eigene
@@ -703,7 +728,12 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   zeigen, nicht bremsen. *Zähler zurücksetzen* leert ihn.
 * **Aufträge** unter *Einstellungen → Aufträge*: Fragen, die Cortex AI von selbst
   stellt — stündlich, täglich oder wöchentlich zu einer festen Uhrzeit. Die Antwort
-  landet als Chat in der Seitenleiste, als hättest du sie selbst gestellt. Jeder
+  landet als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
+  **leuchtet dort, bis du sie geöffnet hast**: ein ruhig pulsierender Punkt und ein
+  kräftigerer Name. Danach sieht der Chat aus wie jeder andere. Beim Antworten
+  sitzt ja niemand davor; ohne das Leuchten ginge die Antwort in der Liste unter.
+  Auf dem Handy trägt der Knopf zur Seitenleiste den Punkt, weil die Leiste dort
+  zu ist. Jeder
   Auftrag lässt sich anhalten, sofort ausführen (*Jetzt*) und löschen; die Zeile
   darunter sagt, wann er das nächste Mal dran ist und wie der letzte Lauf ausging.
   Zwei Entscheidungen dahinter: Ein Auftrag baut sich seinen **eigenen Agenten**,
@@ -736,7 +766,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Cortex AI 9.2.0                                                   │
+│ Cortex AI 9.2.1                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1202,6 +1232,21 @@ genau eine Umgebung zu einer Frage eines Menschen, nie ein Raster, nie eine
 Liste aller Postleitzahlen), harte Grenzen bei Umkreis (max. 15 km), Trefferzahl
 (30) und Zeit. Antwortet die Karte nicht, ist das kein Fehler, sondern ein
 leeres Ergebnis mit Begründung — die Antwort entsteht dann eben aus dem Web.
+
+**Die Profile.** `find_profiles` sucht zu einer Marke, Firma, Einrichtung oder
+Person alles, was es **außerhalb der eigenen Website** gibt: Instagram, LinkedIn,
+Facebook, X, YouTube, Wikipedia, TikTok, Trustpilot, kununu, Yelp, GitHub,
+Reddit. Eine gewöhnliche Suche liefert die Website und danach zehn Portale — was
+fehlt, ist genau das, was ein Mensch als Nächstes aufmacht. Dort steht oft
+Aktuelleres als auf der Seite (Öffnungszeiten, Angebote, Neues), und mancher
+Laden hat überhaupt nur ein Profil.
+
+Gesucht wird über die Suchmaschine mit `site:` — **nicht** durch Durchprobieren
+von Profiladressen. Das ist der Unterschied zwischen Recherche und Abgrasen: wir
+fragen, was öffentlich indexiert ist, statt ein Verzeichnis von Profilnamen
+abzuklappern. Was sich beim Lesen sperrt (Instagram und LinkedIn tun das oft),
+bleibt beim Titel und dem Suchausschnitt; umgangen wird nichts. Acht Plattformen
+je Aufruf, versetzt gestartet, sechs Stunden zwischengespeichert.
 
 **Die Technik der Spurensuche.** Jeder Agent bekommt sie im Auftrag mit, und es
 gibt eine eigene Rolle dafür („Spurensuche"), die der Master oder die

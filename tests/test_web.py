@@ -3285,3 +3285,72 @@ def test_max_with_a_question_goes_through_the_research_path(
     assert antwort["ok"] is True
     assert "volle Mannschaft" in antwort["text"]
     assert "Pro-Modus" in antwort["text"]
+
+
+def test_opening_a_chat_ends_the_glow(client, session: web.ChatSession) -> None:
+    """Geöffnet ist gelesen."""
+    settings = session.settings()
+    cache = Cache(settings.db_path, settings.cache_ttl_hours)
+    cache.add_history(session_id="nachts", question="Was ist neu?", answer="Einiges.")
+    cache.mark_unread("nachts", reason="auftrag")
+
+    _, roh = client("GET", "/api/chats")
+    chats = {chat["session_id"]: chat for chat in json.loads(roh)["chats"]}
+    assert chats["nachts"]["unread"] is True
+
+    client("POST", "/api/open", {"session_id": "nachts"})
+    _, roh = client("GET", "/api/chats")
+    chats = {chat["session_id"]: chat for chat in json.loads(roh)["chats"]}
+    assert chats["nachts"]["unread"] is False
+
+
+def test_the_sidebar_glows_until_it_is_read() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert ".recent.neu::before" in html, "der leuchtende Punkt"
+    assert "@keyframes leuchten" in html
+    assert 'chat.unread ? " neu" : ""' in html
+    # Auf dem Handy ist die Leiste zu -- dort trägt der Knopf den Punkt.
+    assert "body.hat-neues #btn-side::after" in html
+    assert 'classList.toggle("hat-neues"' in html
+    # Und es wird nachgesehen, ohne dass jemand die Seite neu lädt.
+    assert "setInterval(() => { if (!busy && !chatQuery) loadRecents(); }, 60_000);" in html
+
+
+def test_the_picker_offers_only_the_strong_ones_in_code_and_pro() -> None:
+    """Alles andere wäre eine Wahl, die gleich wieder überstimmt wird."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'const nurStarke = mode === "code" || mode === "pro";' in html
+    assert "(nurStarke ? daten.strong : daten.models)" in html
+    assert '"Stärkstes Modell wählen"' in html
+    # Gewählt wird dort das Code-Modell -- der Standardmodus behält seins.
+    assert "{ CORTEX_CODE_MODEL: model.id } : { CORTEX_MODEL: model.id }" in html
+
+
+def test_the_header_shows_what_really_runs() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'cfg.strong_model || cfg.values.CORTEX_MODEL' in html
+    assert 'mode === "code" || mode === "pro"' in html
+
+
+def test_the_config_says_which_model_is_the_strong_one(client) -> None:
+    _, roh = client("GET", "/api/config")
+    assert "strong_model" in json.loads(roh)
+
+
+def test_the_model_list_carries_the_strong_ones(client) -> None:
+    _, roh = client("GET", "/api/models")
+    daten = json.loads(roh)
+    assert "models" in daten and "strong" in daten
+    assert len(daten["strong"]) <= 3
+
+
+def test_the_whole_picker_scrolls_not_just_the_list() -> None:
+    """Vorher konnte man das Modell wählen, aber nicht, was es tun darf."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    picker = html[html.index(".picker{position:absolute") :]
+    picker = picker[: picker.index(".pick{")]
+    assert "overflow-y:auto" in picker
+    assert "max-height:calc(100vh - 72px)" in picker
+    assert "display:flex;flex-direction:column" in picker
+    # Die Liste bekommt einen kleineren Anteil, sonst füllt sie alles.
+    assert "min(38vh,320px)" in picker

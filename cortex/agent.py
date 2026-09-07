@@ -67,6 +67,12 @@ kannst du zwei weitere Formulierungen derselben Frage mitgeben; alle laufen zusa
 und die Treffer werden gemischt. Das kostet nur EINEN Werkzeugaufruf.
 - `fetch_page(url)` -- laedt eine Seite (auch PDFs) und gibt den lesbaren Text zurueck.
 - `search_news(query, count)` -- Nachrichten mit Datum, fuer alles Aktuelle.
+- `find_profiles(name, platforms)` -- sucht zu einer Marke, Firma, Einrichtung \
+oder Person alles ausserhalb der eigenen Website: Instagram, LinkedIn, Facebook, \
+X, YouTube, Wikipedia, Bewertungsportale. Nimm es IMMER, wenn ein Name im Spiel \
+ist -- dort steht oft Aktuelleres als auf der Seite, und manche haben nur ein \
+Profil und gar keine Seite. Danach liest du die gefundenen Adressen mit \
+`fetch_page`; was sich sperrt, bleibt beim Titel und dem Ausschnitt.
 - `local_places(what, where, radius_km)` -- sucht in der KARTE (OpenStreetMap) \
 statt in einer Suchmaschine: kleine Laeden, Werkstaetten, Praxen, Vereine, mit \
 Adresse, Telefon, Oeffnungszeiten und Website. Nimm es bei allem Oertlichen, und \
@@ -129,7 +135,9 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 
 #: Die Werkzeuge, die hinaus ins Web gehen. Sie fallen weg, wenn jemand das
 #: Suchen abschaltet.
-WEB_TOOLS = frozenset({"web_search", "fetch_page", "search_news", "local_places"})
+WEB_TOOLS = frozenset(
+    {"web_search", "fetch_page", "search_news", "local_places", "find_profiles"}
+)
 
 #: Die drei Arbeitsweisen. "normal" fuehrt ein Gespraech, "code" schreibt
 #: Code, "pro" ist der Normalmodus mit voller Leistung: staerkstes Modell,
@@ -1138,6 +1146,10 @@ class Agent:
         from cortex.master import MAX_ROUNDS, plan_mission, review_results
         from cortex.subagents import plan_subtasks, spread_tasks
 
+        # Der Master ist das Hauptmodell: dasselbe, das oben in der Kopfzeile
+        # steht und am Ende die Antwort schreibt. Nichts Kleines nebenher --
+        # wer die Auftraege verteilt und die Rueckmeldungen bewertet, muss
+        # die Frage so gut verstehen wie der, der sie beantwortet.
         limit = max(1, self.agent_limit)
         strong = self.strong_count
         self._emit("planning", question=question)

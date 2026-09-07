@@ -36,7 +36,14 @@ def _html_handler(html: str):
 
 def test_core_tool_schemas() -> None:
     names = [schema["function"]["name"] for schema in TOOL_SCHEMAS]
-    assert names == ["web_search", "fetch_page", "search_news", "local_places", "calculate"]
+    assert names == [
+        "web_search",
+        "fetch_page",
+        "search_news",
+        "local_places",
+        "find_profiles",
+        "calculate",
+    ]
 
 
 def test_web_search_uses_settings_defaults(
@@ -1313,3 +1320,113 @@ def test_the_news_search_knows_the_place_too(
     box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
     box.search_news("Baustellen")
     assert gestellt == ["Baustellen Bremen"]
+
+
+# ---------------------------------------------------------------------------
+# Profile: was es zu einem Namen ausserhalb der eigenen Seite gibt
+# ---------------------------------------------------------------------------
+def test_profiles_are_searched_per_platform(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Eine Suche nach einer Marke liefert die Website und zehn Portale. Was
+    fehlt, ist das, was ein Mensch als Nächstes aufmacht."""
+    gestellt: list[str] = []
+
+    def fake_search(query, **kwargs):
+        gestellt.append(query)
+        domain = query.split("site:")[-1].strip()
+        return [
+            SearchResult(
+                title=f"Profil auf {domain}",
+                url=f"https://{domain}/velohaus",
+                snippet="Öffnungszeiten und Neues",
+                rank=1,
+            )
+        ]
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    payload = box.find_profiles("Velohaus Bremen")
+
+    assert all(anfrage.startswith("Velohaus Bremen site:") for anfrage in gestellt)
+    plattformen = [eintrag["platform"] for eintrag in payload["profiles"]]
+    assert "Instagram" in plattformen and "LinkedIn" in plattformen
+    assert payload["profiles"][0]["url"].startswith("https://instagram.com/")
+    assert "fetch_page" in payload["note"], "der nächste Schritt steht dabei"
+    assert "gleiche Namen" in payload["note"], "und die Warnung vor Verwechslung"
+    box.close()
+
+
+def test_only_the_platform_itself_counts(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Suchmaschinen liefern zu `site:` gern auch Nachbarn."""
+    def fake_search(query, **kwargs):
+        return [SearchResult(title="Irgendwas", url="https://presse.de/x", snippet="", rank=1)]
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    payload = box.find_profiles("Velohaus")
+    assert payload["profiles"] == []
+    assert "Instagram" in payload["not_found"]
+    box.close()
+
+
+def test_a_wish_for_certain_platforms_is_respected(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    gestellt: list[str] = []
+
+    def fake_search(query, **kwargs):
+        gestellt.append(query)
+        return []
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    box.find_profiles("Velohaus", platforms=["LinkedIn", "kununu"])
+    assert sorted(anfrage.split("site:")[-1] for anfrage in gestellt) == [
+        "kununu.com",
+        "linkedin.com",
+    ]
+    box.close()
+
+
+def test_a_broken_search_does_not_break_the_profiles(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    from cortex.search import SearchError
+
+    def fake_search(query, **kwargs):
+        if "instagram" in query:
+            raise SearchError("Limit")
+        return [SearchResult(title="T", url="https://linkedin.com/x", snippet="", rank=1)]
+
+    monkeypatch.setattr("cortex.tools.search_web", fake_search)
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    payload = box.find_profiles("Velohaus")
+    assert "Instagram" in payload["not_found"]
+    assert any(eintrag["platform"] == "LinkedIn" for eintrag in payload["profiles"])
+    box.close()
+
+
+def test_no_name_no_search(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    gestellt: list[str] = []
+    monkeypatch.setattr(
+        "cortex.tools.search_web", lambda query, **kwargs: gestellt.append(query) or []
+    )
+    box = Toolbox(settings, cache=None, fetcher=_mock_fetcher(_html_handler("<html></html>")))
+    payload = box.find_profiles("   ")
+    assert payload["profiles"] == [] and "error" in payload
+    assert gestellt == []
+    box.close()
+
+
+def test_the_platform_list_stays_short() -> None:
+    """Zwölf Suchanfragen auf einmal sind für eine offene Suchmaschine ein
+    Ausschlag."""
+    from cortex.tools import MAX_PROFILE_SITES, PROFILE_SITES
+
+    assert MAX_PROFILE_SITES == 8
+    assert len(PROFILE_SITES) >= 10, "wählen kann man aus mehr"
+    # Instagram und LinkedIn stehen vorn -- danach fragt man zuerst.
+    assert [label for label, _ in PROFILE_SITES][:2] == ["Instagram", "LinkedIn"]

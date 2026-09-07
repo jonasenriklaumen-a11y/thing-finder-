@@ -232,42 +232,78 @@ def snapshot(data_dir: Path | str | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Auswahl der Modelle
 # ---------------------------------------------------------------------------
-def strongest_model(settings: Any) -> str:
-    """Das staerkste Modell, das gerade erreichbar ist -- fuer den Code-Modus.
+def strongest_models(settings: Any, limit: int = 3) -> list[dict[str, str]]:
+    """Die staerksten erreichbaren Modelle -- das beste zuerst.
 
-    Die Reihenfolge: ein von Hand eingetragenes Code-Modell schlaegt alles.
-    Sonst gewinnt der beste eingerichtete Cloud-Anbieter nach `CODING_ORDER`.
-    Gibt es keinen, nimmt Cortex das groesste lokal installierte Modell --
-    bei Ollama ist die Groesse der beste Anhaltspunkt, den es ohne Messung gibt.
+    Dieselbe Rangfolge wie eh und je, nur nicht mehr auf einen Treffer
+    verkuerzt: ein von Hand eingetragenes Code-Modell schlaegt alles, dann
+    kommen die eingerichteten Cloud-Anbieter nach `CODING_ORDER`, danach die
+    lokal installierten Modelle, das groesste zuerst -- bei Ollama ist die
+    Groesse der beste Anhaltspunkt, den es ohne Messung gibt.
 
-    Returns:
-        Eine Modell-Kennung, oder "" wenn nichts Besseres zu finden war als
-        das ohnehin eingestellte Modell.
+    Gebraucht wird die Liste im Code- und im Pro-Modus: dort soll man nicht
+    aus allem waehlen koennen, sondern aus den staerksten. Ein schwaches
+    Modell ist genau dort am teuersten.
     """
+    from cortex.config import provider_of
     from cortex.local_model import DEFAULT_OLLAMA_URL, installed_models, model_size_gb
+
+    ranked: list[dict[str, str]] = []
+
+    def dazu(model_id: str, kind: str, note: str) -> None:
+        model_id = (model_id or "").strip()
+        if not model_id or any(eintrag["id"] == model_id for eintrag in ranked):
+            return
+        ranked.append(
+            {
+                "id": model_id,
+                "label": model_id.split("/", 1)[-1],
+                "kind": kind,
+                "note": note,
+            }
+        )
 
     wanted = str(getattr(settings, "code_model", "") or "").strip()
     if wanted:
-        return wanted
+        dazu(wanted, PROVIDER_LABELS.get(provider_of(wanted), "eigenes"), "von dir eingetragen")
 
     for provider in CODING_ORDER:
         key_name = PROVIDER_KEYS.get(provider, "")
         if not key_name or not os.environ.get(key_name, "").strip():
             continue
-        model_id = CODING_MODELS.get(provider) or PROVIDER_MODELS.get(provider, "")
-        if model_id:
-            return model_id
+        dazu(
+            CODING_MODELS.get(provider) or PROVIDER_MODELS.get(provider, ""),
+            PROVIDER_LABELS.get(provider, provider),
+            PROVIDER_NOTES.get(provider, "Über die Schnittstelle des Anbieters"),
+        )
 
     base = getattr(settings, "api_base", "") or DEFAULT_OLLAMA_URL
     try:
         local = installed_models(base)
     except Exception:
         local = []
-    if not local:
-        return ""
-    sized = [(model_size_gb(name, base) or 0.0, name) for name in local]
-    name = max(sized)[1]
-    return f"ollama_chat/{name}" if name else ""
+    sized = sorted(
+        ((model_size_gb(name, base) or 0.0, name) for name in local), reverse=True
+    )
+    for groesse, name in sized:
+        dazu(
+            f"ollama_chat/{name}",
+            "lokal",
+            f"{groesse:.0f} GB auf deinem Rechner" if groesse else "Läuft auf deinem Rechner",
+        )
+
+    return ranked[: max(1, int(limit))]
+
+
+def strongest_model(settings: Any) -> str:
+    """Das staerkste Modell, das gerade erreichbar ist.
+
+    Returns:
+        Eine Modell-Kennung, oder "" wenn nichts Besseres zu finden war als
+        das ohnehin eingestellte Modell.
+    """
+    beste = strongest_models(settings, limit=1)
+    return beste[0]["id"] if beste else ""
 
 
 def available_models(settings: Any) -> list[dict[str, str]]:

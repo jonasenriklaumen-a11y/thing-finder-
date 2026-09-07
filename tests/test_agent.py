@@ -130,6 +130,7 @@ def test_tools_are_offered_to_the_llm(
         "fetch_page",
         "search_news",
         "local_places",
+        "find_profiles",
         "calculate",
         "recall_memory",
         "save_memory",
@@ -156,6 +157,7 @@ def test_subagents_can_be_switched_off(
         "fetch_page",
         "search_news",
         "local_places",
+        "find_profiles",
         "calculate",
         "change_setting",
     ]
@@ -3333,3 +3335,53 @@ def test_the_strong_model_reaches_the_agents(
     monkeypatch.setattr("cortex.system.strongest_model", lambda _s: "")
     agent._code_model = None
     assert agent.strong_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Die Auswahl der starken Modelle
+# ---------------------------------------------------------------------------
+def test_the_three_strongest_are_offered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Im Code- und im Pro-Modus soll man wählen können -- aber nur unter den
+    stärksten. Ein schwaches Modell ist genau dort am teuersten."""
+    from cortex.config import Settings
+    from cortex.system import strongest_model, strongest_models
+
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-x")
+    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: ["gross:70b"])
+    monkeypatch.setattr("cortex.local_model.model_size_gb", lambda *a, **k: 40.0)
+
+    settings = Settings(model="ollama_chat/klein")
+    liste = strongest_models(settings, limit=3)
+    assert len(liste) == 3
+    assert all(set(eintrag) == {"id", "label", "kind", "note"} for eintrag in liste)
+    # Die Cloud-Anbieter stehen vor dem lokalen Modell.
+    assert liste[-1]["id"] == "ollama_chat/gross:70b"
+    assert "GB" in liste[-1]["note"]
+    # Und das erste ist genau das, was `strongest_model` allein zurückgibt.
+    assert strongest_model(settings) == liste[0]["id"]
+
+
+def test_a_hand_picked_model_leads_the_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cortex.config import Settings
+    from cortex.system import strongest_models
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    settings = Settings(model="ollama_chat/klein", code_model="openai/gpt-4o")
+    liste = strongest_models(settings, limit=3)
+    assert liste[0]["id"] == "openai/gpt-4o"
+    assert "eingetragen" in liste[0]["note"]
+
+
+def test_nothing_reachable_is_an_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cortex.config import Settings
+    from cortex.system import strongest_model, strongest_models
+
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "NVIDIA_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("cortex.local_model.installed_models", lambda *a, **k: [])
+    settings = Settings(model="ollama_chat/klein")
+    assert strongest_models(settings) == []
+    assert strongest_model(settings) == ""

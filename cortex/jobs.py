@@ -323,6 +323,11 @@ def run_job(job: Job, settings: Any) -> tuple[str, str]:
         chat = str(getattr(agent, "session_id", ""))
         if not antwort:
             return ("ohne Antwort", chat)
+        # Der Auftrag hat sich selbst gestellt -- oft nachts, jedenfalls ohne
+        # dass jemand davorsitzt. Damit die Antwort nicht in der Liste
+        # untergeht, leuchtet der Chat, bis ihn jemand geoeffnet hat.
+        with contextlib.suppress(Exception):
+            cache.mark_unread(chat, reason="auftrag")
         return ("fertig", chat)
     except Exception as exc:  # pragma: no cover - haengt am Modell
         return (f"Fehler: {type(exc).__name__}: {exc}"[:300], "")

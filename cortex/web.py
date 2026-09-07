@@ -153,6 +153,29 @@ class RunBook:
 
 RUNS = RunBook()
 
+#: Wie lange die Liste der staerksten Modelle gilt. Sie fragt bei Ollama nach;
+#: bei jedem Aufruf der Kopfzeile waere das eine Abfrage zu viel.
+STRONG_TTL = 30.0
+_strong_cache: dict[str, Any] = {"when": 0.0, "models": []}
+
+
+def strong_models(limit: int = 3) -> list[dict[str, str]]:
+    """Die staerksten erreichbaren Modelle -- gemerkt fuer ein paar Sekunden."""
+    from cortex.system import strongest_models
+
+    if time.time() - float(_strong_cache["when"]) > STRONG_TTL:
+        try:
+            _strong_cache["models"] = strongest_models(SESSION.settings(), limit=max(3, limit))
+        except Exception:
+            _strong_cache["models"] = []
+        _strong_cache["when"] = time.time()
+    return list(_strong_cache["models"])[:limit]
+
+
+def forget_strong_models() -> None:
+    """Nach einer Aenderung an Modell oder Schluesseln neu nachsehen."""
+    _strong_cache["when"] = 0.0
+
 #: Alles, was sich auch in `cortex setup` einstellen laesst.
 SETTING_KEYS: tuple[str, ...] = (
     "CORTEX_MODEL",
@@ -1448,6 +1471,11 @@ class Handler(BaseHTTPRequestHandler):
                     # Schluessel selbst gehen nie an den Browser -- nur, ob welche da sind.
                     "ha_connected": bool(settings.ha_url and settings.ha_token),
                     "search_key_set": bool(settings.search_api_key),
+                    # Im Code- und im Pro-Modus laeuft nicht das eingestellte
+                    # Modell, sondern das staerkste erreichbare. Frueher stand
+                    # oben trotzdem das alte -- man sah also nicht, womit
+                    # gerade gearbeitet wird.
+                    "strong_model": (strong_models(1) or [{}])[0].get("id", ""),
                     "google": google_state(settings),
                 }
             )
@@ -1520,7 +1548,13 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/models":
             from cortex.system import available_models
 
-            self._json({"models": available_models(SESSION.settings())})
+            self._json(
+                {
+                    "models": available_models(SESSION.settings()),
+                    # Fuer den Code- und den Pro-Modus: nur die staerksten.
+                    "strong": strong_models(3),
+                }
+            )
         elif route == "/api/memory":
             # Abgeschaltet heisst abgeschaltet: dann wird auch nichts gezeigt.
             if not SESSION.settings().memory_enabled:
@@ -1582,6 +1616,10 @@ class Handler(BaseHTTPRequestHandler):
             if not wanted:
                 self._json({"ok": False, "error": "keine Chat-Kennung"}, 400)
                 return
+            # Geoeffnet ist gelesen: das Leuchten in der Liste hoert auf.
+            with contextlib.suppress(Exception):
+                settings = SESSION.settings()
+                Cache(settings.db_path, settings.cache_ttl_hours).clear_unread(wanted)
             self._json({"ok": True, **SESSION.open_chat(wanted)})
         elif route == "/api/ha":
             self._json(self._ha_probe(self._read_json()))
@@ -1624,6 +1662,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 500)
                 return
+            # Ein neues Modell oder ein neuer Schluessel kann die Rangfolge
+            # aendern -- also noch einmal nachsehen statt den alten Stand
+            # weiterzureichen.
+            forget_strong_models()
             self._json({"ok": True, "path": str(written)})
         else:
             self._json({"error": "unbekannter Pfad"}, 404)

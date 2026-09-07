@@ -252,6 +252,10 @@ def lege_chats_an() -> None:
     cache = Cache(settings.db_path, settings.cache_ttl_hours)
     cache.add_history("alt-1", "Welcher Laptop bis 1200 Euro?", "Antwort", {})
     cache.add_history("rundgang", "Was kostet ein Lastenrad?", "Antwort", {})
+    # Ein Chat, in dem ein Auftrag nachts geantwortet hat: der soll leuchten,
+    # bis ihn jemand oeffnet.
+    cache.add_history("auftrag-nacht", "Was gibt es Neues?", "Einiges.", {})
+    cache.mark_unread("auftrag-nacht", reason="auftrag")
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +281,7 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         log.pruefe(pg.is_visible("#greeting"), "Begrüßung steht da")
         log.pruefe(pg.inner_text("#version").startswith("v"), "Version in der Kopfzeile")
         log.pruefe(pg.locator(".chip").count() >= 2, "Beispielfragen vorhanden")
-        log.pruefe(pg.locator(".recent").count() == 2, "zwei Chats in der Seitenleiste")
+        log.pruefe(pg.locator(".recent").count() == 3, "drei Chats in der Seitenleiste")
         log.pruefe(
             pg.eval_on_selector("body", "e => e.scrollWidth <= window.innerWidth + 1"),
             "nichts steht seitlich über",
@@ -365,6 +369,63 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.uncheck("#recheck")
         pg.keyboard.press("Escape")
         foto("04-modi")
+
+    if dran("auswahl"):
+        log.abschnitt("4g. Die Modellauswahl -- ganz, nicht halb")
+        pg.click("#btn-model")
+        pg.wait_for_selector("#picker-models", state="visible")
+        pg.wait_for_timeout(500)
+        hoehen = pg.eval_on_selector(
+            "#picker-models",
+            "e => [Math.round(e.scrollHeight), Math.round(e.clientHeight),"
+            " Math.round(e.getBoundingClientRect().bottom), window.innerHeight]",
+        )
+        log.pruefe(hoehen[2] <= hoehen[3] + 1,
+                   f"das Fenster endet im Bild ({hoehen[2]} von {hoehen[3]})")
+        # Der Fuss ist die letzte Zeile -- kommt man dort hin, kommt man
+        # ueberall hin. Frueher scrollte nur die Modellliste, und alles
+        # darunter war unerreichbar.
+        pg.locator("#picker-models .picker-foot").scroll_into_view_if_needed()
+        pg.wait_for_timeout(300)
+        kasten = pg.locator("#picker-models .picker-foot").bounding_box()
+        log.pruefe(kasten is not None and kasten["y"] + kasten["height"] <= hoehen[3] + 1,
+                   "und der Fuss ist erreichbar")
+        log.pruefe(pg.is_visible("#recheck"), "die Schalter auch")
+        # Die Ueberschrift steht in Grossbuchstaben -- das macht das CSS.
+        log.pruefe(pg.inner_text("#picker-head").lower().startswith("modell"),
+                   "im Standardmodus stehen alle Modelle zur Wahl")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+
+        pg.click('#modes .mode[data-mode="pro"]')
+        pg.wait_for_timeout(700)
+        pg.click("#btn-model")
+        pg.wait_for_selector("#picker-models", state="visible")
+        pg.wait_for_timeout(500)
+        log.pruefe(pg.inner_text("#picker-head").lower().startswith("stärkstes"),
+                   f"im Pro-Modus nur die stärksten ({pg.inner_text('#picker-head')!r})")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(300)
+        pg.click('#modes .mode[data-mode="normal"]')
+        pg.wait_for_timeout(700)
+
+    if dran("ungelesen"):
+        log.abschnitt("4h. Ein Auftrag hat geantwortet")
+        leuchtet = pg.locator(".recent.neu")
+        log.pruefe(leuchtet.count() == 1, f"ein Chat leuchtet ({leuchtet.count()})")
+        log.pruefe("Neues" in leuchtet.inner_text(), "und zwar der vom Auftrag")
+        log.pruefe(
+            pg.eval_on_selector("body", "e => e.classList.contains('hat-neues')"),
+            "der Knopf zur Leiste trägt den Punkt",
+        )
+        leuchtet.locator(".name").click()
+        pg.wait_for_timeout(1200)
+        log.pruefe(pg.locator(".recent.neu").count() == 0,
+                   "geöffnet heißt gelesen -- danach sieht er aus wie jeder andere")
+        log.pruefe(
+            not pg.eval_on_selector("body", "e => e.classList.contains('hat-neues')"),
+            "und der Punkt am Knopf ist weg",
+        )
 
     if dran("werkstatt"):
         log.abschnitt("4a. Werkstatt im Code-Modus")

@@ -180,3 +180,49 @@ def test_ein_chat_erscheint_nur_einmal(tmp_path):
     treffer = cache.search_chats("Brot")
     assert len(treffer) == 1
     assert treffer[0]["turns"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Ungelesenes: was ein Auftrag nachts geantwortet hat
+# ---------------------------------------------------------------------------
+def test_an_unread_chat_says_so(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history(session_id="nachts", question="Was ist neu?", answer="Einiges.")
+    cache.add_history(session_id="normal", question="Und sonst?", answer="Nichts.")
+
+    assert all(chat["unread"] is False for chat in cache.recent_chats())
+
+    cache.mark_unread("nachts", reason="auftrag")
+    zustand = {chat["session_id"]: chat["unread"] for chat in cache.recent_chats()}
+    assert zustand == {"nachts": True, "normal": False}
+    assert cache.unread_chats() == {"nachts"}
+
+
+def test_reading_it_ends_the_glow(tmp_path: Path) -> None:
+    """Danach sieht der Chat aus wie jeder andere."""
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history(session_id="nachts", question="Frage", answer="Antwort")
+    cache.mark_unread("nachts")
+    cache.clear_unread("nachts")
+    assert cache.unread_chats() == set()
+    assert cache.recent_chats()[0]["unread"] is False
+
+
+def test_marking_twice_is_still_one_chat(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history(session_id="nachts", question="Frage", answer="Antwort")
+    cache.mark_unread("nachts")
+    cache.mark_unread("nachts")
+    assert cache.unread_chats() == {"nachts"}
+    # Ohne Kennung passiert gar nichts -- das ist kein Fehler, nur nichts.
+    cache.mark_unread("")
+    cache.clear_unread("")
+    assert cache.unread_chats() == {"nachts"}
+
+
+def test_the_search_shows_it_too(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "c.sqlite3")
+    cache.add_history(session_id="nachts", question="Baustellen in Bremen", answer="Drei.")
+    cache.mark_unread("nachts")
+    treffer = cache.search_chats("Baustellen")
+    assert treffer and treffer[0]["unread"] is True

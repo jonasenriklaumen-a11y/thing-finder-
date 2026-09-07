@@ -219,6 +219,30 @@ body.collapsed aside{margin-left:-260px}
   overflow:hidden;text-overflow:ellipsis}
 .recent:hover{background:var(--surface);color:var(--text)}
 .recent.active{background:var(--accent-soft);color:var(--accent-text)}
+/* Ein Chat, in dem etwas steht, das noch niemand gelesen hat: ein Auftrag
+   hat nachts gefragt und geantwortet. Er leuchtet, bis man ihn oeffnet --
+   danach ist er ein Chat wie jeder andere. Kein Abzeichen mit Zahl: es geht
+   um "da ist was", nicht um "da sind drei". */
+.recent.neu .name{color:var(--text);font-weight:600;padding-left:16px}
+/* Der Punkt selbst steht still ... */
+.recent.neu::before{content:"";position:absolute;left:4px;top:50%;
+  width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--accent)}
+/* ... und darunter laeuft ein Ring aus ihm heraus. Animiert werden nur
+   `transform` und `opacity` -- alles andere zwingt den Browser, das Bild in
+   jedem Einzelbild neu zu zeichnen. */
+.recent.neu::after{content:"";position:absolute;left:4px;top:50%;
+  width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--accent);
+  animation:leuchten 2.4s ease-out infinite;pointer-events:none}
+@keyframes leuchten{
+  0%{transform:scale(1);opacity:.5}
+  70%{transform:scale(3.2);opacity:0}
+  100%{transform:scale(3.2);opacity:0}
+}
+/* Auf dem Handy ist die Leiste zu -- dann traegt der Knopf den Punkt, sonst
+   sieht man das Leuchten nie. */
+body.hat-neues #btn-side{position:relative}
+body.hat-neues #btn-side::after{content:"";position:absolute;top:5px;right:5px;
+  width:7px;height:7px;border-radius:50%;background:var(--accent)}
 .recent .more{flex:0 0 auto;width:26px;height:26px;margin-right:5px;border:0;
   border-radius:7px;background:transparent;color:var(--text-3);cursor:pointer;
   font-size:15px;line-height:1;opacity:0}
@@ -266,12 +290,23 @@ body.collapsed aside{margin-left:-260px}
 .modelpick:hover{border-color:var(--accent)}
 .modelpick #model-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modelpick .caret{color:var(--text-3);flex:0 0 auto;font-size:11px}
+/* Das Fenster scrollt als Ganzes, nicht nur die Modellliste.
+   Vorher scrollte allein `.picker-list`, und alles darunter -- Denktiefe,
+   die Schalter, der Fuss mit dem Weg zu den Einstellungen -- lag ausserhalb
+   des Bildschirms, ohne jede Moeglichkeit, dorthin zu kommen. Man konnte
+   also das Modell waehlen, aber nicht, was es tun darf. */
 .picker{position:absolute;top:52px;left:50%;transform:translateX(-50%);z-index:30;
   width:min(420px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line-2);
-  border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+  border-radius:16px;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;max-height:calc(100vh - 72px);
+  overflow-y:auto;overscroll-behavior:contain}
+/* Die Ueberschrift bleibt beim Scrollen stehen -- sonst weiss man nach zwei
+   Handbewegungen nicht mehr, worin man da blaettert. */
 .picker-head{padding:12px 16px 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--text-3)}
-.picker-list{max-height:min(52vh,420px);overflow-y:auto;padding:0 8px 8px}
+  color:var(--text-3);position:sticky;top:0;background:var(--surface);z-index:2}
+/* Die Liste bekommt einen kleineren Anteil als frueher: sie soll nicht das
+   ganze Fenster fuellen, sonst faengt das Problem von vorne an. */
+.picker-list{max-height:min(38vh,320px);overflow-y:auto;padding:0 8px 8px;flex:0 0 auto}
 .pick{display:block;width:100%;text-align:left;background:transparent;border:0;
   border-radius:10px;padding:10px 12px;cursor:pointer}
 .pick:hover{background:var(--surface-2)}
@@ -883,8 +918,9 @@ input:focus,select:focus{border-color:var(--accent)}
   .thread{padding:4px 12px 180px}
   /* Die Kopfzeile ist hier zweizeilig -- die Modellauswahl muss tiefer
      ansetzen, sonst schneidet sie den Ortsfilter halb ab und es sieht aus
-     wie ein Fehler beim Zeichnen. */
-  .picker{top:74px}
+     wie ein Fehler beim Zeichnen. Und sie hat entsprechend weniger Hoehe. */
+  .picker{top:74px;max-height:calc(100vh - 94px)}
+  .picker-list{max-height:min(30vh,260px)}
   /* Drei Arbeitsweisen brauchen Platz. Also bleibt vom Anhaengen und vom
      Abbrechen hier nur das Sinnbild: es sagt dasselbe wie das Wort, und der
      Titel sagt es noch einmal fuer den, der lange draufhaelt. Ohne das
@@ -951,7 +987,7 @@ input:focus,select:focus{border-color:var(--accent)}
   </div>
 
   <div class="picker" id="picker-models" hidden>
-    <div class="picker-head">Modell wählen</div>
+    <div class="picker-head" id="picker-head">Modell wählen</div>
     <div class="picker-list" id="model-list"></div>
     <div class="picker-effort">
       <div class="eff-head"><b>Denktiefe</b>
@@ -2649,7 +2685,9 @@ function drawRecents(){
       box.appendChild(head);
     }
     const row = document.createElement("div");
-    row.className = "recent" + (chat.session_id === currentChat ? " active" : "");
+    row.className = "recent"
+      + (chat.session_id === currentChat ? " active" : "")
+      + (chat.unread ? " neu" : "");
     row.innerHTML = '<span class="name"></span>'
       + '<button class="more" title="Mehr" aria-label="Mehr">⋯</button>';
     const name = row.querySelector(".name");
@@ -2685,9 +2723,20 @@ async function loadRecents(){
     if (chatQuery !== gesucht) return;
     currentChat = data.current || "";
     chats = data.chats || [];
+    // Steht irgendwo etwas Ungelesenes, traegt auch der Knopf zur Leiste
+    // einen Punkt: auf dem Handy ist sie zu, dort saehe man das Leuchten sonst
+    // nie.
+    document.body.classList.toggle("hat-neues", chats.some(chat => chat.unread));
     drawRecents();
   } catch {}
 }
+
+// Ein Auftrag stellt seine Frage von selbst -- die Antwort soll auffallen,
+// ohne dass jemand die Seite neu laedt. Einmal pro Minute nachsehen reicht
+// dafuer und kostet eine Abfrage, die ohnehin nur in die eigene Datenbank
+// geht. Waehrend einer laufenden Anfrage nicht: dann wird die Liste sowieso
+// gleich neu geladen.
+setInterval(() => { if (!busy && !chatQuery) loadRecents(); }, 60_000);
 
 // Erst tippen lassen, dann fragen: bei jedem Tastendruck eine Anfrage waere
 // eine Anfrage je Buchstabe.
@@ -2954,10 +3003,18 @@ async function openPicker(){
   backdrop.addEventListener("click", closePicker);
   document.body.appendChild(backdrop);
 
+  // Im Code- und im Pro-Modus zaehlt nicht das eingestellte Modell, sondern
+  // das staerkste erreichbare -- ein schwaches ist genau dort am teuersten.
+  // Also stehen dort auch nur die drei staerksten zur Wahl; alles andere
+  // waere eine Auswahl, die gleich wieder ueberstimmt wird.
+  const nurStarke = mode === "code" || mode === "pro";
   let models = [];
   try {
-    models = (await (await api("/api/models")).json()).models || [];
+    const daten = await (await api("/api/models")).json();
+    models = (nurStarke ? daten.strong : daten.models) || [];
   } catch { /* Server weg -- die Liste bleibt leer, der Hinweis unten steht */ }
+  $("#picker-head").textContent = nurStarke
+    ? "Stärkstes Modell wählen" : "Modell wählen";
 
   if (!models.length){
     list.innerHTML = '<div class="picker-foot">Kein Modell gefunden. '
@@ -2975,18 +3032,23 @@ async function openPicker(){
     item.querySelector(".kind").textContent = model.kind;
     item.querySelector(".note").textContent = model.note || "";
     item.title = model.id;
-    item.addEventListener("click", () => chooseModel(model));
+    item.addEventListener("click", () => chooseModel(model, nurStarke));
     list.appendChild(item);
   });
   stagger(list.querySelectorAll(".pick"), 22);
 }
 
-async function chooseModel(model){
+async function chooseModel(model, alsStarkes){
   closePicker();
   $("#model-name").textContent = model.label;
+  // Im Code- und Pro-Modus wird das starke Modell gesetzt, nicht das
+  // allgemeine: sonst haette die Wahl beim naechsten Wechsel in den
+  // Standardmodus alles umgestellt, was man dort eingerichtet hatte.
+  const wunsch = alsStarkes
+    ? { CORTEX_CODE_MODEL: model.id } : { CORTEX_MODEL: model.id };
   const res = await api("/api/config", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ CORTEX_MODEL: model.id })
+    body: JSON.stringify(wunsch)
   });
   const data = await res.json();
   if (data.ok){ currentModel = model.id; refreshHeader(); }
@@ -3847,7 +3909,13 @@ async function kopfNeuZeichnen(){
     const cfg = await (await api("/api/config")).json();
     $("#version").textContent = "v" + cfg.version;
     document.title = `Cortex AI ${cfg.version}`;
-    currentModel = cfg.values.CORTEX_MODEL || "";
+    // Oben steht, womit gerade WIRKLICH gearbeitet wird: im Code- und im
+    // Pro-Modus das staerkste erreichbare Modell, sonst das eingestellte.
+    // Frueher stand dort immer das eingestellte -- und man sah nicht, dass
+    // gerade ein anderes antwortet.
+    currentModel = (mode === "code" || mode === "pro")
+      ? (cfg.strong_model || cfg.values.CORTEX_MODEL || "")
+      : (cfg.values.CORTEX_MODEL || "");
     flash($("#model-name"), currentModel.split("/").pop() || "Modell wählen");
     // Links steht, womit gearbeitet wird -- der Modellname hat oben in der
     // Mitte seinen eigenen Platz und muss hier nicht doppelt stehen.

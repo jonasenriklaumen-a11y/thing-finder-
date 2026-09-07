@@ -1,13 +1,19 @@
-"""Die zwei Werkzeuge des Agenten: `web_search` und `fetch_page`.
+"""Die Werkzeuge des Agenten -- allen voran `web_search` und `fetch_page`.
 
-Mehr braucht es nicht. Instagram, Amazon, Branchenbuch oder Ladenwebsite --
-alles sind einfach Suchtreffer, die gelesen werden koennen. Es gibt bewusst
-keine plattformspezifischen Scraper.
+Instagram, Amazon, Branchenbuch oder Ladenwebsite: alles sind Suchtreffer,
+die gelesen werden koennen. Es gibt bewusst **keine plattformspezifischen
+Scraper**. `find_profiles` ist keine Ausnahme davon, sondern die Regel in
+Reinform: es stellt Suchanfragen mit `site:` und liest, was die Suchmaschine
+oeffentlich kennt -- kein Durchprobieren von Profiladressen, kein Umgehen
+einer Sperre. Was eine Seite nicht hergibt, bleibt beim Titel und dem
+Ausschnitt.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -160,6 +166,72 @@ NEWS_SCHEMA: dict[str, Any] = {
                 "count": {"type": "integer", "description": "Trefferzahl (1-20, Default 8)."},
             },
             "required": ["query"],
+        },
+    },
+}
+
+#: Wo eine Marke, eine Firma oder eine Person ausser auf der eigenen Seite
+#: noch steht. Die Reihenfolge ist die Reihenfolge der Ausbeute: bei Marken
+#: und Laeden bringt Instagram am meisten, bei Firmen LinkedIn, und Wikipedia
+#: klaert, ob es ueberhaupt dieselbe Sache ist.
+#:
+#: Gesucht wird ueber die Suchmaschine mit `site:` -- nicht, indem Adressen
+#: durchprobiert werden. Das ist der Unterschied zwischen Recherche und
+#: Abgrasen: wir fragen, was oeffentlich indexiert ist, statt ein Verzeichnis
+#: von Profilnamen abzuklappern. Und was eine Seite nicht hergibt (Instagram
+#: und LinkedIn sperren Abrufe aus), bleibt eben beim Titel und dem
+#: Suchausschnitt -- umgangen wird nichts.
+PROFILE_SITES: tuple[tuple[str, str], ...] = (
+    ("Instagram", "instagram.com"),
+    ("LinkedIn", "linkedin.com"),
+    ("Facebook", "facebook.com"),
+    ("X", "x.com"),
+    ("YouTube", "youtube.com"),
+    ("Wikipedia", "wikipedia.org"),
+    ("TikTok", "tiktok.com"),
+    ("Trustpilot", "trustpilot.com"),
+    ("kununu", "kununu.com"),
+    ("Yelp", "yelp.com"),
+    ("GitHub", "github.com"),
+    ("Reddit", "reddit.com"),
+)
+
+#: So viele Plattformen fragt ein Aufruf hoechstens ab. Zwoelf Suchanfragen
+#: auf einmal sind fuer eine offene Suchmaschine ein Ausschlag.
+MAX_PROFILE_SITES = 8
+
+PROFILE_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "find_profiles",
+        "description": (
+            "Sucht zu einer Marke, Firma, Einrichtung oder Person alles, was es "
+            "ausserhalb der eigenen Website gibt: Instagram, LinkedIn, Facebook, X, "
+            "YouTube, Wikipedia, Bewertungsportale. Nimm das IMMER, wenn nach einem "
+            "Namen gefragt ist -- oeffentliche Profile stehen oft aktueller da als "
+            "die Website (Oeffnungszeiten, Angebote, Neues), und manche Anbieter "
+            "haben ueberhaupt nur ein Profil und keine Seite. Danach liest du die "
+            "gefundenen Adressen mit `fetch_page`; was sich sperrt, bleibt beim "
+            "Titel und dem Ausschnitt -- umgangen wird nichts."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Der Name, moeglichst genau. Ort dazu hilft.",
+                },
+                "platforms": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Nur diese Plattformen (Instagram, LinkedIn, Facebook, X, "
+                        "YouTube, Wikipedia, TikTok, Trustpilot, kununu, Yelp, "
+                        "GitHub, Reddit). Leer = die acht ergiebigsten."
+                    ),
+                },
+            },
+            "required": ["name"],
         },
     },
 }
@@ -848,7 +920,7 @@ SETTING_SCHEMA: dict[str, Any] = {
 }
 
 
-TOOL_SCHEMAS.extend([NEWS_SCHEMA, PLACES_SCHEMA, CALC_SCHEMA])
+TOOL_SCHEMAS.extend([NEWS_SCHEMA, PLACES_SCHEMA, PROFILE_SCHEMA, CALC_SCHEMA])
 
 
 @dataclass
@@ -1741,6 +1813,12 @@ class Toolbox:
             return self.search_news(
                 query=str(arguments.get("query", "")), count=int(arguments.get("count") or 0)
             )
+        if name == "find_profiles":
+            roh = arguments.get("platforms") or []
+            return self.find_profiles(
+                name=str(arguments.get("name", "")),
+                platforms=[str(item) for item in roh] if isinstance(roh, list) else [],
+            )
         if name == "local_places":
             try:
                 radius = float(arguments.get("radius_km") or 0)
@@ -1919,7 +1997,117 @@ class Toolbox:
         self._emit("search_done", query=query, hits=len(results))
         return {"query": query, "results": [result.as_tool_dict() for result in results]}
 
-    # -- Werkzeug 4: die Karte --------------------------------------------
+    # -- Werkzeug 4: Profile ----------------------------------------------
+    def find_profiles(self, name: str, platforms: list[str] | None = None) -> dict[str, Any]:
+        """Sucht, was es zu einem Namen ausserhalb der eigenen Website gibt.
+
+        Eine Suche nach einer Marke liefert die Website und danach zehn
+        Portale. Was fehlt, ist genau das, was ein Mensch als naechstes
+        aufmacht: Instagram, LinkedIn, die Bewertungen. Dort steht oft mehr
+        und aktuelleres als auf der Seite -- und mancher Laden hat ueberhaupt
+        nur ein Profil.
+
+        Gesucht wird ueber die Suchmaschine mit `site:`, nicht durch
+        Durchprobieren von Adressen: wir fragen, was oeffentlich indexiert
+        ist. Was sich beim Lesen sperrt, bleibt beim Titel und dem Ausschnitt.
+        """
+        name = " ".join((name or "").split())
+        if not name:
+            return {"profiles": [], "error": "Ohne Namen geht es nicht."}
+
+        gewuenscht = {str(item).strip().lower() for item in (platforms or []) if str(item).strip()}
+        sites = [
+            (label, domain)
+            for label, domain in PROFILE_SITES
+            if not gewuenscht or label.lower() in gewuenscht or domain in gewuenscht
+        ]
+        if not gewuenscht:
+            sites = sites[:MAX_PROFILE_SITES]
+        sites = sites[:MAX_PROFILE_SITES]
+
+        key = cache_key("profiles", name.lower(), "|".join(domain for _, domain in sites))
+        cached = self.cache.get(key) if self.cache else None
+        self.stats.searches.append(f"Profile: {name}")
+        self._emit("profiles", name=name, platforms=[label for label, _ in sites])
+        if cached is not None and isinstance(cached, dict):
+            self._emit("profiles_done", name=name, hits=len(cached.get("profiles", [])))
+            return dict(cached)
+
+        def eine(position: int, label: str, domain: str) -> tuple[str, list[SearchResult]]:
+            # Leicht versetzt starten: acht Anfragen in derselben Millisekunde
+            # sind fuer eine offene Suchmaschine ein Ausschlag.
+            if position:
+                time.sleep(min(position * 0.25, 2.0))
+            try:
+                treffer = search_web(
+                    f'{name} site:{domain}',
+                    count=3,
+                    country=self.settings.country,
+                    lang=self.settings.lang,
+                    backend=self.settings.search_backend,
+                    engines=self.settings.search_engines,
+                    instance_url=self.settings.searxng_url,
+                )
+            except SearchError:
+                return label, []
+            return label, treffer
+
+        gefunden: list[dict[str, str]] = []
+        leer: list[str] = []
+        with ThreadPoolExecutor(max_workers=max(1, min(4, len(sites)))) as pool:
+            auftraege = [
+                pool.submit(eine, position, label, domain)
+                for position, (label, domain) in enumerate(sites)
+            ]
+            ergebnisse = {}
+            for auftrag in auftraege:
+                try:
+                    label, treffer = auftrag.result()
+                except Exception:
+                    continue
+                ergebnisse[label] = treffer
+
+        for label, domain in sites:
+            treffer = ergebnisse.get(label, [])
+            # Suchmaschinen liefern zu `site:` gern auch Nachbarn -- was nicht
+            # von der Plattform kommt, gehoert hier nicht hin.
+            passend = [
+                item
+                for item in treffer
+                if domain in (item.source_domain or domain_of(item.url) or "")
+            ]
+            if not passend:
+                leer.append(label)
+                continue
+            bester = passend[0]
+            self.seen_results.setdefault(bester.url, bester)
+            gefunden.append(
+                {
+                    "platform": label,
+                    "url": bester.url,
+                    "title": (bester.title or "").strip(),
+                    "snippet": (bester.snippet or "").strip()[:300],
+                }
+            )
+
+        payload: dict[str, Any] = {
+            "name": name,
+            "profiles": gefunden,
+            "not_found": leer,
+            "note": (
+                "Oeffentliche Treffer, ueber die Suchmaschine gefunden. Lies die "
+                "Adressen mit `fetch_page` weiter; sperrt sich eine Seite "
+                "(Instagram und LinkedIn tun das oft), nimm Titel und Ausschnitt "
+                "und sag dazu, woher du es hast. Pruef bei jedem Treffer, ob er "
+                "wirklich zu dem Namen gehoert -- gleiche Namen gibt es haeufig."
+            ),
+        }
+        if self.cache:
+            self.cache.set(key, payload, kind="profiles", label=name, ttl=6 * 3600)
+        self._emit("profiles_done", name=name, hits=len(gefunden))
+        return payload
+
+    # -- Werkzeug 5: die Karte --------------------------------------------
     def local_places(self, what: str, where: str = "", radius_km: float = 0.0) -> dict[str, Any]:
         """Sucht Orte in OpenStreetMap statt in einer Suchmaschine.
 
@@ -1990,7 +2178,7 @@ class Toolbox:
         self._emit("places_done", what=what, hits=len(orte))
         return payload
 
-    # -- Werkzeug 5: Rechner ----------------------------------------------
+    # -- Werkzeug 6: Rechner ----------------------------------------------
     def calculate(self, expression: str) -> dict[str, Any]:
         """Exakte Arithmetik -- damit das Modell nie selbst rechnen muss."""
         from cortex.calc import CalcError, calculate_pretty
@@ -2002,7 +2190,7 @@ class Toolbox:
         except CalcError as exc:
             return {"expression": expression, "error": str(exc)}
 
-    # -- Werkzeug 5: Merkzettel (nur Hauptagent) --------------------------
+    # -- Werkzeug 7: Merkzettel (nur Hauptagent) --------------------------
     def remember(self, text: str) -> dict[str, Any]:
         """Notiz auf den dauerhaften Merkzettel des Nutzers schreiben."""
         text = (text or "").strip()

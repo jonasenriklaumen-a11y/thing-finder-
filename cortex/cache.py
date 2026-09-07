@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS chat_titles (
     title      TEXT NOT NULL
 );
 
+-- Ein Chat, in dem etwas steht, das noch niemand gelesen hat. Angelegt wird
+-- der Eintrag von den Auftraegen: die stellen ihre Frage von selbst, oft
+-- nachts, und die Antwort soll auffallen, ohne dass jemand danach sucht.
+-- Beim Oeffnen faellt der Eintrag weg -- danach sieht der Chat aus wie jeder
+-- andere.
+CREATE TABLE IF NOT EXISTS chat_unread (
+    session_id TEXT PRIMARY KEY,
+    since      REAL NOT NULL,
+    reason     TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at REAL NOT NULL,
@@ -226,6 +237,34 @@ class Cache:
     # -- Merkzettel -------------------------------------------------------
     MAX_NOTE_LENGTH = 500
 
+    # -- Ungelesenes ------------------------------------------------------
+    def mark_unread(self, session_id: str, reason: str = "auftrag") -> None:
+        """Merkt vor, dass in diesem Chat etwas Ungelesenes steht."""
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO chat_unread (session_id, since, reason) VALUES (?, ?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET since = excluded.since, "
+                "reason = excluded.reason",
+                (session_id, time.time(), str(reason or "")[:40]),
+            )
+
+    def clear_unread(self, session_id: str) -> None:
+        """Gelesen. Ab jetzt ist es ein Chat wie jeder andere."""
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            return
+        with self._connect() as conn:
+            conn.execute("DELETE FROM chat_unread WHERE session_id = ?", (session_id,))
+
+    def unread_chats(self) -> set[str]:
+        """Alle Chats, in denen etwas Ungelesenes steht."""
+        with self._connect() as conn, closing(conn.cursor()) as cur:
+            rows = cur.execute("SELECT session_id FROM chat_unread").fetchall()
+        return {str(row["session_id"]) for row in rows}
+
     def recent_chats(self, limit: int = 30) -> list[dict[str, Any]]:
         """Die letzten Chats, juengster zuerst.
 
@@ -244,6 +283,7 @@ class Cache:
             ORDER BY last_id DESC
             LIMIT ?
         """
+        ungelesen = self.unread_chats()
         with self._connect() as conn, closing(conn.cursor()) as cur:
             rows = cur.execute(query, (limit,)).fetchall()
             chats = []
@@ -263,6 +303,7 @@ class Cache:
                         "renamed": bool(title),
                         "turns": int(row["turns"]),
                         "touched": float(row["touched"] or 0.0),
+                        "unread": row["session_id"] in ungelesen,
                     }
                 )
         return chats
@@ -297,6 +338,7 @@ class Cache:
             ORDER BY last_id DESC
             LIMIT ?
         """
+        ungelesen = self.unread_chats()
         treffer: list[dict[str, Any]] = []
         with self._connect() as conn, closing(conn.cursor()) as cur:
             rows = cur.execute(query, (muster, muster, muster, limit)).fetchall()
@@ -323,6 +365,7 @@ class Cache:
                         "renamed": bool(title),
                         "turns": int(row["turns"]),
                         "touched": float(row["touched"] or 0.0),
+                        "unread": row["session_id"] in ungelesen,
                         "snippet": _snippet(stelle, needle) if stelle else "",
                     }
                 )
