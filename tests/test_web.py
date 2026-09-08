@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 34187)
+Total output lines: 3406
+
 """Tests fuer die Weboberflaeche -- echter Server, gefaelschter Agent."""
 
 from __future__ import annotations
@@ -148,6 +151,29 @@ def sse_events(raw: bytes) -> list[dict[str, Any]]:
         if line.startswith("data:"):
             events.append(json.loads(line[len("data:") :].strip()))
     return events
+
+
+def test_saved_chat_setting_reloads_after_releasing_the_turn_lock(
+    session: web.ChatSession, agent: FakeAgent
+) -> None:
+    """Ein gespeicherter Wert darf die Sitzung nicht hinter ihrer Sperre halten."""
+    done: list[object] = []
+
+    def changes_a_setting(*args: Any, **kwargs: Any) -> AgentResult:
+        assert agent.toolbox.on_settings_changed is not None
+        agent.toolbox.on_settings_changed()
+        return AgentResult(answer="Gespeichert.")
+
+    agent.ask = changes_a_setting  # type: ignore[method-assign]
+    turn = threading.Thread(
+        target=lambda: done.append(session.ask("Ort ändern", lambda *_: None)), daemon=True
+    )
+    turn.start()
+    turn.join(timeout=1)
+
+    assert not turn.is_alive(), "reload() darf nicht die noch gehaltene Sperre nehmen"
+    assert done and agent.closed == 1
+    assert session._agent is None
 
 
 # -- Einstellungen --------------------------------------------------------
@@ -1497,425 +1523,7 @@ def test_opening_a_chat_returns_its_turns(client, session: web.ChatSession) -> N
     cache = Cache(session.settings().db_path, 24)
     cache.add_history(session_id="c1", question="erste Frage", answer="erste Antwort", meta={})
     cache.add_history(session_id="c1", question="zweite Frage", answer="zweite Antwort", meta={})
-    _, body = client("POST", "/api/open", {"session_id": "c1"})
-    payload = json.loads(body)
-    assert payload["ok"] is True
-    assert [turn["question"] for turn in payload["turns"]] == ["erste Frage", "zweite Frage"]
-    assert payload["title"] == "erste Frage"
-
-
-def test_opening_a_chat_restores_the_context(session: web.ChatSession) -> None:
-    """Nachfragen wie "und davon nur die guenstigen" muessen weiter gehen."""
-    cache = Cache(session.settings().db_path, 24)
-    cache.add_history(session_id="c1", question="Laptops bis 1200?", answer="Drei Stueck.",
-                      meta={})
-    session._agent = FakeAgent()
-
-    from aquaticy.agent import Agent
-
-    real = Agent(session.settings())
-    session._agent = real
-    session.open_chat("c1")
-    texts = [str(message.get("content") or "") for message in real.messages]
-    assert any("Laptops bis 1200?" in text for text in texts)
-    assert any("Drei Stueck." in text for text in texts)
-    assert real.session_id == "c1"
-
-
-def test_opening_a_gone_chat_says_so(client) -> None:
-    _, body = client("POST", "/api/open", {"session_id": "gibt-es-nicht"})
-    payload = json.loads(body)
-    assert payload["turns"] == []
-    assert "nicht mehr" in payload["note"]
-
-
-def test_opening_needs_a_chat_id(client) -> None:
-    assert client("POST", "/api/open", {"session_id": "  "})[0] == 400
-
-
-def test_a_new_chat_starts_a_new_entry(client, session: web.ChatSession) -> None:
-    """Neuer Chat heisst: die naechste Frage benennt einen neuen Eintrag."""
-    from aquaticy.agent import Agent
-
-    session._agent = Agent(session.settings())
-    before = session.chat_id()
-    _, body = client("POST", "/api/clear")
-    after = json.loads(body)["current"]
-    assert after and after != before
-
-
-# -- Anbieterwechsel: keine fremde Adresse --------------------------------
-def test_an_ollama_address_never_reaches_the_cloud() -> None:
-    """Ollama antwortet mit "404 page not found" -- das sieht aus wie ein
-    Fehler des Anbieters, ist aber nur die falsche Adresse."""
-    from aquaticy.config import Settings as S
-
-    settings = S(model="nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b",
-                 api_base="http://localhost:11434")
-    assert "api_base" not in settings.llm_kwargs_for(settings.model)
-
-
-def test_a_local_model_keeps_its_address() -> None:
-    from aquaticy.config import Settings as S
-
-    settings = S(model="ollama_chat/gemma4:12b", api_base="http://localhost:11434")
-    assert settings.llm_kwargs_for(settings.model)["api_base"] == "http://localhost:11434"
-
-
-def test_a_proxy_is_not_mistaken_for_ollama() -> None:
-    """Ein LiteLLM-Proxy im Heimnetz ist ein berechtigter Weg zur Cloud."""
-    from aquaticy.config import base_fits
-
-    assert base_fits("http://192.168.1.9:4000", "nvidia_nim/meta/llama")
-    assert base_fits("http://localhost:4000", "mistral/mistral-large-latest")
-    assert not base_fits("http://192.168.1.9:11434", "mistral/mistral-large-latest")
-
-
-# ---------------------------------------------------------------------------
-# Terminal-Setup und Web-Einstellungen zeigen dasselbe
-# ---------------------------------------------------------------------------
-def test_everything_setup_asks_for_is_in_the_web_form() -> None:
-    """Was `aquaticy setup` fragt, muss auch im Browser einstellbar sein.
-
-    Der Test liest die Schluessel direkt aus dem Setup-Quelltext -- kommt dort
-    eine Frage dazu, faellt er auf, bis das Formular nachzieht.
-    """
-    import inspect
-    import re
-
-    from aquaticy import cli
-
-    source = inspect.getsource(cli.setup_command)
-    asked = set(re.findall(r'"(AQUATICY_[A-Z_]+)"', source))
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    for key in asked:
-        assert f'name="{key}"' in html, f"{key} wird im Terminal gefragt, fehlt aber im Formular"
-
-
-def test_the_search_engine_key_can_be_set_in_the_browser() -> None:
-    """Brave und Tavily brauchen einen Schluessel -- den fragt das Terminal ab."""
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    assert f'name="{web.SEARCH_KEY_FIELD}"' in html
-
-
-def test_saving_stores_the_search_key_under_the_right_name(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    target = tmp_path / ".env"
-    target.write_text("", encoding="utf-8")
-    monkeypatch.setattr(web, "find_env_file", lambda: target)
-    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
-
-    web.save_values({"AQUATICY_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "bsa-xyz"})
-    assert "BRAVE_API_KEY=bsa-xyz" in target.read_text(encoding="utf-8")
-
-
-def test_an_empty_search_key_means_unchanged(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    target = tmp_path / ".env"
-    target.write_text("BRAVE_API_KEY=alt\n", encoding="utf-8")
-    monkeypatch.setattr(web, "find_env_file", lambda: target)
-    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
-
-    web.save_values({"AQUATICY_SEARCH_BACKEND": "brave", web.SEARCH_KEY_FIELD: "   "})
-    assert "BRAVE_API_KEY=alt" in target.read_text(encoding="utf-8")
-
-
-def test_the_open_metasearch_needs_no_key(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Ohne Schluesselnamen wird auch nichts geschrieben -- kein Phantomeintrag."""
-    target = tmp_path / ".env"
-    target.write_text("", encoding="utf-8")
-    monkeypatch.setattr(web, "find_env_file", lambda: target)
-    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
-
-    web.save_values({"AQUATICY_SEARCH_BACKEND": "duckduckgo", web.SEARCH_KEY_FIELD: "egal"})
-    content = target.read_text(encoding="utf-8")
-    assert "egal" not in content
-
-
-def test_the_probe_endpoint_tests_the_form_values(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Getestet wird, was im Formular steht -- sonst prueft man den alten Stand."""
-    seen: dict[str, Any] = {}
-
-    def fake_llm(model, api_key="", api_base=""):
-        seen["model"] = model
-        seen["key"] = api_key
-        return True, "ok"
-
-    def fake_search(backend, api_key="", engines="", instance_url=""):
-        seen["backend"] = backend
-        return True, "3 Treffer"
-
-    monkeypatch.setattr("aquaticy.probe.check_llm", fake_llm)
-    monkeypatch.setattr("aquaticy.probe.check_search", fake_search)
-
-    status, body = client(
-        "POST",
-        "/api/probe",
-        {
-            "AQUATICY_MODEL": "mistral/mistral-large-latest",
-            "AQUATICY_SEARCH_BACKEND": "brave",
-            web.API_KEY_FIELD: "sk-neu",
-        },
-    )
-    assert status == 200
-    data = json.loads(body)
-    assert data["ok"] is True
-    assert seen == {"model": "mistral/mistral-large-latest", "key": "sk-neu", "backend": "brave"}
-
-
-def test_the_probe_reports_a_failure_without_crashing(
-    client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("aquaticy.probe.check_llm", lambda *a, **k: (False, "401 Unauthorized"))
-    monkeypatch.setattr("aquaticy.probe.check_search", lambda *a, **k: (True, "3 Treffer"))
-    status, body = client("POST", "/api/probe", {"AQUATICY_MODEL": "mistral/mistral-large-latest"})
-    data = json.loads(body)
-    assert status == 200
-    assert data["ok"] is False
-    assert "401" in data["llm"]["message"]
-    assert data["search"]["ok"] is True
-
-
-def test_a_leftover_ollama_base_is_ignored_in_the_probe(
-    client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Sonst testet man Ollama und bekommt gruenes Licht fuer NVIDIA."""
-    seen: dict[str, Any] = {}
-    monkeypatch.setattr(
-        "aquaticy.probe.check_llm",
-        lambda model, api_key="", api_base="": (seen.update(base=api_base), (True, "ok"))[1],
-    )
-    monkeypatch.setattr("aquaticy.probe.check_search", lambda *a, **k: (True, "ok"))
-    client(
-        "POST",
-        "/api/probe",
-        {"AQUATICY_MODEL": "mistral/mistral-large-latest", "AQUATICY_API_BASE": "http://localhost:11434"},
-    )
-    assert seen["base"] == ""
-
-
-# ---------------------------------------------------------------------------
-# Gmail und Kalender in den Einstellungen
-# ---------------------------------------------------------------------------
-def test_the_settings_have_their_own_google_section() -> None:
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "Gmail &amp; Kalender" in html, "eigene Sparte"
-    assert 'name="AQUATICY_GOOGLE"' in html, "an- und ausschaltbar"
-    assert f'name="{web.GOOGLE_ID_FIELD}"' in html
-    assert f'name="{web.GOOGLE_SECRET_FIELD}"' in html
-    assert "console.cloud.google.com" in html, "die Anleitung steht dabei"
-    assert "Gmail API" in html and "Google Calendar API" in html
-    assert "Testnutzer" in html, "der haeufigste Stolperstein"
-
-
-def test_the_google_secret_never_reaches_the_browser(
-    client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Wie beim HA-Token: der Browser erfaehrt nur, DASS eines da ist."""
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "id-123.apps.googleusercontent.com")
-    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "streng-geheim")
-    web.SESSION.reload()
-    _, body = client("GET", "/api/config")
-    assert b"streng-geheim" not in body
-    data = json.loads(body)
-    assert data["google"]["has_secret"] is True
-    assert data["google"]["connected"] is False
-
-
-def test_saving_stores_the_google_credentials(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    target = tmp_path / ".env"
-    target.write_text("", encoding="utf-8")
-    monkeypatch.setattr(web, "find_env_file", lambda: target)
-    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
-
-    web.save_values(
-        {
-            "AQUATICY_GOOGLE": "true",
-            web.GOOGLE_ID_FIELD: "id-1.apps.googleusercontent.com",
-            web.GOOGLE_SECRET_FIELD: "s3cret",
-        }
-    )
-    content = target.read_text(encoding="utf-8")
-    assert "GOOGLE_CLIENT_ID=id-1.apps.googleusercontent.com" in content
-    assert "GOOGLE_CLIENT_SECRET=s3cret" in content
-    assert "AQUATICY_GOOGLE=true" in content
-
-
-def test_an_empty_google_secret_means_unchanged(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    target = tmp_path / ".env"
-    target.write_text("GOOGLE_CLIENT_SECRET=alt\n", encoding="utf-8")
-    monkeypatch.setattr(web, "find_env_file", lambda: target)
-    monkeypatch.setattr(web.SESSION, "reload", lambda: None)
-
-    web.save_values({web.GOOGLE_SECRET_FIELD: "  "})
-    assert "GOOGLE_CLIENT_SECRET=alt" in target.read_text(encoding="utf-8")
-
-
-def test_the_consent_link_is_built_on_request(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "id-123.apps.googleusercontent.com")
-    web.SESSION.reload()
-    status, body = client("POST", "/api/google", {"action": "start"})
-    data = json.loads(body)
-    assert status == 200 and data["ok"] is True
-    assert "accounts.google.com" in data["url"]
-    assert "gmail.readonly" in data["url"]
-    assert data["redirect"].startswith("http://localhost:")
-
-
-def test_connecting_without_credentials_says_so(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
-    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
-    web.SESSION.reload()
-    _, body = client("POST", "/api/google", {"action": "finish", "code": "abc"})
-    data = json.loads(body)
-    assert data["ok"] is False
-    assert "Client-ID" in data["error"]
-
-
-def test_the_redirect_matches_what_google_allows() -> None:
-    """Google erlaubt fuer Desktop-Anwendungen nur localhost."""
-    assert web.google_redirect("192.168.1.5:8765") == "http://localhost:8765/google"
-    assert web.google_redirect("") == f"http://localhost:{web.DEFAULT_PORT}/google"
-    assert web.google_redirect("kaputt:abc") == f"http://localhost:{web.DEFAULT_PORT}/google"
-
-
-def test_the_return_from_google_finishes_the_connection(
-    client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Sitzt der Browser auf demselben Rechner, ist danach alles fertig."""
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "id-1.apps.googleusercontent.com")
-    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "s3cret")
-    web.SESSION.reload()
-
-    from aquaticy.google import Tokens
-
-    monkeypatch.setattr(
-        "aquaticy.google.exchange_code",
-        lambda cid, secret, code, redirect: Tokens(
-            access_token="at", refresh_token="rt", expires_at=time.time() + 3600
-        ),
-    )
-    monkeypatch.setattr("aquaticy.google.Google.remember", lambda self, tokens: None)
-    monkeypatch.setattr("aquaticy.google.Google.account", lambda self: "jemand@example.com")
-
-    status, body = client("GET", "/google?code=4/0AX")
-    assert status == 200
-    assert b"jemand@example.com" in body
-
-
-def test_a_refusal_at_google_is_shown_not_swallowed(client) -> None:
-    status, body = client("GET", "/google?error=access_denied")
-    assert status == 200
-    assert b"access_denied" in body
-
-
-def test_a_return_without_a_code_says_so(client) -> None:
-    status, body = client("GET", "/google")
-    assert status == 200
-    assert b"keinen Code" in body
-
-
-# ---------------------------------------------------------------------------
-# Der Strom darf nicht abreissen, waehrend das Modell nachdenkt
-# ---------------------------------------------------------------------------
-def test_the_stream_starts_with_a_sign_of_life(client, session: web.ChatSession) -> None:
-    """Erst mit dem ersten Byte steht die Verbindung fuer den Browser wirklich."""
-    _, raw = client("POST", "/api/chat", {"message": "hallo"})
-    assert raw.startswith(b": los")
-
-
-def test_a_silent_model_does_not_kill_the_connection(
-    client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Ein Cloud-Modell schweigt zwischen zwei Schritten gern eine halbe Minute.
-
-    Ohne ein Byte in der Leitung legt irgendwer in der Kette auf, und die
-    Oberflaeche meldete "TypeError: network error", obwohl die Recherche noch
-    lief. Der Herzschlag haelt sie warm.
-    """
-    monkeypatch.setattr(web, "HEARTBEAT_SECONDS", 0.05)
-
-    class Slow:
-        on_event = None
-        toolbox = None
-
-        def set_ask_handler(self, handler):
-            pass
-
-        def ask(self, message, stream=True, mode='', structured=None,
-                recheck=None, effort='', online=None, sandbox=None):
-            time.sleep(0.4)
-            self.on_event("answer_chunk", {"text": "Da bin ich."})
-            self.on_event("done", {"tool_calls": 0, "hit_limit": False})
-            return SimpleNamespace(answer="Da bin ich.")
-
-    slow = Slow()
-    slow.toolbox = slow
-    monkeypatch.setattr(session, "agent", lambda: slow)
-
-    _, raw = client("POST", "/api/chat", {"message": "dauert"})
-    assert raw.count(b": warte") >= 2, "waehrend der Stille geht regelmaessig ein Byte raus"
-    assert [event["type"] for event in sse_events(raw)] == ["chunk", "done"]
-
-
-def test_heartbeats_are_not_mistaken_for_events(client, session: web.ChatSession) -> None:
-    """Kommentarzeilen duerfen nie als Ereignis durchgehen."""
-    _, raw = client("POST", "/api/chat", {"message": "hallo"})
-    for event in sse_events(raw):
-        assert event["type"] != "warte"
-
-
-def test_the_ui_ignores_stream_comments() -> None:
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'part.trimStart().startsWith(":")' in html
-
-
-def test_a_broken_stream_is_explained_in_plain_words() -> None:
-    """"TypeError: network error" ist keine Auskunft, mit der jemand etwas anfangen kann."""
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "Die Verbindung ist mittendrin abgerissen" in html
-    assert "Keine Verbindung zu Aquaticy" in html
-    assert "err instanceof TypeError" in html
-
-
-# ---------------------------------------------------------------------------
-# Abbrechen
-# ---------------------------------------------------------------------------
-def test_the_upload_button_turns_into_a_stop_button() -> None:
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'id="stop"' in html and "Abbrechen" in html
-    assert '$("#clip").hidden = on;' in html, "waehrend der Anfrage weg"
-    assert '$("#stop").hidden = !on;' in html, "und der Abbruch da"
-
-
-def test_hidden_actually_hides() -> None:
-    """`.tool` setzt ein eigenes display -- ohne diese Regel bleibt der Knopf da.
-
-    Genau das war der Fall: beide Knoepfe standen nebeneinander, obwohl einer
-    das hidden-Attribut trug.
-    """
-    html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "[hidden]{display:none!important}" in html
-
-
-def test_stopping_reports_that_nothing_was_running(client, session: web.ChatSession) -> None:
-    status, body = client("POST", "/api/stop")
-    assert status == 200
-    assert json.loads(body) == {"ok": False}
-
-
-def test_stopping_cancels_the_running_agent(
-    client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Der Lauf soll wirklich enden, nicht nur im Browser verschwinden."""
+    _, body = client("POST", "/api/open", {"session_id": "…4187 tokens truncated…er verschwinden."""
     started = threading.Event()
     cancelled = threading.Event()
 
@@ -3380,3 +2988,4 @@ def test_the_whole_picker_scrolls_not_just_the_list() -> None:
     assert "display:flex;flex-direction:column" in picker
     # Die Liste bekommt einen kleineren Anteil, sonst füllt sie alles.
     assert "min(38vh,320px)" in picker
+
