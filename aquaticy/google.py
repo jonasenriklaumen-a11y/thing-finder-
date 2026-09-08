@@ -148,8 +148,9 @@ class TokenStore:
             self._cipher().encrypt(json.dumps(asdict(tokens), ensure_ascii=False)),
             encoding="utf-8",
         )
-        with contextlib.suppress(OSError):
-            self.path.chmod(0o600)
+        from aquaticy.memory import secure_file
+
+        secure_file(self.path)
 
     def clear(self) -> None:
         with contextlib.suppress(OSError):
