@@ -625,6 +625,13 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   hinterlassen hat. Feineinstellung über `AQUATICY_VM_IMAGE`,
   `AQUATICY_VM_IDLE_MINUTES`, `AQUATICY_VM_MEMORY_MB`, `AQUATICY_VM_DISK_GB`,
   `AQUATICY_VM_CPUS`.
+
+  **Eigene VM als zusätzliche Grenze.** Aquaticy erstellt keine virtuelle Maschine
+  für den Rechner selbst. Läuft Aquaticy aber in einer eigenen VM, arbeitet die
+  Werkstatt innerhalb dieser VM; deren Speicher-, CPU- und Netzwerkgrenzen schützen
+  den äußeren Rechner zusätzlich. Die Werkstatt bleibt trotzdem nötig, denn ihre
+  Grenzen gelten für jeden einzelnen Code-Auftrag. Die Laufzeit (gVisor, Podman oder
+  Docker) muss in der VM installiert sein.
 * **Im Web suchen an oder aus**, oben in der Modellauswahl — an ist der Normalfall.
   Im Code-Modus gibt es diesen Schalter nicht: dort zählt die Werkstatt.
   Ausgeschaltet geht Aquaticy nicht mehr hinaus: Suche, Seitenabruf und Agenten werden
@@ -2000,3 +2007,4 @@ Captcha).
 ## Lizenz
 
 MIT
+
