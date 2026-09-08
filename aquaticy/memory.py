@@ -32,7 +32,9 @@ jedem Start neu abgeleitet, und auf der Platte liegt gar keiner.
 from __future__ import annotations
 
 import contextlib
+import os
 import sqlite3
+import subprocess
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +68,33 @@ KEY_FILE = "memory.key"
 #: Es liegt offen -- ein Salz ist kein Geheimnis, es verhindert nur, dass
 #: vorberechnete Tabellen fuer alle Installationen zugleich passen.
 KEY_SALT = b"aquaticy-ai-memory-v1"
+
+
+def secure_file(path: Path) -> None:
+    """Beschraenkt eine Geheimnisdatei auf den aktuellen Benutzer.
+
+    POSIX-Dateisysteme verstehen den Modus direkt. Windows zeigt diesen Modus
+    zwar nicht in ``stat()`` an, braucht aber eine explizite ACL: sonst kann
+    die Datei Rechte vom Ordner erben, obwohl sie einen Schluessel oder Token
+    traegt. Scheitert das auf einem exotischen Dateisystem, bleibt die Datei
+    nutzbar; der Aufrufer kann dabei nicht abstuerzen.
+    """
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
+    if os.name != "nt":
+        return
+    user = os.environ.get("USERNAME", "").strip()
+    if not user:
+        return
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        subprocess.run(
+            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:(R,W)"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
 
 
 class Cipher:
@@ -115,11 +144,7 @@ def _key_from_file(path: Path) -> bytes:
     key = Fernet.generate_key()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(key)
-    # Nur der eigene Benutzer darf ihn lesen. Auf Dateisystemen ohne Rechte
-    # (etwa FAT auf einem USB-Stick) schlaegt das fehl -- kein Grund
-    # abzubrechen, aber der Schutz ist dort eben schwaecher.
-    with contextlib.suppress(OSError):
-        path.chmod(0o600)
+    secure_file(path)
     return key
 
 
