@@ -1,5 +1,5 @@
 """aquaticy -- ein KI-Rechercheagent fuer die Kommandozeile."""
 
-__version__ = "9.2.4"
+__version__ = "9.2.5"
 
 __all__ = ["__version__"]
