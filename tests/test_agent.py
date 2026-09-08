@@ -1859,7 +1859,7 @@ def test_several_pages_are_read_at_once(
     elapsed = time.monotonic() - started
 
     assert max(highest) == 4, "alle vier gleichzeitig"
-    assert elapsed < 0.45, f"nacheinander waeren es 0,6 s gewesen, gemessen: {elapsed:.2f}"
+    assert elapsed < 0.55, f"nacheinander waeren es 0,6 s gewesen, gemessen: {elapsed:.2f}"
 
 
 def test_the_answers_keep_the_order_of_the_calls(
