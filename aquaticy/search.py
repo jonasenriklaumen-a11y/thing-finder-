@@ -16,6 +16,9 @@ import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from html import unescape
+from html.parser import HTMLParser
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import httpx
 
@@ -35,6 +38,83 @@ KEYLESS_BACKENDS = ("duckduckgo", "ddg", "open", "searxng")
 #: Die Namen der offenen Metasuche selbst -- von hier gibt es kein weiteres
 #: Fallback, sie IST das Fallback.
 OPEN_BACKEND_NAMES = frozenset({"duckduckgo", "ddg", "open"})
+
+
+class _DuckDuckGoHTML(HTMLParser):
+    """Liest die kleine HTML-Ergebnisliste ohne einen weiteren Parser.
+
+    Dieser Weg ist absichtlich schlicht: Er ist nur der Ausweichweg, wenn
+    `ddgs` und damit dessen Rust-/HTTP2-Client von einem Server ohne sauberen
+    TLS-Abschluss getrennt wurde.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict[str, str]] = []
+        self._field = ""
+        self._depth = 0
+        self._item: dict[str, str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        classes = (dict(attrs).get("class") or "").split()
+        if tag == "a" and "result__a" in classes:
+            href = dict(attrs).get("href") or ""
+            self._item = {"title": "", "url": _result_url(href), "snippet": ""}
+            self._field, self._depth = "title", 1
+        elif self._item is not None and "result__snippet" in classes:
+            self._field, self._depth = "snippet", 1
+        elif self._field:
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._field:
+            return
+        self._depth -= 1
+        if self._depth > 0:
+            return
+        if self._field == "title" and self._item and self._item["url"]:
+            self.results.append(self._item)
+        self._field = ""
+
+    def handle_data(self, data: str) -> None:
+        if self._field and self._item is not None:
+            self._item[self._field] += data
+
+
+def _result_url(value: str) -> str:
+    """Entpackt DuckDuckGos Weiterleitungs-URL, falls eine geliefert wird."""
+    value = unescape(value).strip()
+    parsed = urlsplit(value)
+    if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+        return unquote((parse_qs(parsed.query).get("uddg") or [""])[0])
+    return value
+
+
+def _search_duckduckgo_html(query: str, options: SearchOptions) -> list[SearchResult]:
+    """HTTP/1.1-Ausweichsuche fuer defekte HTTP/2-/TLS-Verbindungen."""
+    response = httpx.get(
+        "https://html.duckduckgo.com/html/",
+        params={"q": query, "kl": _region(options.country, options.lang)},
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "Mozilla/5.0 (compatible; Aquaticy/9.2)",
+        },
+        timeout=20,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    parser = _DuckDuckGoHTML()
+    parser.feed(response.text)
+    parsed = [
+        SearchResult(
+            title=item["title"].strip(), url=item["url"].strip(), snippet=item["snippet"].strip()
+        )
+        for item in parser.results
+        if item["title"].strip() and item["url"].strip()
+    ]
+    if not parsed:
+        raise SearchError("DuckDuckGo lieferte keine lesbaren Treffer.")
+    return parsed[: max(options.count, 5)]
 
 
 def _region(country: str, lang: str) -> str:
@@ -111,12 +191,20 @@ def _search_open(query: str, options: SearchOptions) -> list[SearchResult]:
             backend=backend,
         )
     except DDGSException as exc:
-        raise SearchError(
-            f"Suche fehlgeschlagen: {exc}\n"
-            f"Alle offenen Engines waren nicht erreichbar. Einzelne lassen sich mit "
-            f"AQUATICY_SEARCH_ENGINES gezielt waehlen (verfuegbar: {', '.join(OPEN_ENGINES)}), "
-            f"oder du nimmst mit AQUATICY_SEARCH_BACKEND=searxng eine eigene Instanz."
-        ) from exc
+        # `ddgs` benutzt `primp` (Rust/rustls). Einige Gegenstellen beenden
+        # HTTP/2 ohne TLS close_notify; das ist ein Serverfehler, darf aber
+        # nicht die Recherche des Nutzers beenden. Der HTML-Endpunkt läuft
+        # über httpx und HTTP/1.1 und ist deshalb davon unabhängig.
+        try:
+            return _search_duckduckgo_html(query, options)
+        except (httpx.HTTPError, SearchError) as fallback:
+            raise SearchError(
+                f"Suche fehlgeschlagen: {exc}\n"
+                f"Auch der HTTP/1.1-Ausweichweg war nicht erreichbar: {fallback}. "
+                f"Einzelne Engines lassen sich mit AQUATICY_SEARCH_ENGINES gezielt waehlen "
+                f"(verfuegbar: {', '.join(OPEN_ENGINES)}), oder du nimmst mit "
+                "AQUATICY_SEARCH_BACKEND=searxng eine eigene Instanz."
+            ) from exc
 
     return [
         SearchResult(
