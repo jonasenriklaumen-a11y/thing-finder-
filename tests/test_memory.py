@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -86,8 +87,21 @@ def test_the_key_file_is_private(store: Memory, tmp_path: Path) -> None:
     store.remember("irgendwas")
     key = tmp_path / mem.KEY_FILE
     assert key.is_file()
-    assert stat.S_IMODE(key.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(key.stat().st_mode) == 0o600
 
+
+
+def test_windows_keys_get_a_private_acl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Windows kennt keine aussagekraeftigen POSIX-Modusbits in stat()."""
+    called: list[list[str]] = []
+    monkeypatch.setattr(mem.os, "name", "nt")
+    monkeypatch.setattr(mem.os, "environ", {"USERNAME": "jonas"})
+    monkeypatch.setattr(mem.subprocess, "run", lambda args, **kwargs: called.append(args))
+    mem.secure_file(tmp_path / "memory.key")
+    assert called == [
+        ["icacls", str(tmp_path / "memory.key"), "/inheritance:r", "/grant:r", "jonas:(R,W)"]
+    ]
 
 def test_the_same_key_reads_the_old_notes(tmp_path: Path) -> None:
     """Neustart darf den Speicher nicht entwerten."""
