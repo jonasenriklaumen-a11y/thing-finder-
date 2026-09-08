@@ -753,7 +753,7 @@ legend{color:var(--accent-text);font-size:11px;text-transform:uppercase;letter-s
   padding:0 9px 0 0;font-weight:600}
 label{display:block;margin:12px 0}
 label .lbl{display:block;font-size:12.5px;color:var(--text-2);margin-bottom:5px}
-input[type=text],input[type=password],select{width:100%;background:var(--surface);
+input[type=text],input[type=email],input[type=password],select{width:100%;background:var(--surface);
   border:1px solid var(--line-2);color:var(--text);border-radius:10px;padding:9px 12px;
   font:inherit;font-size:14px;outline:none}
 input:focus,select:focus{border-color:var(--accent)}
@@ -944,9 +944,84 @@ input:focus,select:focus{border-color:var(--accent)}
   .hello h1{font-size:20px;margin-bottom:4px}
   .hello p,.chips{display:none}
 }
+
+/* Anmeldung und Einwilligung liegen ueber der App. Der Server entscheidet,
+   ob sie verschwinden; ein ausgeblendetes Feld allein waere kein Schutz. */
+.auth-gate{position:fixed;inset:0;z-index:1000;background:var(--bg);display:grid;
+  place-items:center;padding:24px;overflow:auto}
+.auth-gate[hidden]{display:none}
+.auth-card{width:min(520px,100%);background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:28px}
+.auth-card h1{font:600 28px/1.15 var(--serif);margin:0 0 10px}
+.auth-card p{color:var(--text-2);margin:8px 0 18px}
+.auth-card ul{color:var(--text-2);padding-left:20px}
+.auth-card label{display:block;margin:12px 0}
+.auth-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+.auth-tabs,.plan-choice{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}
+.auth-tabs button,.plan-choice label{padding:10px;border:1px solid var(--line-2);
+  border-radius:10px;text-align:center;background:var(--surface-2);cursor:pointer;margin:0}
+.auth-tabs button.active,.plan-choice label:has(input:checked){border-color:var(--accent);
+  background:var(--accent-soft);color:var(--accent-text)}
+.plan-choice input{margin-right:6px}.auth-error{color:var(--err);min-height:1.5em}
+.pro-lock{border:1px solid var(--line-2);background:var(--surface-2);border-radius:10px;
+  padding:10px 12px;margin:0 0 16px;color:var(--text-2)}
+.pro-lock[hidden]{display:none}.locked-feature{opacity:.62}
+.account-grid{display:grid;grid-template-columns:1fr auto;gap:8px 18px;align-items:center}
 </style>
 </head>
 <body class="start">
+
+<div class="auth-gate" id="auth-gate">
+  <section class="auth-card" id="consent-card" hidden>
+    <h1>Bevor es losgeht</h1>
+    <p>Aquaticy braucht einige Angaben, damit Konten getrennt und sicher bleiben.</p>
+    <ul>
+      <li>Ein notwendiges Cookie hält deine Anmeldung auf diesem Gerät.</li>
+      <li>IP-Adresse und Browserangaben werden gehasht zur Absicherung der Sitzung gespeichert.</li>
+      <li>E-Mail, Einstellungen, Chats und Speicher liegen getrennt in deinem Konto.</li>
+      <li>Es gibt keine Werbung und keine Analyse-Cookies.</li>
+    </ul>
+    <p>Wenn du ablehnst, speichert Aquaticy kein Konto und du kannst die Web-App nicht nutzen.</p>
+    <div class="auth-actions">
+      <button type="button" class="btn" id="consent-no">Ablehnen und verlassen</button>
+      <button type="button" class="btn primary" id="consent-yes">Verstanden, weiter</button>
+    </div>
+  </section>
+
+  <section class="auth-card" id="login-card" hidden>
+    <h1>Willkommen bei Aquaticy</h1>
+    <p id="auth-lead">Erstelle dein Konto. Danach gehören Chats und Einstellungen nur dir.</p>
+    <div class="auth-tabs">
+      <button type="button" class="active" id="tab-register">Registrieren</button>
+      <button type="button" id="tab-login">Anmelden</button>
+    </div>
+    <form id="auth-form">
+      <div class="plan-choice" id="plan-choice">
+        <label><input type="radio" name="plan" value="normal" checked>Normal</label>
+        <label><input type="radio" name="plan" value="pro">Pro</label>
+      </div>
+      <label><span class="lbl">E-Mail-Adresse</span>
+        <input type="email" id="auth-email" required autocomplete="email" maxlength="254"></label>
+      <label><span class="lbl">Passwort <span class="why">mindestens 15 Zeichen</span></span>
+        <input type="password" id="auth-password" required autocomplete="new-password"
+               minlength="15" maxlength="128"></label>
+      <label id="pro-code-row" hidden><span class="lbl">9-stelliger Pro-Code</span>
+        <input type="password" id="auth-pro-code" inputmode="text" maxlength="9"
+               autocomplete="one-time-code"></label>
+      <div class="auth-error" id="auth-error" role="alert"></div>
+      <div class="auth-actions">
+        <button type="submit" class="btn primary" id="auth-submit">Konto erstellen</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="auth-card" id="leave-card" hidden>
+    <h1>Alles klar</h1>
+    <p>Ohne die notwendigen Kontodaten kann Aquaticy die Web-App nicht sicher bereitstellen.
+      Du kannst dieses Fenster jetzt schließen oder zurückgehen und zustimmen.</p>
+    <div class="auth-actions"><button type="button" class="btn" id="consent-back">Zurück</button></div>
+  </section>
+</div>
 
 <aside>
   <div class="brand">
@@ -1186,6 +1261,17 @@ input:focus,select:focus{border-color:var(--accent)}
       <div class="secnav" id="secnav" role="group" aria-label="Abschnitte"></div>
     </div>
     <form id="settings">
+      <fieldset><legend>Konto</legend>
+        <div class="account-grid">
+          <span>E-Mail</span><strong id="account-email">…</strong>
+          <span>Kontotyp</span><strong id="account-plan">…</strong>
+          <span>Token</span><strong id="account-tokens">…</strong>
+        </div>
+        <div class="actions section">
+          <span class="note">Jedes Konto hat eigene Chats, Einstellungen und Speicherdateien.</span>
+          <button type="button" class="btn" id="account-logout">Abmelden</button>
+        </div>
+      </fieldset>
       <fieldset><legend>Modell</legend>
         <label><span class="lbl">Hauptmodell <span class="why">Anbieter und Name, z.B. mistral/mistral-large-latest</span></span>
           <input type="text" name="AQUATICY_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
@@ -1275,13 +1361,9 @@ input:focus,select:focus{border-color:var(--accent)}
       <fieldset><legend>Nutzung</legend>
         <p class="lead">Wie viel durch die Leitung geht. Ein Token sind hier drei
           Zeichen — eine Vereinbarung, keine Messung: jeder Anbieter zerlegt Text
-          anders. Für Größenordnungen reicht es. Ein Limit gibt es nicht.</p>
+          anders. Normale Konten haben insgesamt 200.000 Token, Pro-Konten kein Limit.</p>
         <div class="zaehler" id="zaehler"></div>
         <div class="note" id="usage-detail"></div>
-        <div class="actions section">
-          <span class="note" id="usage-cleared"></span>
-          <button type="button" class="btn" id="usage-reset">Zähler zurücksetzen</button>
-        </div>
       </fieldset>
 
       <fieldset><legend>Aufträge</legend>
@@ -1395,7 +1477,9 @@ input:focus,select:focus{border-color:var(--accent)}
         </details>
       </fieldset>
 
-      <fieldset><legend>Zuhause &amp; Netz</legend>
+      <fieldset id="pro-features"><legend>Zuhause &amp; Netz</legend>
+        <div class="pro-lock" id="pro-lock" hidden>🔒 Diese Funktionen gehören zu Pro:
+          LAN-Suche, Home Assistant und Lagerverwaltung.</div>
         <div class="inline">
           <label><span class="lbl">Home Assistant</span>
             <input type="text" name="AQUATICY_HA_URL" placeholder="192.168.1.5:8123"></label>
@@ -1540,6 +1624,9 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
+const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4";
+$("#version").textContent = "v" + aquaticyVersion;
+document.title = `Aquaticy AI ${aquaticyVersion}`;
 
 /* ---------- Arbeitsweise, Struktur und Denktiefe ---------- */
 // Alles drei gehoert zur Frage, nicht zur Sitzung -- es geht bei jeder
@@ -1726,23 +1813,86 @@ function setBusy(on){
 }
 let currentModel = "";
 
-/* ---------- Zugangswort (nur im Netzbetrieb) ----------
-   Der Server setzt es auch als Cookie. Wir merken es zusaetzlich selbst und
-   schicken es als Kopfzeile mit -- dann geht es auch dort, wo der Browser
-   Cookies zurueckhaelt. Aus der Adresszeile nehmen wir es danach heraus,
-   damit es nicht in jedem Screenshot mitfaehrt. */
-let token = new URLSearchParams(location.search).get("token") || "";
-try {
-  if (token) localStorage.setItem("aquaticy-token", token);
-  else token = localStorage.getItem("aquaticy-token") || "";
-} catch {}
+/* Das Zugangswort aus dem Netzbetrieb legt der Server als HttpOnly-Cookie ab.
+   Es gehoert weder in localStorage noch in JavaScript. */
 if (location.search) history.replaceState(null, "", location.pathname);
 
 function api(path, options = {}){
   const headers = Object.assign({}, options.headers);
-  if (token) headers["X-Aquaticy-Token"] = token;
-  return fetch(path, Object.assign({}, options, { headers }));
+  return fetch(path, Object.assign({credentials:"same-origin"}, options, { headers }));
 }
+
+/* ---------- Einwilligung und Konto ---------- */
+const authGate = $("#auth-gate"), consentCard = $("#consent-card");
+const loginCard = $("#login-card"), leaveCard = $("#leave-card");
+let authMode = "register";
+
+function showAuth(card){
+  [consentCard, loginCard, leaveCard].forEach(item => { item.hidden = item !== card; });
+  authGate.hidden = false;
+}
+function setAuthMode(mode){
+  authMode = mode;
+  const registering = mode === "register";
+  $("#tab-register").classList.toggle("active", registering);
+  $("#tab-login").classList.toggle("active", !registering);
+  $("#plan-choice").hidden = !registering;
+  $("#auth-submit").textContent = registering ? "Konto erstellen" : "Anmelden";
+  $("#auth-lead").textContent = registering
+    ? "Erstelle dein Konto. Danach gehören Chats und Einstellungen nur dir."
+    : "Melde dich an, um deine Chats und Einstellungen auf diesem Gerät zu öffnen.";
+  $("#auth-password").autocomplete = registering ? "new-password" : "current-password";
+  $("#auth-error").textContent = "";
+  showProCode();
+}
+function showProCode(){
+  const pro = authMode === "register"
+    && document.querySelector('input[name="plan"]:checked')?.value === "pro";
+  $("#pro-code-row").hidden = !pro;
+  $("#auth-pro-code").required = pro;
+}
+document.querySelectorAll('input[name="plan"]').forEach(el =>
+  el.addEventListener("change", showProCode));
+$("#tab-register").addEventListener("click", () => setAuthMode("register"));
+$("#tab-login").addEventListener("click", () => setAuthMode("login"));
+$("#consent-yes").addEventListener("click", async () => {
+  const res = await api("/api/consent", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({accepted:true})});
+  if (res.ok) showAuth(loginCard);
+});
+$("#consent-no").addEventListener("click", async () => {
+  await api("/api/consent", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({accepted:false})});
+  showAuth(leaveCard);
+});
+$("#consent-back").addEventListener("click", () => showAuth(consentCard));
+$("#auth-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("#auth-error"); error.textContent = "";
+  const body = {
+    email: $("#auth-email").value.trim(),
+    password: $("#auth-password").value,
+    plan: document.querySelector('input[name="plan"]:checked')?.value || "normal",
+    pro_code: $("#auth-pro-code").value.trim().toUpperCase(),
+  };
+  try {
+    const res = await api(`/api/auth/${authMode}`, {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const data = await res.json();
+    if (!res.ok || !data.ok){ error.textContent = data.error || "Das hat nicht geklappt."; return; }
+    location.reload();
+  } catch { error.textContent = "Der Server ist gerade nicht erreichbar."; }
+});
+
+async function bootAuth(){
+  try {
+    const state = await (await api("/api/auth/status")).json();
+    if (!state.consent){ showAuth(consentCard); return; }
+    if (!state.authenticated){ setAuthMode("register"); showAuth(loginCard); return; }
+    authGate.hidden = true;
+  } catch { showAuth(loginCard); $("#auth-error").textContent = "Der Server ist nicht erreichbar."; }
+}
+bootAuth();
 
 /* ---------- Markdown (klein gehalten, kein Fremdcode) ---------- */
 const esc = (t) => t.replace(/[&<>"']/g, (c) =>
@@ -2185,7 +2335,11 @@ async function verfolge(hole, steps, bubble, text){
 
   try {
     const res = await hole();
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (!res.ok){
+      let message = `HTTP ${res.status}`;
+      try { message = (await res.json()).error || message; } catch {}
+      throw new Error(message);
+    }
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     while (true){
@@ -3151,8 +3305,8 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#model-note").textContent = "";
   $("#usage-note").innerHTML = "";
   api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
-  $("#usage-cleared").textContent = "";
   loadUsage();
+  loadAccount(cfg.account);
   $("#job-note").textContent = "";
   jobFelder();
   loadJobs();
@@ -3171,6 +3325,27 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#savenote").textContent = ""; $("#savenote").className = "note";
   $("#ha-note").textContent = ""; $("#ha-note").className = "note";
   openOverlay(overlay);
+});
+
+async function loadAccount(account){
+  $("#account-email").textContent = account?.email || "…";
+  $("#account-plan").textContent = account?.pro ? "Pro" : "Normal";
+  const pro = account?.pro === true;
+  const section = $("#pro-features");
+  section.classList.toggle("locked-feature", !pro);
+  $("#pro-lock").hidden = pro;
+  section.querySelectorAll("input,select,button").forEach(field => { field.disabled = !pro; });
+  try {
+    const data = await (await api("/api/account")).json();
+    $("#account-tokens").textContent = data.token_limit == null
+      ? `${kurz(data.tokens_used)} · unbegrenzt`
+      : `${kurz(data.tokens_used)} von ${kurz(data.token_limit)}`;
+  } catch { $("#account-tokens").textContent = "nicht verfügbar"; }
+}
+
+$("#account-logout").addEventListener("click", async () => {
+  await api("/api/auth/logout", {method:"POST"});
+  location.reload();
 });
 function closeSettings(){
   closeOverlay(overlay);
@@ -3223,15 +3398,6 @@ async function loadUsage(){
     ? "Je Modell:\n" + zeilen.join("\n")
     : "Noch nichts gezählt.";
 }
-
-$("#usage-reset").addEventListener("click", async () => {
-  if (!confirm("Den Zählerstand wirklich zurücksetzen?")) return;
-  try {
-    await api("/api/usage", { method: "DELETE" });
-    $("#usage-cleared").textContent = "Zurückgesetzt.";
-    loadUsage();
-  } catch { $("#usage-cleared").textContent = "Ging nicht."; }
-});
 
 /* ---------- Werkstatt: Dateien ---------- */
 // Ohne diese Liste muesste man raten, wie die Datei heisst, die Aquaticy
@@ -3886,7 +4052,7 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const values = {};
   for (const el of form.elements){
-    if (!el.name) continue;   // z.B. die Anbieterauswahl, die nur die Felder fuellt
+    if (!el.name || el.disabled) continue;
     values[el.name] = el.type === "checkbox" ? String(el.checked) : el.value;
   }
   const note = $("#savenote");
@@ -3925,8 +4091,10 @@ function refreshHeader(){
 async function kopfNeuZeichnen(){
   try {
     const cfg = await (await api("/api/config")).json();
-    $("#version").textContent = "v" + cfg.version;
-    document.title = `Aquaticy AI ${cfg.version}`;
+    if (cfg.version) {
+      $("#version").textContent = "v" + cfg.version;
+      document.title = `Aquaticy AI ${cfg.version}`;
+    }
     // Oben steht, womit gerade WIRKLICH gearbeitet wird: im Code- und im
     // Pro-Modus das staerkste erreichbare Modell, sonst das eingestellte.
     // Frueher stand dort immer das eingestellte -- und man sah nicht, dass

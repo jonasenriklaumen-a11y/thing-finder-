@@ -61,6 +61,7 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 def test_missing_requirements_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AQUATICY_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     settings = config.get_settings()
     assert any("MISTRAL_API_KEY" in problem for problem in settings.missing_requirements())
 

@@ -443,6 +443,40 @@ def version_command() -> None:
     console.print(f"aquaticy {__version__}")
 
 
+@app.command("list")
+def list_users_command() -> None:
+    """Listet Konten mit Token- und Speicherverbrauch."""
+    from aquaticy.auth import AuthStore, folder_bytes, pro_code_for
+    from aquaticy.memory import human_size
+    from aquaticy.usage import UsageLog
+
+    settings = get_settings()
+    store = AuthStore(settings.data_dir, pro_code_for(settings.data_dir))
+    accounts = store.accounts()
+    table = Table("E-Mail", "Konto", "Token", "Speicher", box=None, pad_edge=False)
+    for account in accounts:
+        profile = store.profile_dir(account.id)
+        table.add_row(
+            account.email,
+            "Pro" if account.pro else "Normal",
+            f"{UsageLog(profile / 'aquaticy.sqlite3').total_tokens():,}".replace(",", "."),
+            human_size(folder_bytes(profile)),
+        )
+    if accounts:
+        console.print(table)
+    else:
+        console.print("[dim]Noch keine Konten angelegt.[/dim]")
+
+
+@app.command("pro-code")
+def pro_code_command() -> None:
+    """Zeigt den geheimen neunstelligen Code fuer neue Pro-Konten."""
+    from aquaticy.auth import pro_code_for
+
+    settings = get_settings()
+    console.print(pro_code_for(settings.data_dir))
+
+
 # ---------------------------------------------------------------------------
 # history / install-browser
 # ---------------------------------------------------------------------------

@@ -221,6 +221,10 @@ class Settings:
     model: str = DEFAULT_MODEL
     vision_model: str = ""
     api_base: str = ""
+    #: Pro Benutzer hinterlegte Anbieter-Schluessel. Im Einzelplatzbetrieb
+    #: bleibt die bisherige Umgebungsvariable der Rueckfall.
+    api_keys: dict[str, str] = field(default_factory=dict)
+    search_keys: dict[str, str] = field(default_factory=dict)
     search_backend: str = "duckduckgo"
     #: Komma-Liste offener Engines fuer die Metasuche (leer = alle).
     search_engines: str = ""
@@ -395,7 +399,7 @@ class Settings:
     @property
     def api_key(self) -> str:
         name = self.api_key_name
-        return _env_str(name) if name else ""
+        return (self.api_keys.get(name) or _env_str(name)) if name else ""
 
     @property
     def search_key_name(self) -> str:
@@ -405,7 +409,7 @@ class Settings:
     @property
     def search_api_key(self) -> str:
         name = self.search_key_name
-        return _env_str(name) if name else ""
+        return (self.search_keys.get(name) or _env_str(name)) if name else ""
 
     def llm_kwargs(self) -> dict[str, object]:
         """Zusatzargumente fuer `litellm.completion` mit dem Hauptmodell."""
@@ -484,10 +488,10 @@ class Settings:
         if model_issue:
             problems.append(model_issue)
         key_name = self.api_key_name
-        if key_name and not _env_str(key_name):
+        if key_name and not self.api_key:
             problems.append(f"{key_name} fehlt (fuer Modell {self.model})")
         backend_key = SEARCH_BACKEND_KEYS.get(self.search_backend, "")
-        if backend_key and not _env_str(backend_key):
+        if backend_key and not self.search_api_key:
             problems.append(f"{backend_key} fehlt (fuer Suchmaschine {self.search_backend})")
         if self.search_backend == "searxng" and not self.searxng_url:
             problems.append("AQUATICY_SEARXNG_URL fehlt (fuer Suchmaschine searxng)")

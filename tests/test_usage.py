@@ -87,12 +87,11 @@ def test_ohne_modellnamen_landet_es_unter_unbekannt(tmp_path: Path) -> None:
     assert log.summary()["models"][0]["model"] == "unbekannt"
 
 
-def test_zuruecksetzen_leert_den_stand(tmp_path: Path) -> None:
+def test_total_tokens_counts_every_model(tmp_path: Path) -> None:
     log = UsageLog(tmp_path / "u.db")
     log.record("a", 30, 3)
     log.record("b", 30, 3)
-    assert log.clear() == 2
-    assert log.summary()["total"]["calls"] == 0
+    assert log.total_tokens() == 66
 
 
 def test_ein_kaputter_zaehler_kostet_keine_antwort(tmp_path: Path) -> None:

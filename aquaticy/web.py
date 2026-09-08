@@ -1,8 +1,8 @@
 """Weboberflaeche fuer aquaticy -- derselbe Agent, nur im Browser.
 
-Bewusst ohne Webframework: die Standardbibliothek reicht fuer eine lokale
-Ein-Nutzer-Anwendung, und jede zusaetzliche Abhaengigkeit macht die
-Installation komplizierter. Der Server laeuft nur auf dem eigenen Rechner.
+Bewusst ohne Webframework: die Standardbibliothek reicht fuer den lokalen
+Mehrnutzer-Server, und jede zusaetzliche Abhaengigkeit macht die Installation
+komplizierter. Der Server laeuft auf dem eigenen Rechner oder Heimserver.
 
 Die Zwischenschritte gehen als Server-Sent Events an den Browser -- dieselben
 Ereignisse, die im Terminal die "[Suche]"- und "[Lese]"-Zeilen erzeugen.
@@ -21,6 +21,7 @@ import socket
 import threading
 import time
 import webbrowser
+from dataclasses import replace
 from html import escape
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,7 +29,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from dotenv import dotenv_values
+
 from aquaticy import __version__
+from aquaticy.auth import NORMAL_TOKEN_LIMIT, Account, AuthStore, RateLimiter, pro_code_for
 from aquaticy.cache import Cache
 from aquaticy.config import (
     DEFAULT_ENV_PATH,
@@ -168,11 +172,13 @@ def strong_models(limit: int = 3, purpose: str = "work") -> list[dict[str, str]]
     from aquaticy.system import strongest_models
 
     purpose = "code" if purpose == "code" else "work"
-    eintrag = _strong_cache.setdefault(purpose, {"when": 0.0, "models": []})
+    settings = SESSION.settings()
+    cache_key = f"{settings.data_dir}|{purpose}"
+    eintrag = _strong_cache.setdefault(cache_key, {"when": 0.0, "models": []})
     if time.time() - float(eintrag["when"]) > STRONG_TTL:
         try:
             eintrag["models"] = strongest_models(
-                SESSION.settings(), limit=max(3, limit), purpose=purpose
+                settings, limit=max(3, limit), purpose=purpose
             )
         except Exception:
             eintrag["models"] = []
@@ -314,6 +320,93 @@ DENIED_PAGE = """<!doctype html><html lang="de"><meta charset="utf-8">
 Start im Terminal steht &mdash; die mit <code>?token=</code> am Ende.</p>
 </div></body></html>"""
 
+AUTH_COOKIE = "aquaticy_session"
+CONSENT_COOKIE = "aquaticy_consent"
+AUTH: AuthStore | None = None
+AUTH_LIMIT = RateLimiter(attempts=8, window_seconds=60)
+REQUEST_LIMIT = RateLimiter(attempts=240, window_seconds=60)
+
+_STRING_SETTINGS = {
+    "AQUATICY_MODEL": "model",
+    "AQUATICY_VISION_MODEL": "vision_model",
+    "AQUATICY_SUBAGENT_MODEL": "subagent_model",
+    "AQUATICY_CODE_MODEL": "code_model",
+    "AQUATICY_API_BASE": "api_base",
+    "AQUATICY_SEARCH_BACKEND": "search_backend",
+    "AQUATICY_SEARCH_ENGINES": "search_engines",
+    "AQUATICY_SEARXNG_URL": "searxng_url",
+    "AQUATICY_LOCATION": "location",
+    "AQUATICY_LANG": "lang",
+    "AQUATICY_COUNTRY": "country",
+    "AQUATICY_HA_URL": "ha_url",
+    "HA_TOKEN": "ha_token",
+    "AQUATICY_LAN_SUBNET": "lan_subnet",
+    "AQUATICY_STORAGE_URL": "storage_url",
+    "AQUATICY_STORAGE_ACCESS": "storage_access",
+    "GOOGLE_CLIENT_ID": "google_client_id",
+    "GOOGLE_CLIENT_SECRET": "google_client_secret",
+}
+_BOOL_SETTINGS = {
+    "AQUATICY_SUBAGENTS_AUTO": "subagents_auto",
+    "AQUATICY_ENABLE_PLAYWRIGHT": "enable_playwright",
+    "AQUATICY_HA_CONTROL": "ha_control",
+    "AQUATICY_GOOGLE": "google_enabled",
+    "AQUATICY_GOOGLE_WRITE": "google_write",
+    "AQUATICY_LAN_ENABLED": "lan_enabled",
+    "AQUATICY_MEMORY": "memory_enabled",
+}
+_INT_SETTINGS = {
+    "AQUATICY_SEARCH_VARIANTS": "search_variants",
+    "AQUATICY_MAX_SUBAGENTS": "max_subagents",
+    "AQUATICY_SUBAGENT_BUDGET": "subagent_budget",
+    "AQUATICY_SUBAGENT_PARALLEL": "subagent_parallel",
+    "AQUATICY_MAX_TOOL_CALLS": "max_tool_calls",
+    "AQUATICY_CONTEXT_TOKENS": "context_tokens",
+    "AQUATICY_PLANNER_TIMEOUT": "planner_timeout",
+}
+
+
+def _profile_settings(profile: Path, plan: str) -> Settings:
+    """Kopiert die Servervorgaben und legt die Werte eines Kontos darueber."""
+    base = get_settings()
+    settings = replace(
+        base,
+        data_dir=profile,
+        env_path=profile / ".env",
+        api_keys=dict(base.api_keys),
+        search_keys=dict(base.search_keys),
+    )
+    raw = {
+        str(key): str(value or "")
+        for key, value in dotenv_values(settings.env_path).items()
+        if key
+    }
+    for key, attr in _STRING_SETTINGS.items():
+        if key in raw:
+            setattr(settings, attr, raw[key].strip())
+    for key, attr in _BOOL_SETTINGS.items():
+        if key in raw:
+            setattr(settings, attr, raw[key].strip().lower() in {"1", "true", "yes", "on", "ja"})
+    for key, attr in _INT_SETTINGS.items():
+        if key in raw:
+            with contextlib.suppress(ValueError):
+                setattr(settings, attr, int(raw[key]))
+    for key in ("MISTRAL_API_KEY", "NVIDIA_NIM_API_KEY", "AQUATICY_API_KEY"):
+        if raw.get(key):
+            settings.api_keys[key] = raw[key]
+    for key in SEARCH_BACKEND_KEYS.values():
+        if key and raw.get(key):
+            settings.search_keys[key] = raw[key]
+    if plan != "pro":
+        settings.lan_enabled = False
+        settings.ha_url = ""
+        settings.ha_token = ""
+        settings.ha_control = False
+        settings.storage_url = ""
+        settings.storage_access = "off"
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    return settings
+
 #: Dieselbe Uebersicht wie `/help` im Terminal, nur als Markdown.
 HELP_MARKDOWN = """### Befehle
 
@@ -335,21 +428,20 @@ Dauerhaft aendern lassen sich Modell, Suche und Ort oben unter **Einstellungen**
 
 
 class ChatSession:
-    """Haelt den Agenten und serialisiert die Anfragen.
-
-    Eine lokale Oberflaeche hat einen Nutzer; zwei gleichzeitige Anfragen
-    wuerden sich nur den Gespraechsverlauf zerschiessen.
-    """
+    """Haelt den Agenten und serialisiert die Anfragen eines Kontos."""
 
     #: So lange wartet eine Rueckfrage auf eine Antwort. Laenger nicht: der
     #: Agent haelt derweil die Sitzung besetzt, und wer den Tab zumacht, soll
     #: sie nicht dauerhaft blockieren.
     ANSWER_TIMEOUT = 180.0
 
-    def __init__(self) -> None:
+    def __init__(self, account: Account | None = None, profile: Path | None = None) -> None:
         self._lock = threading.Lock()
         self._agent: Any = None
         self._settings: Settings | None = None
+        self.account = account
+        self.profile = profile
+        self.runs = RunBook()
         #: Antworten auf Rueckfragen. Nur eine Anfrage laeuft gleichzeitig,
         #: deshalb genuegt eine Schlange fuer die ganze Sitzung.
         self._answers: queue.Queue[str] = queue.Queue()
@@ -362,8 +454,20 @@ class ChatSession:
 
     def settings(self) -> Settings:
         if self._settings is None:
-            self._settings = get_settings()
+            self._settings = (
+                _profile_settings(self.profile, self.plan)
+                if self.profile is not None
+                else get_settings()
+            )
         return self._settings
+
+    @property
+    def plan(self) -> str:
+        return self.account.plan if self.account is not None else "pro"
+
+    @property
+    def pro(self) -> bool:
+        return self.plan == "pro"
 
     def agent(self) -> Any:
         from aquaticy.agent import Agent
@@ -434,7 +538,8 @@ class ChatSession:
                     self._agent.close()
             self._agent = None
             self._settings = None
-            reset_settings_cache()
+            if self.profile is None:
+                reset_settings_cache()
             with contextlib.suppress(Exception):
                 from aquaticy.sandbox import forget_shared
 
@@ -928,7 +1033,60 @@ def resolve_image(target: Path) -> Path:
     raise FileNotFoundError(f"Nicht gefunden: {target}")
 
 
-SESSION = ChatSession()
+DEFAULT_SESSION = ChatSession()
+_REQUEST = threading.local()
+
+
+class SessionRegistry:
+    """Eine unabhaengige ChatSession je Konto."""
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, ChatSession] = {}
+        self._lock = threading.Lock()
+
+    def get(self, account: Account) -> ChatSession:
+        with self._lock:
+            session = self._sessions.get(account.id)
+            if session is None:
+                if AUTH is None:  # pragma: no cover - nur bei kaputtem Serverstart
+                    return DEFAULT_SESSION
+                session = ChatSession(account, AUTH.profile_dir(account.id))
+                self._sessions[account.id] = session
+            return session
+
+
+SESSIONS = SessionRegistry()
+USER_SCHEDULERS: dict[str, Any] = {}
+
+
+class SessionProxy:
+    """Haelt den bestehenden Code lesbar und waehlt pro Anfrage das Konto."""
+
+    @staticmethod
+    def current() -> ChatSession:
+        return getattr(_REQUEST, "session", DEFAULT_SESSION)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.current(), name)
+
+
+SESSION = SessionProxy()
+
+
+def current_runs() -> RunBook:
+    session = SESSION.current() if isinstance(SESSION, SessionProxy) else SESSION
+    return session.runs if session.account is not None else RUNS
+
+
+def start_user_scheduler(account: Account) -> None:
+    """Startet den Taktgeber genau einmal fuer das Konto."""
+    if account.id in USER_SCHEDULERS:
+        return
+    from aquaticy.jobs import Scheduler
+
+    scheduler = Scheduler(SESSIONS.get(account).settings)
+    scheduler.start()
+    USER_SCHEDULERS[account.id] = scheduler
 
 
 def ui_state() -> Any:
@@ -1079,6 +1237,20 @@ def save_values(payload: dict[str, Any]) -> Path:
             nichts geschrieben -- halb gespeicherte Einstellungen waeren
             schlimmer als gar keine.
     """
+    session = SESSION.current() if isinstance(SESSION, SessionProxy) else SESSION
+    if not session.pro and any(
+        key in payload
+        for key in (
+            "AQUATICY_HA_URL",
+            "AQUATICY_HA_CONTROL",
+            HA_TOKEN_FIELD,
+            "AQUATICY_LAN_ENABLED",
+            "AQUATICY_LAN_SUBNET",
+            "AQUATICY_STORAGE_URL",
+            "AQUATICY_STORAGE_ACCESS",
+        )
+    ):
+        raise ValueError("LAN-Suche, Home Assistant und Lagerverwaltung brauchen ein Pro-Konto.")
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
     }
@@ -1100,7 +1272,7 @@ def save_values(payload: dict[str, Any]) -> Path:
     if api_key:
         # Nur setzen, wenn wirklich etwas eingetippt wurde -- ein leeres Feld
         # bedeutet "unveraendert", nicht "loeschen".
-        key_name = api_key_name_for(values.get("AQUATICY_MODEL", "") or SESSION.settings().model)
+        key_name = api_key_name_for(values.get("AQUATICY_MODEL", "") or session.settings().model)
         if key_name:
             values[key_name] = api_key
     google_id = str(payload.get(GOOGLE_ID_FIELD, "")).strip()
@@ -1111,18 +1283,27 @@ def save_values(payload: dict[str, Any]) -> Path:
         values["GOOGLE_CLIENT_SECRET"] = google_secret
     search_key = str(payload.get(SEARCH_KEY_FIELD, "")).strip()
     if search_key:
-        backend = values.get("AQUATICY_SEARCH_BACKEND", "") or SESSION.settings().search_backend
+        backend = values.get("AQUATICY_SEARCH_BACKEND", "") or session.settings().search_backend
         backend_key_name = SEARCH_BACKEND_KEYS.get(backend, "")
         if backend_key_name:
             values[backend_key_name] = search_key
-    target = find_env_file() or DEFAULT_ENV_PATH
+    target = (
+        session.settings().env_path
+        if session.profile is not None
+        else find_env_file() or DEFAULT_ENV_PATH
+    )
     written = write_env_file(values, target)
     # In einem laufenden Prozess gewinnen bereits gesetzte Umgebungsvariablen
     # ueber die .env. Ohne override laege die neue Einstellung zwar in der
     # Datei, waere aber erst nach einem Neustart aktiv -- die Oberflaeche
     # meldet aber "sofort aktiv", und das soll auch stimmen.
-    load_env(written, override=True)
-    SESSION.reload()
+    if session.profile is None:
+        load_env(written, override=True)
+    else:
+        from aquaticy.memory import secure_file
+
+        secure_file(written)
+    session.reload()
     return written
 
 
@@ -1209,9 +1390,11 @@ def with_state(html: str) -> str:
     # alle aus einer Weissliste -- aber genau das ist der Punkt: man baut
     # die Absicherung ein, bevor jemand die Liste erweitert.
     roh = json.dumps(stand, ensure_ascii=False).replace("</", "<\\/")
-    return html.replace(
-        "<script>", f"<script>window.__AQUATICY_STATE__ = {roh};</script>\n<script>", 1
+    boot = (
+        f"window.__AQUATICY_STATE__ = {roh};"
+        f"window.__AQUATICY_VERSION__ = {json.dumps(__version__)};"
     )
+    return html.replace("<script>", f"<script>{boot}</script>\n<script>", 1)
 
 
 def safe_name(name: str) -> str:
@@ -1243,7 +1426,8 @@ def same_secret(candidate: str, secret: str) -> bool:
 class Handler(BaseHTTPRequestHandler):
     """Sehr kleiner Router -- eine Handvoll Endpunkte."""
 
-    server_version = f"aquaticy/{__version__}"
+    server_version = "Aquaticy"
+    sys_version = ""
 
     def log_message(self, fmt: str, *args: Any) -> None:
         return  # keine Zugriffsprotokolle in der Konsole
@@ -1254,6 +1438,20 @@ class Handler(BaseHTTPRequestHandler):
         self.responded = True
         super().send_response(code, message)
 
+    def end_headers(self) -> None:
+        """Sicherheitskopfzeilen gelten fuer HTML, JSON, Downloads und SSE."""
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+            "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+        )
+        super().end_headers()
+
     def _guarded(self, handler: Any) -> None:
         """Faengt alles ab, was in einer Route schiefgeht.
 
@@ -1262,6 +1460,26 @@ class Handler(BaseHTTPRequestHandler):
         dann immer wieder. Eine Zeile im Terminal und ein 500 sind brauchbarer.
         """
         self.responded = False
+        route = self._route()
+        client = self._client_ip()
+        if not REQUEST_LIMIT.allow(client):
+            self._json({"error": "Zu viele Anfragen. Bitte warte kurz."}, 429)
+            return
+        account = self._account()
+        public = route in {
+            "/",
+            "/index.html",
+            "/api/auth/status",
+            "/api/consent",
+            "/api/auth/register",
+            "/api/auth/login",
+        }
+        if AUTH is not None and route.startswith("/api/") and not public and account is None:
+            self._json({"error": "Bitte melde dich an."}, 401)
+            return
+        previous = getattr(_REQUEST, "session", None)
+        if account is not None:
+            _REQUEST.session = SESSIONS.get(account)
         try:
             handler()
         except (BrokenPipeError, ConnectionResetError):
@@ -1274,7 +1492,13 @@ class Handler(BaseHTTPRequestHandler):
             print(f"  [Fehler] {self.command} {self.path}: {type(exc).__name__}: {exc}")
             if not self.responded:
                 with contextlib.suppress(OSError):
-                    self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+                    self._json({"error": "Der Server konnte die Anfrage nicht verarbeiten."}, 500)
+        finally:
+            if previous is None:
+                with contextlib.suppress(AttributeError):
+                    del _REQUEST.session
+            else:
+                _REQUEST.session = previous
 
     # -- Hilfen -----------------------------------------------------------
     def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -1287,6 +1511,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _json(self, payload: dict[str, Any], status: int = 200) -> None:
         self._send(status, json.dumps(payload, ensure_ascii=False).encode(), "application/json")
+
+    def _json_cookie(
+        self, payload: dict[str, Any], name: str, value: str, max_age: int, status: int = 200
+    ) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self._set_cookie(name, value, max_age)
+        self.end_headers()
+        self.wfile.write(body)
 
     def _route(self) -> str:
         """Pfad ohne Query -- `/?token=...` ist immer noch die Startseite."""
@@ -1302,6 +1538,46 @@ class Handler(BaseHTTPRequestHandler):
             if TOKEN_COOKIE in cookie:
                 return cookie[TOKEN_COOKIE].value
         return ""
+
+    def _cookie(self, name: str) -> str:
+        raw = self.headers.get("Cookie") or ""
+        with contextlib.suppress(Exception):
+            cookie = SimpleCookie(raw)
+            if name in cookie:
+                return cookie[name].value
+        return ""
+
+    def _client_ip(self) -> str:
+        return str(self.client_address[0] if self.client_address else "unknown")
+
+    def _device(self) -> str:
+        return "\x1f".join(
+            (
+                self.headers.get("User-Agent") or "unbekannt",
+                self.headers.get("Accept-Language") or "",
+            )
+        )[:1000]
+
+    def _account(self) -> Account | None:
+        if AUTH is None:
+            return None
+        return AUTH.session_account(self._cookie(AUTH_COOKIE), self._device())
+
+    def _origin_ok(self) -> bool:
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return True
+        parsed = urlsplit(origin)
+        return parsed.scheme in {"http", "https"} and parsed.netloc == (
+            self.headers.get("Host") or ""
+        )
+
+    def _set_cookie(self, name: str, value: str, max_age: int) -> None:
+        secure = "; Secure" if isinstance(self.connection, __import__("ssl").SSLSocket) else ""
+        self.send_header(
+            "Set-Cookie",
+            f"{name}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict{secure}",
+        )
 
     def _authorized(self) -> bool:
         """Prueft das Zugangswort -- aus Adresse, Cookie oder Kopfzeile.
@@ -1360,13 +1636,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._deny()
             return
+        if not self._origin_ok():
+            self._json({"error": "Die Herkunft der Anfrage stimmt nicht."}, 403)
+            return
         route = self._route()
         settings = SESSION.settings()
-        if route == "/api/usage":
-            from aquaticy.usage import UsageLog
-
-            self._json({"cleared": UsageLog(settings.db_path).clear()})
-        elif route == "/api/jobs":
+        if route == "/api/jobs":
             from aquaticy.jobs import JobStore
 
             gemeint = (parse_qs(urlsplit(self.path).query).get("id") or [""])[0].strip()
@@ -1484,6 +1759,34 @@ class Handler(BaseHTTPRequestHandler):
         route = self._route()
         if route in ("/", "/index.html"):
             self._send_ui()
+        elif route == "/api/auth/status":
+            account = self._account()
+            self._json(
+                {
+                    "consent": self._cookie(CONSENT_COOKIE) == "yes",
+                    "authenticated": account is not None,
+                    "account": (
+                        {"email": account.email, "plan": account.plan} if account else None
+                    ),
+                }
+            )
+        elif route == "/api/account":
+            account = self._account()
+            if account is None:
+                self._json({"error": "Bitte melde dich an."}, 401)
+                return
+            from aquaticy.usage import UsageLog
+
+            used = UsageLog(SESSION.settings().db_path).total_tokens()
+            self._json(
+                {
+                    "email": account.email,
+                    "plan": account.plan,
+                    "tokens_used": used,
+                    "token_limit": None if account.pro else NORMAL_TOKEN_LIMIT,
+                    "tokens_left": None if account.pro else max(0, NORMAL_TOKEN_LIMIT - used),
+                }
+            )
         elif route == "/google":
             self._google_return()
         elif route == "/api/config":
@@ -1491,6 +1794,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 {
                     "version": __version__,
+                    "account": (
+                        {
+                            "email": SESSION.account.email,
+                            "plan": SESSION.plan,
+                            "pro": SESSION.pro,
+                        }
+                        if SESSION.account is not None
+                        else {"email": "lokal", "plan": "pro", "pro": True}
+                    ),
                     "values": current_values(),
                     "key_name": api_key_name_for(settings.model),
                     "search_key_name": SEARCH_BACKEND_KEYS.get(settings.search_backend, ""),
@@ -1642,7 +1954,60 @@ class Handler(BaseHTTPRequestHandler):
             self._deny()
             return
         route = self._route()
-        if route == "/api/chat":
+        if not self._origin_ok():
+            self._json({"error": "Die Herkunft der Anfrage stimmt nicht."}, 403)
+            return
+        if route == "/api/consent":
+            accepted = bool(self._read_json().get("accepted"))
+            if not accepted:
+                self._json_cookie(
+                    {"ok": False, "leave": True}, CONSENT_COOKIE, "", 0, status=403
+                )
+                return
+            self._json_cookie({"ok": True}, CONSENT_COOKIE, "yes", 365 * 86400)
+        elif route in {"/api/auth/register", "/api/auth/login"}:
+            if AUTH is None:
+                self._json({"error": "Die Kontoverwaltung ist nicht gestartet."}, 503)
+                return
+            if self._cookie(CONSENT_COOKIE) != "yes":
+                self._json({"error": "Bitte bestätige zuerst den Datenschutzhinweis."}, 403)
+                return
+            if not AUTH_LIMIT.allow(self._client_ip()):
+                self._json({"error": "Zu viele Anmeldeversuche. Bitte warte eine Minute."}, 429)
+                return
+            payload = self._read_json()
+            if route.endswith("register"):
+                try:
+                    account = AUTH.register(
+                        str(payload.get("email", "")),
+                        str(payload.get("password", "")),
+                        str(payload.get("plan", "normal")),
+                        str(payload.get("pro_code", "")),
+                    )
+                except ValueError as exc:
+                    self._json({"ok": False, "error": str(exc)}, 400)
+                    return
+            else:
+                account = AUTH.authenticate(
+                    str(payload.get("email", "")), str(payload.get("password", ""))
+                )
+                if account is None:
+                    self._json({"ok": False, "error": "E-Mail oder Passwort stimmt nicht."}, 401)
+                    return
+            with contextlib.suppress(Exception):
+                start_user_scheduler(account)
+            token = AUTH.create_session(account, self._device(), self._client_ip())
+            self._json_cookie(
+                {"ok": True, "account": {"email": account.email, "plan": account.plan}},
+                AUTH_COOKIE,
+                token,
+                30 * 86400,
+            )
+        elif route == "/api/auth/logout":
+            if AUTH is not None:
+                AUTH.logout(self._cookie(AUTH_COOKIE))
+            self._json_cookie({"ok": True}, AUTH_COOKIE, "", 0)
+        elif route == "/api/chat":
             self._chat()
         elif route == "/api/clear":
             SESSION.reset()
@@ -1658,12 +2023,18 @@ class Handler(BaseHTTPRequestHandler):
                 Cache(settings.db_path, settings.cache_ttl_hours).clear_unread(wanted)
             self._json({"ok": True, **SESSION.open_chat(wanted)})
         elif route == "/api/ha":
+            if not SESSION.pro:
+                self._json({"ok": False, "error": "Home Assistant braucht Pro."}, 403)
+                return
             self._json(self._ha_probe(self._read_json()))
         elif route == "/api/probe":
             self._json(self._probe(self._read_json()))
         elif route == "/api/google":
             self._json(self._google(self._read_json()))
         elif route == "/api/storage":
+            if not SESSION.pro:
+                self._json({"ok": False, "error": "Die Lagerverwaltung braucht Pro."}, 403)
+                return
             self._json(self._storage_probe(self._read_json()))
         elif route == "/api/chat-edit":
             self._json(self._chat_edit(self._read_json()))
@@ -1974,10 +2345,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         if TOKEN:
-            self.send_header(
-                "Set-Cookie",
-                f"{TOKEN_COOKIE}={TOKEN}; Path=/; Max-Age=2592000; SameSite=Strict",
-            )
+            self._set_cookie(TOKEN_COOKIE, TOKEN, 30 * 86400)
         self.end_headers()
         self.wfile.write(body)
 
@@ -1998,6 +2366,24 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
 
     def _chat(self) -> None:
         """Fuehrt die Anfrage aus und streamt die Ereignisse als SSE."""
+        if not SESSION.pro:
+            from aquaticy.usage import UsageLog
+
+            used = UsageLog(SESSION.settings().db_path).total_tokens()
+            if used >= NORMAL_TOKEN_LIMIT:
+                self._json(
+                    {
+                        "error": (
+                            "Dein Kontingent von 200.000 Token ist aufgebraucht. "
+                            "Mit einem Pro-Konto gibt es kein Tokenlimit."
+                        ),
+                        "code": "token_limit",
+                        "tokens_used": used,
+                        "token_limit": NORMAL_TOKEN_LIMIT,
+                    },
+                    429,
+                )
+                return
         payload = self._read_json()
         message = str(payload.get("message", "")).strip()[:MAX_MESSAGE_CHARS]
         raw = payload.get("attachments")
@@ -2057,7 +2443,8 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
 
         # Der Lauf gehoert ab hier dem Server, nicht der Verbindung. Reisst
         # sie ab, laeuft er weiter und kann spaeter zu Ende gesehen werden.
-        lauf = RUNS.start(message)
+        session = SESSION.current() if isinstance(SESSION, SessionProxy) else SESSION
+        lauf = current_runs().start(message)
         seen_done = threading.Event()
 
         def emit(name: str, payload: dict[str, Any]) -> None:
@@ -2070,6 +2457,8 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
             lauf.add({"type": kind, **payload})
 
         def run() -> None:
+            previous = getattr(_REQUEST, "session", None)
+            _REQUEST.session = session
             try:
                 SESSION.ask(
                     message,
@@ -2090,6 +2479,11 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                 if not seen_done.is_set():
                     lauf.add({"type": "done"})
                 lauf.finish()
+                if previous is None:
+                    with contextlib.suppress(AttributeError):
+                        del _REQUEST.session
+                else:
+                    _REQUEST.session = previous
 
         worker = threading.Thread(target=run, daemon=True)
         worker.start()
@@ -2097,7 +2491,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
 
     def _run_stream(self) -> None:
         """Haengt sich an den laufenden Turn -- oder sagt, dass es keinen gibt."""
-        lauf = RUNS.latest()
+        lauf = current_runs().latest()
         if lauf is None:
             self._json({"error": "kein Lauf"}, 404)
             return
@@ -2110,7 +2504,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
 
     def _run_state(self) -> None:
         """Was gerade laeuft -- fuer die Seite, die eben geladen wurde."""
-        lauf = RUNS.latest()
+        lauf = current_runs().latest()
         self._json(lauf.state() if lauf is not None else {"running": False, "resume": False})
 
     def _stream_run(self, lauf: Run, since: int = 0) -> None:
@@ -2286,9 +2680,13 @@ def serve(
     der die Adresse erreicht. Fuer den Netzbetrieb setzt die Kommandozeile
     deshalb von sich aus eines.
     """
-    global TOKEN
+    global AUTH, TOKEN
 
     TOKEN = token
+    data_dir = get_settings().data_dir
+    code = pro_code_for(data_dir)
+    AUTH = AuthStore(data_dir, code)
+    print(f"  Pro-Code: {code} (9 Zeichen, geheim halten)")
     # Ein harter Abbruch kann eine Werkstatt zurueckgelassen haben. Sie belegt
     # Speicher und hat nichts mehr zu tun -- also weg damit, bevor es losgeht.
     try:
@@ -2305,6 +2703,8 @@ def serve(
         global SCHEDULER
         SCHEDULER = Scheduler(SESSION.settings)
         SCHEDULER.start()
+        for account in AUTH.accounts():
+            start_user_scheduler(account)
     except Exception:  # pragma: no cover - Auftraege duerfen den Start nie kosten
         pass
     server = ThreadingHTTPServer((host, port), Handler)
@@ -2321,4 +2721,4 @@ def serve(
     finally:
         server.server_close()
         TOKEN = ""
-
+        AUTH = None

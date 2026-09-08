@@ -83,7 +83,18 @@ def secure_file(path: Path) -> None:
         path.chmod(0o600)
     if os.name != "nt":
         return
-    user = os.environ.get("USERNAME", "").strip()
+    user = ""
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        identity = subprocess.run(
+            ["whoami"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        user = (identity.stdout or "").strip()
+    user = user or os.environ.get("USERNAME", "").strip()
     if not user:
         return
     with contextlib.suppress(OSError, subprocess.TimeoutExpired):

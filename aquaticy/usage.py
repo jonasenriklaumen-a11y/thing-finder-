@@ -13,8 +13,9 @@ Gezaehlt wird, was tatsaechlich ueber die Leitung geht:
   Schnittstelle zustandslos ist; genau so rechnen die Anbieter auch ab.
 * **heraus** die Antwort und die Argumente der Werkzeugaufrufe.
 
-Abgelegt wird tageweise je Modell in derselben Datenbank wie der Cache. Ein
-Limit gibt es bewusst nicht: der Zaehler soll zeigen, nicht bremsen.
+Abgelegt wird tageweise je Modell in derselben Datenbank wie der Cache. Bei
+normalen Konten setzt die Weboberflaeche nach insgesamt 200.000 Token eine
+Pause; Pro-Konten bleiben unbegrenzt.
 """
 
 from __future__ import annotations
@@ -169,8 +170,13 @@ class UsageLog:
             "days": [dict(row) for row in verlauf],
         }
 
-    def clear(self) -> int:
-        """Loescht den Zaehlerstand. Returns: geloeschte Zeilen."""
-        with self._lock, self._connect() as conn:
-            cur = conn.execute("DELETE FROM usage")
-            return int(cur.rowcount or 0)
+    def total_tokens(self) -> int:
+        """Gesamtverbrauch fuer Quota und Kontenliste."""
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) FROM usage"
+                ).fetchone()
+            return int(row[0] or 0)
+        except sqlite3.Error:
+            return 0

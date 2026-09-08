@@ -1,13 +1,12 @@
 # Aquaticy
 
-**Aquaticy** ist der Rechercheagent, mit dem man chatten kann — er durchsucht
-eigenständig das Internet, liest die gefundenen Seiten und gibt die Ergebnisse
-ausgewertet zurück, mit Quelle zu jeder Angabe. **Und er kennt dein Zuhause:** er sieht
-ins eigene Netz, liest Home Assistant und — wenn du es erlaubst — deinen Kalender und
-dein Postfach. Also auch Fragen, deren Antwort im Web gar nicht stehen kann.
+**Aquaticy** recherchiert für dich. Du stellst eine Frage, Aquaticy durchsucht das Web,
+liest die passenden Seiten und fasst das Ergebnis mit Quellen zusammen. Mit einem
+Pro-Konto kann Aquaticy außerdem dein Heimnetz, Home Assistant und deine
+Lagerverwaltung einbeziehen.
 
-Ein Befehl, drei Wege: im Terminal (`aquaticy`), im Browser (`aquaticy web`) und vom Handy
-aus (`aquaticy web --lan`) — überall derselbe Agent mit denselben Einstellungen.
+Du kannst Aquaticy im Terminal (`aquaticy`), im Browser (`aquaticy web`) oder vom Handy
+aus (`aquaticy web --lan`) nutzen.
 
 ```
 $ aquaticy
@@ -138,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.3.0                                      │
+│ Aquaticy AI 9.4                                        │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -786,8 +785,8 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Token gekostet hat, sieht man so. Gezählt wird, was wirklich hinausgeht: der
   Systemtext und das ganze Gespräch bei *jedem* Aufruf (die Schnittstelle ist
   zustandslos, genau so rechnen die Anbieter auch ab) plus die Antwort und die
-  Argumente der Werkzeugaufrufe. **Ein Limit gibt es bewusst nicht:** der Zähler soll
-  zeigen, nicht bremsen. *Zähler zurücksetzen* leert ihn.
+  Argumente der Werkzeugaufrufe. Bei normalen Konten endet das Kontingent bei insgesamt
+  200.000 Token. Pro-Konten bleiben unbegrenzt. Der Zähler lässt sich nicht zurücksetzen.
 * **Aufträge** unter *Einstellungen → Aufträge*: Fragen, die Aquaticy AI von selbst
   stellt — stündlich, täglich oder wöchentlich zu einer festen Uhrzeit. Die Antwort
   landet als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
@@ -828,7 +827,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.3.0                                                   │
+│ Aquaticy AI 9.4                                                     │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -838,9 +837,9 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 ╰───────────────────────────────────────────────────────────────────╯
 ```
 
-**Mehr als Adresse und Port braucht es nicht** — keine Anmeldung, kein Zugangswort,
-nichts einzutippen. Die Adressen ermittelt aquaticy selbst, du musst nichts
-nachschlagen. Die Tailscale-Adresse erscheint nur, wenn Tailscale auch läuft.
+Beim ersten Besuch erklärt Aquaticy kurz, welche Daten für Anmeldung und getrennte
+Konten nötig sind. Danach registrierst du dich oder meldest dich mit einem bestehenden
+Konto an. Die Tailscale-Adresse erscheint nur, wenn Tailscale läuft.
 
 Wer den Zugang trotzdem einschränken will, vergibt ein Wort:
 
@@ -849,11 +848,9 @@ aquaticy web --lan --token familie   # dann nur mit ?token=familie in der Adress
 aquaticy web --host 192.168.1.44     # gezielt eine Netzwerkkarte
 ```
 
-Das Wort hängt hinten an der Adresse. Nur der erste Aufruf braucht es — danach
-merkt es sich der Browser, und aquaticy nimmt es aus der Adresszeile heraus. Es darf
-nur ASCII enthalten (also `gruen`, nicht `grün`): der Browser schickt es als
-HTTP-Kopfzeile mit, und die verträgt keine Umlaute. aquaticy sagt es dir beim Start,
-falls das Wort nicht taugt.
+Das zusätzliche Zugangswort schützt schon die Startseite. Der Browser übernimmt es
+beim ersten Aufruf in ein geschütztes Cookie und Aquaticy entfernt es aus der
+Adresszeile. Es darf nur ASCII enthalten, also etwa `gruen` statt `grün`.
 
 **Wenn das andere Gerät die Seite nicht lädt:** meist blockt die Firewall des
 Rechners den Port. Unter Windows fragt die Firewall beim ersten Start nach —
@@ -861,9 +858,9 @@ dort „privates Netzwerk" erlauben. Unter Linux mit ufw: `sudo ufw allow 8765/t
 Ohne Tailscale müssen beide Geräte im selben Netz sein (nicht eines im
 WLAN-Gastzugang).
 
-Alle Geräte teilen sich **eine** Sitzung — der Gesprächsverlauf ist also derselbe,
-egal von wo du weiterfragst. Fragt ein zweites Gerät, während noch eine Recherche
-läuft, sieht es „[Warte] Ein anderes Gerät fragt gerade" und kommt danach dran.
+Jedes Konto hat eigene Chats, Einstellungen, Aufträge und Speicherdateien. Mehrere
+Konten können gleichzeitig mit Aquaticy arbeiten. Innerhalb eines Kontos werden zwei
+gleichzeitig gestellte Fragen geordnet, damit der Gesprächsverlauf verständlich bleibt.
 Ins offene Internet stellt `--lan` nichts: dafür bräuchte es zusätzlich eine
 Portfreigabe im Router. Über Tailscale erreichst du aquaticy auch von unterwegs,
 ohne eine solche Freigabe — genau dafür ist es da.
@@ -1978,9 +1975,29 @@ zu einem anderen Anbieter gehört. Jede andere Adresse bleibt stehen — ein Lit
 oder ein eigenes NIM im Heimnetz ist ein völlig legitimer Weg zu einem Cloud-Modell und
 wird nicht angefasst.
 
-SQLite (`~/.aquaticy/aquaticy.sqlite3`) hält den Response-Cache (TTL 24 h), den Verlauf
-vergangener Recherchen, den Merkzettel, den verschlüsselten Speicher, die Aufträge,
-den Token-Zähler und den Zustand der Oberfläche.
+SQLite hält Konten und Sitzungen unter `~/.aquaticy/`. Jeder Nutzer bekommt unter
+`~/.aquaticy/users/` ein eigenes Verzeichnis für Verlauf, Merkzettel, verschlüsselten
+Speicher, Aufträge, Token-Zähler und Einstellungen.
+
+## Konten und Pro
+
+Beim ersten Start erzeugt Aquaticy einen geheimen, neunstelligen Pro-Code und zeigt ihn
+im Terminal. Später zeigt `aquaticy pro-code` denselben Code erneut. Alternativ setzt du
+ihn vor dem Start mit `AQUATICY_PRO_CODE`.
+
+Normale Konten können recherchieren, chatten und ihre eigenen Einstellungen und Daten
+nutzen. Nach insgesamt 200.000 Token nehmen sie keine weiteren Modellanfragen an. Der
+Zähler lässt sich nicht zurücksetzen. Pro-Konten haben kein Tokenlimit und können
+zusätzlich die LAN-Suche, Home Assistant und die Lagerverwaltung verwenden.
+
+```bash
+aquaticy list       # E-Mail, Kontotyp, Token- und Speicherverbrauch
+aquaticy pro-code   # geheimen Pro-Code anzeigen
+```
+
+Passwörter werden mit scrypt und einem eigenen Salz gehasht. Sitzungen liegen in
+HttpOnly-Cookies; IP-Adresse und Browsermerkmale speichert Aquaticy nur als Hash für die
+Sitzungsprüfung. Es gibt keine Werbe- oder Analyse-Cookies.
 
 ## Aufbau
 
@@ -2003,6 +2020,7 @@ aquaticy/
   sandbox.py     # die Werkstatt: abgeschotteter Behälter für den Code-Modus
   jobs.py        # Aufträge: Fragen, die sich von selbst stellen
   usage.py       # der Token-Zähler (drei Zeichen sind ein Token)
+  auth.py        # Konten, Passwort-Hashes, Sitzungen und Limits
   memory.py      # der verschlüsselte Speicher
   google.py      # Gmail und Kalender, lesend und (auf Wunsch) ändernd
   subagents.py   # parallele Rechercheaufträge samt Rollen und Prüfern
@@ -2053,4 +2071,3 @@ Captcha).
 ## Lizenz
 
 MIT
-

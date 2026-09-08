@@ -529,6 +529,21 @@ def raw_request(port: int, method: str, path: str, headers: dict[str, str] | Non
     return result
 
 
+def json_request(
+    port: int, method: str, path: str, body: dict[str, Any], cookie: str = ""
+) -> tuple[int, dict[str, str], dict[str, Any]]:
+    conn = HTTPConnection("127.0.0.1", port, timeout=10)
+    headers = {"Content-Type": "application/json", "User-Agent": "Aquaticy-Test"}
+    if cookie:
+        headers["Cookie"] = cookie
+    conn.request(method, path, body=json.dumps(body), headers=headers)
+    response = conn.getresponse()
+    payload = json.loads(response.read())
+    result = response.status, dict(response.getheaders()), payload
+    conn.close()
+    return result
+
+
 @pytest.fixture
 def port(session: web.ChatSession):
     server = ThreadingHTTPServer(("127.0.0.1", 0), web.Handler)
@@ -545,6 +560,62 @@ def port(session: web.ChatSession):
 def test_without_a_token_everything_stays_open(port: int) -> None:
     # Der rein lokale Betrieb soll so einfach bleiben wie vorher.
     assert raw_request(port, "GET", "/")[0] == 200
+
+
+def test_consent_registration_and_account_isolation(
+    port: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aquaticy.auth import AuthStore
+
+    monkeypatch.setattr(web, "AUTH", AuthStore(tmp_path / "accounts", "PRO123456"))
+    monkeypatch.setattr(web, "SESSIONS", web.SessionRegistry())
+    monkeypatch.setattr(web, "SESSION", web.SessionProxy())
+    monkeypatch.setattr(web, "strong_models", lambda *args, **kwargs: [])
+    assert raw_request(port, "GET", "/api/config")[0] == 401
+
+    status, headers, _ = json_request(port, "POST", "/api/consent", {"accepted": True})
+    assert status == 200
+    consent = headers["Set-Cookie"].split(";", 1)[0]
+    status, headers, payload = json_request(
+        port,
+        "POST",
+        "/api/auth/register",
+        {
+            "email": "person@example.org",
+            "password": "eine sehr lange Passphrase",
+            "plan": "normal",
+        },
+        consent,
+    )
+    assert status == 200 and payload["account"]["plan"] == "normal"
+    assert "HttpOnly" in headers["Set-Cookie"]
+    assert "SameSite=Strict" in headers["Set-Cookie"]
+    session_cookie = headers["Set-Cookie"].split(";", 1)[0]
+    cookies = consent + "; " + session_cookie
+    status, _, body = raw_request(
+        port,
+        "GET",
+        "/api/config",
+        {"Cookie": cookies, "User-Agent": "Aquaticy-Test"},
+    )
+    assert status == 200 and json.loads(body)["account"]["pro"] is False
+    status, _, payload = json_request(port, "POST", "/api/ha", {}, cookies)
+    assert status == 403 and "Pro" in payload["error"]
+
+
+def test_security_headers_and_origin_check(port: int) -> None:
+    status, headers, _ = raw_request(port, "GET", "/")
+    assert status == 200
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["X-Frame-Options"] == "DENY"
+    assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    status, _, body = raw_request(
+        port,
+        "POST",
+        "/api/clear",
+        {"Origin": "https://evil.example", "Host": f"127.0.0.1:{port}"},
+    )
+    assert status == 403 and "Herkunft" in json.loads(body)["error"]
 
 
 def test_guarded_server_refuses_strangers(port: int, guarded: str) -> None:
@@ -690,10 +761,11 @@ def test_style_and_script_blocks_stay_separate() -> None:
 
 
 def test_every_request_carries_the_token() -> None:
-    """Keine rohen fetch-Aufrufe -- die kaemen im Netzbetrieb ohne Zugangswort."""
+    """Das Zugangswort bleibt im HttpOnly-Cookie und damit ausserhalb von JavaScript."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'fetch("/api' not in html
-    assert 'X-Aquaticy-Token' in html
+    assert "aquaticy-token" not in html
+    assert "localStorage.setItem" not in html
 
 
 # -- Zugangswort mit Sonderzeichen ---------------------------------------
@@ -745,7 +817,8 @@ def test_a_broken_route_answers_500_instead_of_dying(
     monkeypatch.setattr(web, "current_values", boom)
     status, _, body = raw_request(port, "GET", "/api/config")
     assert status == 500
-    assert "kaputt" in json.loads(body)["error"]
+    assert json.loads(body)["error"] == "Der Server konnte die Anfrage nicht verarbeiten."
+    assert "RuntimeError: kaputt" in capfd.readouterr().out
     assert "Traceback" not in capfd.readouterr().err
     # Der Server lebt weiter.
     assert raw_request(port, "GET", "/")[0] == 200
@@ -2590,7 +2663,7 @@ def test_a_running_recheck_is_visible() -> None:
 # ---------------------------------------------------------------------------
 # Nutzung, Speicher, Chats durchsuchen, Export, Auftraege
 # ---------------------------------------------------------------------------
-def test_the_counter_can_be_read_and_reset(client, web_settings: Settings) -> None:
+def test_the_counter_can_be_read_but_not_reset(client, web_settings: Settings) -> None:
     from aquaticy.usage import UsageLog
 
     log = UsageLog(web_settings.db_path)
@@ -2603,8 +2676,8 @@ def test_the_counter_can_be_read_and_reset(client, web_settings: Settings) -> No
     assert zahlen["total"]["tokens_in"] == 300
 
     status, data = client("DELETE", "/api/usage")
-    assert status == 200 and json.loads(data)["cleared"] == 1
-    assert json.loads(client("GET", "/api/usage")[1])["total"]["calls"] == 0
+    assert status == 404
+    assert json.loads(client("GET", "/api/usage")[1])["total"]["calls"] == 1
 
 
 def test_the_memory_window_shows_nothing_when_memory_is_off(
