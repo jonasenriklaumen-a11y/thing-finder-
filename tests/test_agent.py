@@ -2477,17 +2477,64 @@ def test_the_workshop_exists_only_in_the_code_mode(
 
     agent.ask("", mode="code", sandbox=True)
     namen = {schema["function"]["name"] for schema in agent.tools}
-    assert {"vm_run", "vm_write", "vm_read"} <= namen
+    assert {"vm_run", "vm_write", "vm_read", "blender_run"} <= namen
     assert "Werkstatt" in agent.messages[0]["content"]
 
     agent.ask("", mode="normal")
     namen = {schema["function"]["name"] for schema in agent.tools}
-    assert not ({"vm_run", "vm_write", "vm_read"} & namen), "im Gespraech nicht"
+    assert not ({"vm_run", "vm_write", "vm_read", "blender_run"} & namen), "im Gespraech nicht"
     assert "Werkstatt" not in agent.messages[0]["content"]
 
     agent.ask("", mode="code", sandbox=False)
     namen = {schema["function"]["name"] for schema in agent.tools}
-    assert not ({"vm_run", "vm_write", "vm_read"} & namen), "ausgeschaltet auch nicht"
+    assert not ({"vm_run", "vm_write", "vm_read", "blender_run"} & namen), (
+        "ausgeschaltet auch nicht"
+    )
+
+
+def test_blender_is_mentioned_only_in_the_workshop_prompt(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Nur im Code-Modus mit Werkstatt weiss das Modell, dass es Blender gibt."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+
+    agent.ask("", mode="code", sandbox=True)
+    assert "blender_run" in agent.messages[0]["content"]
+    assert "Blender" in agent.messages[0]["content"]
+
+    agent.ask("", mode="normal")
+    assert "blender_run" not in agent.messages[0]["content"]
+
+
+def test_the_workshop_size_shows_up_in_the_tool_texts(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    """Falsche Zahlen waeren schlimmer als gar keine -- das Modell plant damit."""
+    settings.vm_cpus = 4
+    settings.vm_memory_mb = 6144
+    settings.vm_disk_gb = 20
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("", mode="code", sandbox=True)
+
+    system = agent.messages[0]["content"]
+    assert "4 Prozessorkerne" in system
+    assert "6144 MB" in system
+    assert "20 GB" in system
+
+    vm_run = next(s for s in agent.tools if s["function"]["name"] == "vm_run")
+    beschreibung = vm_run["function"]["description"]
+    assert "6144 MB" in beschreibung
+    assert "4 Prozessorkerne" in beschreibung
+    assert "20 GB" in beschreibung
+
+
+def test_a_single_core_gets_the_singular(settings: Settings, toolbox: Toolbox) -> None:
+    """Normal hat nur einen Kern -- 'ein Prozessorkern', nicht 'kerne'."""
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.ask("", mode="code", sandbox=True)
+    system = agent.messages[0]["content"]
+    assert "1 Prozessorkern" in system
+    assert "1 Prozessorkerne" not in system
 
 
 def test_the_workshop_prompt_draws_the_line(settings: Settings, toolbox: Toolbox) -> None:
@@ -2526,6 +2573,60 @@ def test_a_missing_runtime_is_an_answer_not_a_crash(
     """Ohne Abschottung sagt das Werkzeug, was fehlt -- und fuehrt nichts aus."""
     monkeypatch.setattr("aquaticy.sandbox.find_runtime", lambda: None)
     antwort = toolbox.vm_run("echo hallo")
+    assert "error" in antwort
+    assert "fuehre ich nichts aus" in antwort["error"]
+
+
+def test_blender_run_writes_the_script_before_running_it(toolbox: Toolbox) -> None:
+    """Zwei Schritte in einem: die Datei muss da sein, bevor Blender sie oeffnet."""
+    geschehen: list[tuple[str, str]] = []
+
+    class FakeBox:
+        def write(self, path: str, text: str) -> dict:
+            geschehen.append(("write", path))
+            return {"written": f"/work/{path}", "bytes": len(text)}
+
+        def run(self, command: str, timeout: int = 30):
+            geschehen.append(("run", command))
+
+            class Result:
+                def as_dict(self) -> dict:
+                    return {"exit_code": 0, "stdout": "fertig", "stderr": "", "seconds": 1.2}
+
+            assert "blender --background --python" in command
+            assert timeout == 90  # BLENDER_TIMEOUT, nicht COMMAND_TIMEOUT
+            return Result()
+
+    toolbox._sandbox_box = FakeBox()
+    antwort = toolbox.blender_run("bpy.ops.mesh.primitive_cube_add()")
+    assert antwort["exit_code"] == 0
+    assert antwort["script"] == "/work/design.py"
+    assert [schritt for schritt, _ in geschehen] == ["write", "run"]
+
+
+def test_blender_run_adds_the_py_suffix(toolbox: Toolbox) -> None:
+    class FakeBox:
+        def write(self, path: str, text: str) -> dict:
+            return {"written": f"/work/{path}"}
+
+        def run(self, command: str, timeout: int = 30):
+            class Result:
+                def as_dict(self) -> dict:
+                    return {"exit_code": 0, "stdout": "", "stderr": "", "seconds": 0.1}
+
+            return Result()
+
+    toolbox._sandbox_box = FakeBox()
+    antwort = toolbox.blender_run("pass", filename="szene")
+    assert antwort["script"] == "/work/szene.py"
+
+
+def test_blender_run_without_a_runtime_is_an_answer_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch, toolbox: Toolbox
+) -> None:
+    """Fehlt Blender im Abbild, ist das ein gewoehnlicher Fehler -- kein Absturz."""
+    monkeypatch.setattr("aquaticy.sandbox.find_runtime", lambda: None)
+    antwort = toolbox.blender_run("bpy.ops.mesh.primitive_cube_add()")
     assert "error" in antwort
     assert "fuehre ich nichts aus" in antwort["error"]
 

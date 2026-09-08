@@ -1430,3 +1430,42 @@ def test_the_platform_list_stays_short() -> None:
     assert len(PROFILE_SITES) >= 10, "wählen kann man aus mehr"
     # Instagram und LinkedIn stehen vorn -- danach fragt man zuerst.
     assert [label for label, _ in PROFILE_SITES][:2] == ["Instagram", "LinkedIn"]
+
+
+# ---------------------------------------------------------------------------
+# Werkstatt-Werkzeuge: Zahlen, die zur Groesse passen
+# ---------------------------------------------------------------------------
+def test_vm_schemas_carry_the_real_numbers() -> None:
+    from aquaticy.tools import vm_schemas_for
+
+    settings = Settings(vm_cpus=1, vm_memory_mb=1024, vm_disk_gb=4)
+    schemas = vm_schemas_for(settings)
+    namen = {schema["function"]["name"] for schema in schemas}
+    assert {"vm_run", "vm_write", "vm_read", "vm_files", "blender_run"} <= namen
+
+    vm_run = next(s for s in schemas if s["function"]["name"] == "vm_run")
+    assert "1024 MB" in vm_run["function"]["description"]
+    assert "1 Prozessorkern" in vm_run["function"]["description"]
+    assert "1 Prozessorkerne" not in vm_run["function"]["description"]
+    assert "4 GB" in vm_run["function"]["description"]
+
+
+def test_vm_schemas_follow_the_plus_size() -> None:
+    from aquaticy.tools import vm_schemas_for
+
+    settings = Settings(vm_cpus=4, vm_memory_mb=6144, vm_disk_gb=20)
+    schemas = vm_schemas_for(settings)
+    vm_run = next(s for s in schemas if s["function"]["name"] == "vm_run")
+    assert "6144 MB" in vm_run["function"]["description"]
+    assert "4 Prozessorkerne" in vm_run["function"]["description"]
+    assert "20 GB" in vm_run["function"]["description"]
+
+
+def test_vm_schemas_do_not_mutate_the_shared_template() -> None:
+    """Sonst haengt der Text der ersten Anfrage an allen weiteren."""
+    from aquaticy.tools import VM_SCHEMAS, vm_schemas_for
+
+    vm_schemas_for(Settings(vm_cpus=4, vm_memory_mb=6144, vm_disk_gb=20))
+    original = next(s for s in VM_SCHEMAS if s["function"]["name"] == "vm_run")
+    assert "1024 MB" in original["function"]["description"]
+    assert "6144 MB" not in original["function"]["description"]

@@ -797,17 +797,26 @@ STORAGE_EDIT_SCHEMA: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 # Die Werkstatt -- nur im Code-Modus, nur wenn sie eingeschaltet ist
 # ---------------------------------------------------------------------------
+#: Vorlage fuer die vm_run-Beschreibung -- die Zahlen haengen von der
+#: gewaehlten Werkstatt-Groesse ab (normal/plus, siehe AQUATICY_VM_SIZE) und
+#: werden erst in `vm_schemas_for` eingesetzt. Falsche Zahlen waeren
+#: schlimmer als gar keine: das Modell plant damit, wie viel es sich leisten
+#: kann.
+VM_RUN_DESCRIPTION = (
+    "Fuehrt einen Shell-Befehl in der abgeschotteten Werkstatt aus und gibt "
+    "Ausgabe und Rueckgabewert zurueck. Dort darfst du alles: Dateien anlegen, "
+    "Programme starten, Tests laufen lassen. Es gibt KEIN Netz (kein pip "
+    "install, kein curl), {memory_mb} MB Arbeitsspeicher, {cpus} {kern_wort} "
+    "und {disk_gb} GB Platte unter /work. Nutze es, um deinen Code wirklich "
+    "auszuprobieren, statt zu behaupten, er laufe."
+)
+
 VM_RUN_SCHEMA: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "vm_run",
-        "description": (
-            "Fuehrt einen Shell-Befehl in der abgeschotteten Werkstatt aus und gibt "
-            "Ausgabe und Rueckgabewert zurueck. Dort darfst du alles: Dateien anlegen, "
-            "Programme starten, Tests laufen lassen. Es gibt KEIN Netz (kein pip "
-            "install, kein curl), ein Gigabyte Arbeitsspeicher, einen Prozessorkern "
-            "und vier Gigabyte Platte unter /work. Nutze es, um deinen Code wirklich "
-            "auszuprobieren, statt zu behaupten, er laufe."
+        "description": VM_RUN_DESCRIPTION.format(
+            memory_mb=1024, cpus=1, kern_wort="Prozessorkern", disk_gb=4
         ),
         "parameters": {
             "type": "object",
@@ -879,12 +888,92 @@ VM_FILES_SCHEMA: dict[str, Any] = {
     },
 }
 
+#: Blender arbeitet nur im Code-Modus, in der Werkstatt -- nie auf dem
+#: Rechner des Nutzers, und nie ohne die Abschottung. Ob es das Werkzeug
+#: wirklich gibt, haengt am Werkstatt-Abbild (AQUATICY_VM_IMAGE): das
+#: mitgelieferte Standardabbild bringt es nicht mit, sondern nur eins, das
+#: Blender selbst enthaelt (siehe docker/workshop-blender.Dockerfile). Fehlt
+#: es, kommt "command not found" zurueck -- das ist keine Stoerung, sondern
+#: die ehrliche Antwort.
+BLENDER_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "blender_run",
+        "description": (
+            "Fuehrt ein Python-Skript headless in Blender aus (die bpy-API) und "
+            "erstellt oder bearbeitet damit ein 3D-Design: Modelle, Szenen, "
+            "Materialien, Renderings. Das Skript landet als Datei in der Werkstatt "
+            "und startet dann mit 'blender --background --python <datei>'. "
+            "Schreib normalen bpy-Code hinein, z.B. bpy.ops.mesh.primitive_cube_add(...), "
+            "bpy.ops.wm.save_as_mainfile(filepath='/work/design.blend'), oder fuers "
+            "Rendern bpy.context.scene.render.filepath = '/work/bild.png' gefolgt von "
+            "bpy.ops.render.render(write_still=True). Fertige Dateien liegen danach "
+            "unter /work -- mit vm_files findest du sie, der Nutzer kann sie sich "
+            "herunterladen. Blender braucht mehr Rechenleistung als ein Skript: bei "
+            "der Werkstatt-Groesse 'normal' kann ein Rendering am Zeitlimit oder am "
+            "Speicher scheitern, 'plus' (Einstellungen -> Werkstatt) schafft mehr. "
+            "Blender ist nur da, wenn die Werkstatt mit einem Blender-faehigen Abbild "
+            "laeuft -- fehlt es, kommt 'command not found' zurueck, dann sag dem "
+            "Nutzer, dass dafür ein anderes Werkstatt-Abbild noetig ist."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "script": {
+                    "type": "string",
+                    "description": "Vollstaendiger bpy-Python-Code, der in Blender laeuft.",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": (
+                        "Dateiname fuer das Skript, z.B. 'design.py'. Standard 'design.py'."
+                    ),
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": (
+                        "Sekunden, hoechstens 120. Standard 90 -- Rendern braucht "
+                        "laenger als ein gewoehnlicher Befehl."
+                    ),
+                },
+            },
+            "required": ["script"],
+        },
+    },
+}
+
 VM_SCHEMAS: tuple[dict[str, Any], ...] = (
     VM_RUN_SCHEMA,
     VM_WRITE_SCHEMA,
     VM_READ_SCHEMA,
     VM_FILES_SCHEMA,
+    BLENDER_SCHEMA,
 )
+
+
+def vm_schemas_for(settings: Any) -> tuple[dict[str, Any], ...]:
+    """Die Werkstatt-Werkzeuge, mit den tatsaechlichen Grenzen im Text.
+
+    Die Zahlen in `vm_run` haengen von der gewaehlten Werkstatt-Groesse ab
+    (normal/plus, siehe AQUATICY_VM_SIZE) -- ein Werkzeugtext mit falschen
+    Zahlen waere schlimmer als gar keiner, das Modell plant damit, wie viel
+    es sich leisten kann.
+    """
+    import copy
+
+    cpus = max(1, int(getattr(settings, "vm_cpus", 1) or 1))
+    memory_mb = max(1, int(getattr(settings, "vm_memory_mb", 1024) or 1024))
+    disk_gb = max(1, int(getattr(settings, "vm_disk_gb", 4) or 4))
+    schemas = copy.deepcopy(VM_SCHEMAS)
+    for schema in schemas:
+        if schema["function"]["name"] == "vm_run":
+            schema["function"]["description"] = VM_RUN_DESCRIPTION.format(
+                memory_mb=memory_mb,
+                cpus=cpus,
+                kern_wort="Prozessorkern" if cpus == 1 else "Prozessorkerne",
+                disk_gb=disk_gb,
+            )
+    return schemas
 
 
 # ---------------------------------------------------------------------------
@@ -1801,6 +1890,41 @@ class Toolbox:
         self.stats.vm_calls += 1
         return {"files": dateien, "count": len(dateien)}
 
+    def blender_run(self, script: str, filename: str = "", timeout: int = 0) -> dict[str, Any]:
+        """Schreibt ein bpy-Skript in die Werkstatt und laesst Blender es headless laufen.
+
+        Zwei Schritte in einem: die Datei muss existieren, bevor Blender sie
+        oeffnen kann. Fehlt Blender im Werkstatt-Abbild, kommt das als ganz
+        gewoehnlicher Fehler zurueck ("command not found") -- kein Sonderfall.
+        """
+        import shlex
+
+        from aquaticy.sandbox import BLENDER_TIMEOUT, SandboxUnavailable
+
+        name = (filename or "design.py").strip() or "design.py"
+        if not name.endswith(".py"):
+            name += ".py"
+        try:
+            box = self._sandbox()
+            geschrieben = box.write(name, script)
+            if "error" in geschrieben:
+                return geschrieben
+            pfad = geschrieben["written"]
+            result = box.run(
+                f"blender --background --python {shlex.quote(pfad)}",
+                timeout=int(timeout or BLENDER_TIMEOUT),
+            )
+        except SandboxUnavailable as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:  # pragma: no cover
+            return {"error": f"Die Werkstatt antwortet nicht: {exc}"}
+        self.stats.vm_calls += 1
+        payload = result.as_dict()
+        payload["script"] = pfad
+        return payload
+
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt den Tool-Call *name* mit *arguments* aus."""
         if name == "web_search":
@@ -1848,6 +1972,12 @@ class Toolbox:
             return self.vm_read(path=str(arguments.get("path", "")))
         if name == "vm_files":
             return self.vm_files(path=str(arguments.get("path", "") or ""))
+        if name == "blender_run":
+            return self.blender_run(
+                script=str(arguments.get("script", "")),
+                filename=str(arguments.get("filename", "") or ""),
+                timeout=int(arguments.get("timeout") or 0),
+            )
         if name == "calculate":
             return self.calculate(expression=str(arguments.get("expression", "")))
         if name == "remember":

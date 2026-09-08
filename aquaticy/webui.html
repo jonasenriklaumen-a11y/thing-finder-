@@ -1220,6 +1220,18 @@ input:focus,select:focus{border-color:var(--accent)}
         </div>
       </fieldset>
 
+      <fieldset><legend>Werkstatt</legend>
+        <label><span class="lbl">Größe <span class="why">Gilt für die nächste Werkstatt, die
+          entsteht — eine laufende ändert sich nicht mit</span></span>
+          <select name="AQUATICY_VM_SIZE">
+            <option value="normal">Normal — 1 Kern, 1 GB Arbeitsspeicher, 4 GB Speicher</option>
+            <option value="plus">Plus — 4 Kerne, 6 GB Arbeitsspeicher, 20 GB Speicher</option>
+          </select></label>
+        <div class="note">Normal reicht für die meisten Programmieraufgaben. Plus lohnt sich für
+          alles, was mehr Rechenleistung braucht — zum Beispiel, wenn Aquaticy im Code-Modus mit
+          Blender ein 3D-Design erstellen oder rendern soll.</div>
+      </fieldset>
+
       <fieldset><legend>Speicher</legend>
         <div class="check">
           <input type="checkbox" role="switch" class="schalter" id="memon" name="AQUATICY_MEMORY">

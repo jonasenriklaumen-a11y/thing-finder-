@@ -138,7 +138,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.2.5                                      │
+│ Aquaticy AI 9.3.0                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -626,6 +626,48 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   `AQUATICY_VM_IDLE_MINUTES`, `AQUATICY_VM_MEMORY_MB`, `AQUATICY_VM_DISK_GB`,
   `AQUATICY_VM_CPUS`.
 
+  **Größe der Werkstatt.** In den Einstellungen unter *Werkstatt* (oder per
+  `AQUATICY_VM_SIZE`) wählst du zwischen zwei Größen — gilt für die nächste
+  Werkstatt, die entsteht, nicht rückwirkend für eine laufende:
+
+  | Größe | Kerne | Arbeitsspeicher | Speicher |
+  |---|---|---|---|
+  | `normal` (Standard) | 1 | 1 GB | 4 GB |
+  | `plus` | 4 | 6 GB | 20 GB |
+
+  „Normal" reicht für die meisten Programmieraufgaben. „Plus" lohnt sich für
+  alles, was mehr Rechenleistung braucht — zum Beispiel Blender (siehe unten).
+  Wer einzelne Zahlen von Hand braucht, überschreibt sie weiterhin über
+  `AQUATICY_VM_CPUS` / `_MEMORY_MB` / `_DISK_GB`; das gewinnt dann gegenüber
+  der gewählten Größe.
+
+  **Blender — nur im Code-Modus.** In der Werkstatt kann Aquaticy auch mit
+  Blender arbeiten: 3D-Modelle bauen, Szenen einrichten, Materialien setzen,
+  rendern. Das Werkzeug `blender_run(script, filename, timeout)` schreibt ein
+  Python-Skript (die `bpy`-API) in die Werkstatt und startet es headless mit
+  `blender --background --python <datei>`; fertige Dateien (`.blend`, PNGs,
+  Exporte) liegen danach unter `/work` — dieselbe Stelle wie bei jedem
+  anderen Code-Auftrag, abrufbar über 🗀 oder `vm_files`.
+
+  Blender selbst bringt das Standardabbild (`python:3.12-slim`) nicht mit —
+  absichtlich, sonst würde jede Werkstatt hunderte Megabyte laden, die kaum
+  jemand für ein Python-Skript braucht. Ein fertiges Blender-Abbild baust du
+  mit dem mitgelieferten `docker/workshop-blender.Dockerfile`:
+
+  ```bash
+  docker build -f docker/workshop-blender.Dockerfile -t aquaticy-workshop-blender:local .
+  ```
+
+  und trägst es dann ein:
+
+  ```bash
+  AQUATICY_VM_IMAGE=aquaticy-workshop-blender:local
+  AQUATICY_VM_SIZE=plus
+  ```
+
+  Ohne dieses Abbild versucht Aquaticy es trotzdem — `blender_run` meldet dann
+  ganz gewöhnlich „command not found", keinen Sonderfehler, und sagt dir das.
+
   **Eigene VM als zusätzliche Grenze.** Aquaticy erstellt keine virtuelle Maschine
   für den Rechner selbst. Läuft Aquaticy aber in einer eigenen VM, arbeitet die
   Werkstatt innerhalb dieser VM; deren Speicher-, CPU- und Netzwerkgrenzen schützen
@@ -786,7 +828,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.2.5                                                   │
+│ Aquaticy AI 9.3.0                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1707,6 +1749,10 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `AQUATICY_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
 | `AQUATICY_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
 | `AQUATICY_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
+| `AQUATICY_VM_SIZE` | Größe der Werkstatt: `normal` oder `plus` | `normal` |
+| `AQUATICY_VM_IMAGE` | Abbild für die Werkstatt (z. B. mit Blender) | `python:3.12-slim` |
+| `AQUATICY_VM_IDLE_MINUTES` | Werkstatt löschen nach so vielen Minuten Ruhe | `20` |
+| `AQUATICY_VM_CPUS` / `_MEMORY_MB` / `_DISK_GB` | Grenzen von Hand statt der Größe | aus `AQUATICY_VM_SIZE` |
 | `AQUATICY_STORAGE_URL` | Adresse der Lagerverwaltung im Netz | — |
 | `AQUATICY_STORAGE_ACCESS` | `off`, `read` oder `write` | `read` |
 | `AQUATICY_GOOGLE` | Gmail und Kalender lesen dürfen | `false` |

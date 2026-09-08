@@ -42,9 +42,9 @@ from aquaticy.tools import (
     STORAGE_FIND_SCHEMA,
     SUBAGENT_SCHEMA,
     TOOL_SCHEMAS,
-    VM_SCHEMAS,
     EventHook,
     Toolbox,
+    vm_schemas_for,
 )
 
 SYSTEM_PROMPT = """\
@@ -491,6 +491,9 @@ Saetze, damit die Notiz spaeter fuer sich steht. In den Speicher gehoert nur Tex
 Bilder oder Dateien."""
 
 #: Wird angehaengt, wenn die Werkstatt eingeschaltet ist (nur im Code-Modus).
+#: %(cpus)s / %(kern_wort)s / %(memory_mb)s / %(disk_gb)s kommen aus den
+#: tatsaechlichen Einstellungen (normal/plus, siehe AQUATICY_VM_SIZE) --
+#: falsche Zahlen waeren schlimmer als gar keine.
 VM_PROMPT = """\
 
 Du hast eine Werkstatt: eine abgeschottete Maschine, in der du Code wirklich \
@@ -498,16 +501,24 @@ ausfuehren kannst.
 - `vm_write(path, text)` -- Datei anlegen (unter /work).
 - `vm_run(command, timeout)` -- Shell-Befehl ausfuehren, Ausgabe kommt zurueck.
 - `vm_read(path)` -- Datei wieder auslesen.
+- `blender_run(script, filename, timeout)` -- ein bpy-Skript headless in \
+Blender ausfuehren: 3D-Modelle bauen, Szenen einrichten, rendern. Nur da, \
+wenn das Werkstatt-Abbild Blender mitbringt -- sonst kommt "command not \
+found" zurueck, dann sag das dem Nutzer, statt es zu verschweigen.
 
 So arbeitest du damit: schreib den Code hinein, FUEHR IHN AUS, lies die Ausgabe, \
 und behebe, was schiefging, bevor du antwortest. Erst dann ist der Code \
 "lauffaehig" -- vorher ist es eine Behauptung. Ein kurzer Test oder ein \
 Aufrufbeispiel gehoert dazu; zeig in der Antwort, was dabei herauskam.
 
-Was die Werkstatt hat: einen Prozessorkern, ein Gigabyte Arbeitsspeicher, vier \
-Gigabyte Platte unter /work, Python und die ueblichen Werkzeuge. Was sie NICHT \
-hat: Netz. Kein `pip install`, kein `curl`, kein `apt-get` -- komm mit der \
-Standardbibliothek aus und sag es, wenn eine Fremdbibliothek noetig waere.
+Was die Werkstatt hat: %(cpus)s %(kern_wort)s, %(memory_mb)s MB Arbeitsspeicher, \
+%(disk_gb)s GB Platte unter /work, Python und die ueblichen Werkzeuge. Was sie \
+NICHT hat: Netz. Kein `pip install`, kein `curl`, kein `apt-get` -- komm mit \
+der Standardbibliothek aus und sag es, wenn eine Fremdbibliothek noetig waere. \
+Reicht die Groesse fuer eine Aufgabe nicht (ein Blender-Rendering zum Beispiel \
+braucht mehr als einen Kern), sag dem Nutzer, dass die Werkstatt-Groesse in \
+den Einstellungen auf "Plus" gestellt werden kann -- fuer die naechste \
+Werkstatt, nicht fuer diese hier.
 
 Die Grenze: Du arbeitest INNERHALB der Werkstatt. Du versuchst nicht, aus ihr \
 auszubrechen, den Rechner des Nutzers zu erreichen, die Abschottung zu \
@@ -997,7 +1008,7 @@ class Agent:
         # Die Werkstatt gibt es nur im Code-Modus -- beim Recherchieren waere
         # eine Maschine, in der man Programme startet, nur eine Ablenkung.
         if self.workshop_on:
-            extra.extend(VM_SCHEMAS)
+            extra.extend(vm_schemas_for(self.settings))
         # Subagenten bekommen diese Liste nie -- sie arbeiten mit TOOL_SCHEMAS
         # allein. Einstellungen aendert also nur der Hauptagent, und das ist
         # genau richtig so.
@@ -1580,7 +1591,13 @@ class Agent:
                 text += PRO_PROMPT % {"agents": self.agent_limit}
         text += ASK_PROMPT if self.toolbox.ask_handler is not None else NO_ASK_PROMPT
         if self.workshop_on:
-            text += VM_PROMPT
+            cpus = max(1, int(self.settings.vm_cpus or 1))
+            text += VM_PROMPT % {
+                "cpus": cpus,
+                "kern_wort": "Prozessorkern" if cpus == 1 else "Prozessorkerne",
+                "memory_mb": max(1, int(self.settings.vm_memory_mb or 1024)),
+                "disk_gb": max(1, int(self.settings.vm_disk_gb or 4)),
+            }
         if not self.online:
             text += OFFLINE_PROMPT
         return text + self._person_prompt()

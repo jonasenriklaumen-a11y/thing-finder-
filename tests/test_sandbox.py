@@ -362,3 +362,23 @@ def test_ohne_laufende_werkstatt_ist_die_liste_leer(monkeypatch: pytest.MonkeyPa
     box = werkstatt.Sandbox()
     assert box.list_files() == []
 
+
+
+def test_vm_sizes_cover_normal_and_plus() -> None:
+    """normal entspricht den alten festen Zahlen, plus gibt deutlich mehr."""
+    assert werkstatt.VM_SIZES["normal"] == {
+        "cpus": werkstatt.CPUS,
+        "memory_mb": werkstatt.MEMORY_MB,
+        "disk_gb": werkstatt.DISK_GB,
+    }
+    plus = werkstatt.VM_SIZES["plus"]
+    normal = werkstatt.VM_SIZES["normal"]
+    assert plus["cpus"] > normal["cpus"]
+    assert plus["memory_mb"] > normal["memory_mb"]
+    assert plus["disk_gb"] > normal["disk_gb"]
+
+
+def test_blender_timeout_is_longer_than_a_normal_command() -> None:
+    """Ein Rendering braucht laenger als ein gewoehnlicher Befehl -- aber
+    bleibt trotzdem innerhalb der harten Obergrenze."""
+    assert werkstatt.COMMAND_TIMEOUT < werkstatt.BLENDER_TIMEOUT <= werkstatt.MAX_TIMEOUT

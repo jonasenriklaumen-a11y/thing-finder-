@@ -19,6 +19,10 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         "AQUATICY_COUNTRY",
         "AQUATICY_MAX_TOOL_CALLS",
         "AQUATICY_DATA_DIR",
+        "AQUATICY_VM_SIZE",
+        "AQUATICY_VM_CPUS",
+        "AQUATICY_VM_MEMORY_MB",
+        "AQUATICY_VM_DISK_GB",
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "BRAVE_API_KEY",
@@ -329,3 +333,55 @@ def test_an_explicit_parallelism_is_never_exceeded() -> None:
     """Wer sechs eingestellt hat, bekommt auch im Pro-Modus sechs."""
     settings = config.Settings(model="ollama_chat/x", subagent_parallel=6)
     assert settings.parallel_for(24) == 6
+
+
+# ---------------------------------------------------------------------------
+# Werkstatt-Groesse: normal oder plus
+# ---------------------------------------------------------------------------
+def test_the_default_size_matches_the_old_fixed_numbers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Wer nichts einstellt, bekommt genau das, was vor der Groesse galt."""
+    monkeypatch.setenv("AQUATICY_DATA_DIR", str(tmp_path / "data"))
+    settings = config.get_settings()
+    assert settings.vm_size == "normal"
+    assert settings.vm_cpus == 1
+    assert settings.vm_memory_mb == 1024
+    assert settings.vm_disk_gb == 4
+
+
+def test_plus_gives_more_of_everything(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AQUATICY_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("AQUATICY_VM_SIZE", "plus")
+    settings = config.get_settings()
+    assert settings.vm_size == "plus"
+    assert settings.vm_cpus == 4
+    assert settings.vm_memory_mb == 6144
+    assert settings.vm_disk_gb == 20
+
+
+def test_an_unknown_size_falls_back_to_normal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("AQUATICY_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("AQUATICY_VM_SIZE", "gigantisch")
+    settings = config.get_settings()
+    assert settings.vm_size == "normal"
+    assert settings.vm_cpus == 1
+
+
+def test_a_hand_picked_number_wins_over_the_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Wer einzeln schraubt, weiss was er tut -- das gewinnt gegenueber der Groesse."""
+    monkeypatch.setenv("AQUATICY_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("AQUATICY_VM_SIZE", "plus")
+    monkeypatch.setenv("AQUATICY_VM_CPUS", "2")
+    settings = config.get_settings()
+    assert settings.vm_size == "plus"
+    assert settings.vm_cpus == 2
+    # Die anderen beiden Zahlen kommen weiterhin aus der Groesse.
+    assert settings.vm_memory_mb == 6144
+    assert settings.vm_disk_gb == 20

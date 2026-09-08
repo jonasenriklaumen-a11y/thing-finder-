@@ -255,8 +255,11 @@ class Settings:
     #: Modell fuer den Code-Modus. Leer heisst: Aquaticy sucht sich das
     #: staerkste erreichbare selbst aus.
     code_model: str = ""
-    #: Die Werkstatt im Code-Modus: Abbild und Grenzen. Aenderbar nur ueber
-    #: die .env -- wer hier schraubt, weiss, was er tut.
+    #: Die Werkstatt im Code-Modus: Abbild und Grenzen. Die Groesse waehlt
+    #: man in den Einstellungen ("normal" oder "plus", siehe VM_SIZES in
+    #: aquaticy/sandbox.py); die einzelnen Zahlen bleiben zusaetzlich per
+    #: .env ueberschreibbar, fuer wer genauer schrauben will.
+    vm_size: str = "normal"
     vm_image: str = ""
     vm_idle_minutes: int = 20
     vm_memory_mb: int = 1024
@@ -494,8 +497,14 @@ class Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Settings aus der Umgebung lesen (Ergebnis wird gecacht)."""
+    from aquaticy.sandbox import VM_SIZES
+
     env_path = load_env()
     data_dir = Path(_env_str("AQUATICY_DATA_DIR") or str(Path.home() / ".aquaticy"))
+    vm_size = _env_str("AQUATICY_VM_SIZE", "normal").strip().lower()
+    if vm_size not in VM_SIZES:
+        vm_size = "normal"
+    vm_preset = VM_SIZES[vm_size]
     settings = Settings(
         model=_env_str("AQUATICY_MODEL", DEFAULT_MODEL),
         vision_model=_env_str("AQUATICY_VISION_MODEL"),
@@ -517,11 +526,14 @@ def get_settings() -> Settings:
         context_tokens=_env_int("AQUATICY_CONTEXT_TOKENS", 16384),
         subagent_model=_env_str("AQUATICY_SUBAGENT_MODEL"),
         code_model=_env_str("AQUATICY_CODE_MODEL"),
+        vm_size=vm_size,
         vm_image=_env_str("AQUATICY_VM_IMAGE"),
         vm_idle_minutes=_env_int("AQUATICY_VM_IDLE_MINUTES", 20),
-        vm_memory_mb=_env_int("AQUATICY_VM_MEMORY_MB", 1024),
-        vm_disk_gb=_env_int("AQUATICY_VM_DISK_GB", 4),
-        vm_cpus=_env_int("AQUATICY_VM_CPUS", 1),
+        # Die einzelnen Zahlen ergeben sich aus der Groesse -- ausser jemand
+        # traegt von Hand eine eigene ein, die gewinnt dann.
+        vm_memory_mb=_env_int("AQUATICY_VM_MEMORY_MB", 0) or vm_preset["memory_mb"],
+        vm_disk_gb=_env_int("AQUATICY_VM_DISK_GB", 0) or vm_preset["disk_gb"],
+        vm_cpus=_env_int("AQUATICY_VM_CPUS", 0) or vm_preset["cpus"],
         subagent_budget=_env_int("AQUATICY_SUBAGENT_BUDGET", 6),
         subagent_parallel=_env_int("AQUATICY_SUBAGENT_PARALLEL", 0),
         ha_url=_env_str("AQUATICY_HA_URL"),

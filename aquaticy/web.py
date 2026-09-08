@@ -217,6 +217,7 @@ SETTING_KEYS: tuple[str, ...] = (
     "AQUATICY_LAN_ENABLED",
     "AQUATICY_LAN_SUBNET",
     "AQUATICY_MEMORY",
+    "AQUATICY_VM_SIZE",
 )
 
 #: Zahlenfelder mit dem Bereich, in dem sie sinnvoll sind. Geprueft wird
@@ -239,6 +240,7 @@ NUMBERS: dict[str, tuple[int, int]] = {
 #: Felder, die nur bestimmte Woerter annehmen.
 CHOICES: dict[str, tuple[str, ...]] = {
     "AQUATICY_STORAGE_ACCESS": ("off", "read", "write"),
+    "AQUATICY_VM_SIZE": ("normal", "plus"),
 }
 
 #: Wie lang ein Formularwert hoechstens sein darf. Eine Adresse ist keine
@@ -978,6 +980,7 @@ def current_values() -> dict[str, str]:
         "AQUATICY_LAN_ENABLED": "true" if settings.lan_enabled else "false",
         "AQUATICY_LAN_SUBNET": settings.lan_subnet,
         "AQUATICY_MEMORY": "true" if settings.memory_enabled else "false",
+        "AQUATICY_VM_SIZE": settings.vm_size,
     }
 
 

@@ -71,6 +71,22 @@ CPUS = 1
 MEMORY_MB = 1024
 DISK_GB = 4
 
+#: Zwei Groessen fuer die Werkstatt, waehlbar in den Einstellungen
+#: (AQUATICY_VM_SIZE). "normal" ist der Alltag -- ein Skript schreiben,
+#: ausfuehren, die Ausgabe lesen. "plus" gibt es fuer alles, was mehr
+#: Rechenleistung braucht: ein Blender-Rendering zum Beispiel bringt mit
+#: einem Kern und einem Gigabyte kaum ein Bild zustande, bevor die Zeit
+#: ablaeuft.
+VM_SIZES: dict[str, dict[str, int]] = {
+    "normal": {"cpus": CPUS, "memory_mb": MEMORY_MB, "disk_gb": DISK_GB},
+    "plus": {"cpus": 4, "memory_mb": 6144, "disk_gb": 20},
+}
+
+#: Wie lange ein Blender-Rendering laufen darf. Laenger als ein gewoehnlicher
+#: Befehl (COMMAND_TIMEOUT) -- schon eine einfache Szene braucht mehrere
+#: Sekunden je Bild --, aber wie jeder Befehl durch MAX_TIMEOUT gedeckelt.
+BLENDER_TIMEOUT = 90
+
 #: Prozesse und offene Dateien. Beides deckelt eine Gabelbombe.
 PID_LIMIT = 256
 FILE_LIMIT = 512
