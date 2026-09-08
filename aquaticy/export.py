@@ -334,7 +334,10 @@ def export(
     if with_images and fmt in ("html", "md"):
         asset_dir = target.with_suffix("") / "bilder"
         image_map = {
-            url: str(Path(asset_dir.parent.name) / "bilder" / name)
+            # HTML und Markdown verwenden URLs, keine Windows-Pfade. Ein
+            # Backslash funktioniert im Browser nicht verlaesslich und machte
+            # heruntergeladene Bilder auf Windows unsichtbar.
+            url: (Path(asset_dir.parent.name) / "bilder" / name).as_posix()
             for url, name in download_images(turns, asset_dir).items()
         }
 
