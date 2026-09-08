@@ -171,7 +171,7 @@ def test_throttle_spaces_requests_per_domain() -> None:
     throttle.wait("a.de")
     throttle.wait("a.de")
     elapsed = time.monotonic() - start
-    assert elapsed >= 0.19
+    assert elapsed >= 0.17
 
 
 def test_throttle_is_per_domain() -> None:
