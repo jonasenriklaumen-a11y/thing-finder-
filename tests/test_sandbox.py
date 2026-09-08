@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -361,6 +362,15 @@ def test_dateiliste_nennt_pfad_und_groesse(monkeypatch: pytest.MonkeyPatch) -> N
 def test_ohne_laufende_werkstatt_ist_die_liste_leer(monkeypatch: pytest.MonkeyPatch) -> None:
     box = werkstatt.Sandbox()
     assert box.list_files() == []
+
+
+def test_each_account_gets_its_own_workshop(tmp_path) -> None:
+    werkstatt.forget_shared()
+    one = SimpleNamespace(data_dir=tmp_path / "one")
+    two = SimpleNamespace(data_dir=tmp_path / "two")
+    assert werkstatt.shared(one) is werkstatt.shared(one)
+    assert werkstatt.shared(one) is not werkstatt.shared(two)
+    werkstatt.forget_shared()
 
 
 

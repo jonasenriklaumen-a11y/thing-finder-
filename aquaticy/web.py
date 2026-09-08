@@ -404,6 +404,10 @@ def _profile_settings(profile: Path, plan: str) -> Settings:
         settings.ha_control = False
         settings.storage_url = ""
         settings.storage_access = "off"
+        settings.vm_size = "normal"
+        settings.vm_cpus = 1
+        settings.vm_memory_mb = 1024
+        settings.vm_disk_gb = 4
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     return settings
 
@@ -532,6 +536,7 @@ class ChatSession:
         wechselt, will ein anderes Modell -- nicht ein anderes Gespraech.
         """
         with self._lock:
+            old_settings = self._settings
             if self._agent is not None:
                 self._carry_over = str(getattr(self._agent, "session_id", ""))
                 with contextlib.suppress(Exception):
@@ -543,7 +548,7 @@ class ChatSession:
             with contextlib.suppress(Exception):
                 from aquaticy.sandbox import forget_shared
 
-                forget_shared()
+                forget_shared(old_settings)
 
     def _settings_dirty(self) -> None:
         """Merkt vor, dass der Agent neu gebaut werden muss.
@@ -588,6 +593,7 @@ class ChatSession:
         effort: str = "",
         online: bool | None = None,
         sandbox: bool | None = None,
+        agents: int | None = None,
     ) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
@@ -611,6 +617,7 @@ class ChatSession:
             with self._lock:
                 self._drain_answers()
                 agent = self.agent()
+                previous_agent_limit = getattr(agent, "_agent_limit_override", None)
                 try:
                     agent.on_event = lambda name, payload: emit(name, payload)
                     agent.toolbox.on_event = agent.on_event
@@ -619,6 +626,7 @@ class ChatSession:
                     # noch mit den alten Werten weiter.
                     agent.toolbox.on_settings_changed = self._settings_dirty
                     agent.set_ask_handler(self._ask_browser)
+                    agent._agent_limit_override = agents
                     if message.startswith("/image"):
                         message = self._image_question(agent, message)
                     elif attachments:
@@ -639,6 +647,7 @@ class ChatSession:
                         sandbox=sandbox,
                     )
                 finally:
+                    agent._agent_limit_override = previous_agent_limit
                     agent.on_event = None
                     agent.toolbox.on_event = None
                     agent.toolbox.on_settings_changed = None
@@ -1238,7 +1247,7 @@ def save_values(payload: dict[str, Any]) -> Path:
             schlimmer als gar keine.
     """
     session = SESSION.current() if isinstance(SESSION, SessionProxy) else SESSION
-    if not session.pro and any(
+    pro_integration = any(
         key in payload
         for key in (
             "AQUATICY_HA_URL",
@@ -1249,8 +1258,13 @@ def save_values(payload: dict[str, Any]) -> Path:
             "AQUATICY_STORAGE_URL",
             "AQUATICY_STORAGE_ACCESS",
         )
-    ):
-        raise ValueError("LAN-Suche, Home Assistant und Lagerverwaltung brauchen ein Pro-Konto.")
+    )
+    plus_workshop = str(payload.get("AQUATICY_VM_SIZE", "")).strip() == "plus"
+    if not session.pro and (pro_integration or plus_workshop):
+        raise ValueError(
+            "LAN-Suche, Home Assistant, Lagerverwaltung und die Plus-Werkstatt "
+            "brauchen ein Pro-Konto."
+        )
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
     }
@@ -1922,6 +1936,9 @@ class Handler(BaseHTTPRequestHandler):
             settings = SESSION.settings()
             self._json(UsageLog(settings.db_path).summary())
         elif route == "/api/system":
+            if not SESSION.pro:
+                self._json({"error": "Die Auslastungsanzeige braucht ein Pro-Konto."}, 403)
+                return
             from aquaticy.system import snapshot
 
             settings = SESSION.settings()
@@ -2406,7 +2423,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         # aus dem Cache soll deswegen nicht aufhoeren zu arbeiten.
         wunsch = {
             name: payload[name]
-            for name in ("mode", "effort", "structured", "recheck", "online", "sandbox")
+            for name in (
+                "mode", "effort", "structured", "recheck", "online", "sandbox", "agents"
+            )
             if name in payload
         }
         if "structured" not in wunsch and "thinking" in payload:
@@ -2427,6 +2446,8 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         recheck = bool(stand["recheck"])
         online = bool(stand["online"])
         sandbox = bool(stand["sandbox"])
+        agents = int(stand.get("agents", 12))
+        agents = max(1, min(50 if mode == "pro" else 12, agents))
         # Und was der Modus ausblendet, gilt auch nicht -- das entscheidet der
         # Server, nicht der Browser: im Code-Modus wird immer nachgeschlagen.
         # Das Gegenpruefen geht unveraendert durch; was es bedeutet,
@@ -2470,6 +2491,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                     effort=effort,
                     online=online,
                     sandbox=sandbox,
+                    agents=agents,
                 )
             except Exception as exc:
                 lauf.add({"type": "error", "message": f"{type(exc).__name__}: {exc}"})

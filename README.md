@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.1                                      │
+│ Aquaticy AI 9.4.2                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -264,9 +264,10 @@ bearbeiten, bevor der Hauptagent übernimmt:
 **Es sind immer alle.** Ein Planer, der drei Teilfragen liefert, während zwölf Agenten
 bereitstehen, lässt zwölf Agenten zu dritt suchen — und die Antwort ist so dünn wie die
 Zerlegung. Deshalb wird die Liste auf die volle Zahl **aufgefüllt**: erst fragt der Planer
-nach genau so vielen Teilfragen, wie Agenten da sind (12 im Standardmodus; im Pro-Modus
-entscheidet der **Master** die Zahl, bis zu 44 bei Mistral, bis zu 12 bei
-NVIDIA, und `/max` macht daraus alle), und was
+nach genau so vielen Teilfragen, wie Agenten da sind. Die Zahl stellst du direkt in der
+Modellauswahl ein: **1 bis 12** in Normal und Code, **1 bis 50** in Pro. Der Master
+entscheidet weiterhin, wie viele davon eine konkrete Frage wirklich braucht; `/max`
+setzt die gewählte Mannschaft vollständig ein. Was
 dann noch fehlt, entsteht aus derselben Frage unter einem anderen
 Blickwinkel — Preise und Kosten, Erfahrungen und Kritik, aktuelle Änderungen, offizielle
 Angaben, Alternativen, Tests, Bedingungen, Anfahrt und Öffnungszeiten. Das ist keine
@@ -287,8 +288,8 @@ gemischt (RRF), und es kostet trotzdem nur *einen* Aufruf von seinem knappen Bud
 Gleichlautende Teilfragen werden vor dem Start aussortiert: zwei gleiche Aufträge lesen
 dieselben Seiten und melden dasselbe zurück — bezahlt wird beides.
 
-**Rollen statt lauter gleicher Agenten.** Vierundzwanzig identische Agenten suchen
-vierundzwanzigmal dasselbe: was oben in den Treffern steht. Deshalb bekommt jede
+**Rollen statt lauter gleicher Agenten.** Viele identische Agenten suchen sonst
+mehrfach dasselbe: was oben in den Treffern steht. Deshalb bekommt jede
 Teilfrage einen Blickwinkel, abgeleitet aus ihrem Wortlaut — reine Textarbeit, kein
 Modellaufruf, keine Wartezeit:
 
@@ -509,10 +510,8 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   die Aufträge verteilt und die Rückmeldungen bewertet, muss die Frage so gut
   verstehen wie der, der sie beantwortet. Er macht drei Dinge:
 
-  1. **Beauftragen.** Er entscheidet, wie viele Agenten die Frage braucht —
-     bis zu **44** bei Mistral, bis zu **12** bei NVIDIA (dessen
-     Freikontingent nur 40 Anfragen pro Minute erlaubt — mehr Agenten würden
-     dort nur länger warten, nicht mehr finden) —, und gibt jedem einen
+  1. **Beauftragen.** Er entscheidet innerhalb der am Regler gewählten Grenze,
+     wie viele Agenten die Frage braucht — in Pro zwischen **1 und 50** — und gibt jedem einen
      eigenen Auftrag *und* eine eigene
      Rolle, in seinen Worten („sucht Betreiberseiten statt Portale", „achtet
      auf Preise und deren Stand"). Zwei Aufträge darf er als schwer markieren;
@@ -535,13 +534,12 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
 
   **`/max`.** Ohne den Befehl entscheidet der Master die Zahl. Mit ihm sind es
   alle: `/max Welche Fahrradläden in Bremen reparieren Lastenräder?` stellt die
-  volle Mannschaft auf — 44 Agenten bei Mistral (12 bei NVIDIA), die beiden
-  starken dazu und, wenn *Gegenprüfen* an ist, die vier Prüfer. Bleibt der
+  volle am Regler gewählte Mannschaft auf. Die beiden starken Agenten und,
+  wenn *Gegenprüfen* an ist, die vier Prüfer behalten ihre bisherigen Aufgaben. Bleibt der
   Master unter der Zahl, wird mit Blickwinkeln aufgefüllt. `/max` allein
   getippt erklärt sich selbst.
 
-  **Gegenprüfen heißt hier: vier Prüfer** (44 + 2 + 4 = 50 bei Mistral,
-  12 + 2 + 4 = 18 bei NVIDIA). Sie recherchieren
+  **Gegenprüfen heißt hier: vier Prüfer.** Sie recherchieren
   nicht, sie kontrollieren: jedes fertige Teilergebnis wird auf **anderen
   Seiten** gegengelesen — und zwar *während* die übrigen Agenten noch suchen,
   nicht danach. Ist die Recherche durch, helfen die frei gewordenen Agenten
@@ -632,7 +630,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   | Größe | Kerne | Arbeitsspeicher | Speicher |
   |---|---|---|---|
   | `normal` (Standard) | 1 | 1 GB | 4 GB |
-  | `plus` | 4 | 6 GB | 20 GB |
+  | `plus` (Pro-Konto) | 4 | 6 GB | 20 GB |
 
   „Normal" reicht für die meisten Programmieraufgaben. „Plus" lohnt sich für
   alles, was mehr Rechenleistung braucht — zum Beispiel Blender (siehe unten).
@@ -771,7 +769,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   eine Testsuche los — dasselbe, was `aquaticy setup` am Ende macht. Geprüft wird, was
   gerade im Formular steht, nicht der gespeicherte Stand; so sieht man vor dem
   Speichern, ob ein Schlüssel stimmt.
-* **Auslastung** unter *Einstellungen → Auslastung*: Der Haken „Auslastung des
+* **Auslastung** für Pro-Konten unter *Einstellungen → Auslastung*: Der Haken „Auslastung des
   Rechners anzeigen" blendet Prozessor, Arbeitsspeicher, Festplatte, Grafikkarte und
   den belegten Speicher als Kacheln ein — alle vier Sekunden aufgefrischt, solange das
   Einstellungsfenster offen ist. Standardmäßig aus; der Haken bleibt im Browser
@@ -827,7 +825,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.1                                                   │
+│ Aquaticy AI 9.4.2                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -858,8 +856,8 @@ dort „privates Netzwerk" erlauben. Unter Linux mit ufw: `sudo ufw allow 8765/t
 Ohne Tailscale müssen beide Geräte im selben Netz sein (nicht eines im
 WLAN-Gastzugang).
 
-Jedes Konto hat eigene Chats, Einstellungen, Aufträge und Speicherdateien. Mehrere
-Konten können gleichzeitig mit Aquaticy arbeiten. Innerhalb eines Kontos werden zwei
+Jedes Konto hat eigene Chats, Einstellungen, Aufträge, Speicherdateien und eine eigene
+Werkstatt. Mehrere Konten können gleichzeitig mit Aquaticy arbeiten. Innerhalb eines Kontos werden zwei
 gleichzeitig gestellte Fragen geordnet, damit der Gesprächsverlauf verständlich bleibt.
 Ins offene Internet stellt `--lan` nichts: dafür bräuchte es zusätzlich eine
 Portfreigabe im Router. Über Tailscale erreichst du aquaticy auch von unterwegs,
@@ -1730,7 +1728,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `AQUATICY_LOCATION` | Standard-Ortsfilter | — |
 | `AQUATICY_LANG` / `AQUATICY_COUNTRY` | Sprache / Land der Suche | `de` / `de` |
 | `AQUATICY_MAX_TOOL_CALLS` | Werkzeug-Budget je Anfrage | `20` |
-| `AQUATICY_MAX_SUBAGENTS` | Subagenten je Anfrage (`0` = aus; im Pro-Modus bis 44 bei Mistral, bis 12 bei NVIDIA) | `12` |
+| `AQUATICY_MAX_SUBAGENTS` | Fallback für Terminal/alte Clients; im Web steht der Regler bei der Modellauswahl (Normal/Code 1–12, Pro 1–50) | `12` |
 | `AQUATICY_SUBAGENTS_AUTO` | jede Anfrage automatisch zerlegen | `true` |
 | `AQUATICY_TRIAGE_TIMEOUT` | Zeitlimit der Small-Talk-Heuristik (s) | `5` |
 | `AQUATICY_PLANNER_TIMEOUT` | Zeitlimit für Prüfung + Planung (s) | `20` |
@@ -1746,7 +1744,7 @@ Alle Werte kommen aus der `.env` (siehe [`.env.example`](.env.example)):
 | `AQUATICY_FETCH_TIMEOUT` | Timeout je Seitenabruf (s) | `15` |
 | `AQUATICY_CACHE_TTL_HOURS` | Gültigkeit des Response-Cache | `24` |
 | `AQUATICY_ENABLE_PLAYWRIGHT` | Stufe-3-Fallback erlauben | `true` |
-| `AQUATICY_VM_SIZE` | Größe der Werkstatt: `normal` oder `plus` | `normal` |
+| `AQUATICY_VM_SIZE` | Größe der Werkstatt: `normal` oder `plus` (Plus nur mit Pro-Konto) | `normal` |
 | `AQUATICY_VM_IMAGE` | Abbild für die Werkstatt (z. B. mit Blender) | `python:3.12-slim` |
 | `AQUATICY_VM_IDLE_MINUTES` | Werkstatt löschen nach so vielen Minuten Ruhe | `20` |
 | `AQUATICY_VM_CPUS` / `_MEMORY_MB` / `_DISK_GB` | Grenzen von Hand statt der Größe | aus `AQUATICY_VM_SIZE` |

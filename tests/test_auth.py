@@ -85,7 +85,8 @@ def test_normal_profile_cannot_enable_pro_integrations(tmp_path, monkeypatch) ->
         "AQUATICY_HA_URL=http://homeassistant:8123\n"
         "HA_TOKEN=secret\n"
         "AQUATICY_STORAGE_URL=http://lager:3000\n"
-        "AQUATICY_STORAGE_ACCESS=write\n",
+        "AQUATICY_STORAGE_ACCESS=write\n"
+        "AQUATICY_VM_SIZE=plus\n",
         encoding="utf-8",
     )
     account = Account("u1", "a@example.org", "normal", 0)
@@ -93,3 +94,5 @@ def test_normal_profile_cannot_enable_pro_integrations(tmp_path, monkeypatch) ->
     assert settings.lan_enabled is False
     assert settings.ha_url == "" and settings.ha_token == ""
     assert settings.storage_url == "" and settings.storage_access == "off"
+    assert settings.vm_size == "normal"
+    assert (settings.vm_cpus, settings.vm_memory_mb, settings.vm_disk_gb) == (1, 1024, 4)

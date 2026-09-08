@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import sqlite3
+import subprocess
 import threading
 import time
 from collections import defaultdict, deque
@@ -104,10 +105,36 @@ def pro_code_for(data_dir: Path) -> str:
 
 
 def secure_directory(path: Path) -> None:
-    """Beschraenkt ein Datenverzeichnis samt neu angelegter Dateien."""
+    """Beschraenkt ein Datenverzeichnis samt neu angelegter Dateien.
+
+    Unter Windows reicht ``chmod`` nicht: dort entfernen wir die geerbten
+    Rechte und geben nur dem Konto des Serverprozesses Vollzugriff. Damit
+    erben auch SQLite-WAL-Dateien und neue Uploads dieselbe Grenze.
+    """
     path.mkdir(parents=True, exist_ok=True)
     with suppress(OSError):
         path.chmod(0o700)
+    if os.name != "nt":
+        return
+    user = ""
+    with suppress(OSError, subprocess.TimeoutExpired):
+        identity = subprocess.run(
+            ["whoami"], check=False, capture_output=True, text=True, timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        user = (identity.stdout or "").strip()
+    user = user or os.environ.get("USERNAME", "").strip()
+    if not user:
+        return
+    with suppress(OSError, subprocess.TimeoutExpired):
+        subprocess.run(
+            [
+                "icacls", str(path), "/inheritance:r", "/grant:r",
+                f"{user}:(OI)(CI)F",
+            ],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
 
 
 class RateLimiter:

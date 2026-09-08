@@ -56,6 +56,10 @@ MODES = ("normal", "code", "pro")
 #: Wie lange das Modell ueberlegen darf.
 EFFORTS = ("low", "medium", "high")
 
+#: Die Oberflaeche merkt die gewaehlte Mannschaft. Ob fuer das Konto 12 oder
+#: 50 erlaubt sind, entscheidet erst die authentifizierte Webroute.
+AGENT_COUNTS = range(1, 51)
+
 #: Jedes Feld mit seinem Standard und dem, was erlaubt ist. `bool` heisst:
 #: ein Wahrheitswert, alles andere eine Liste zulaessiger Zeichenketten.
 FIELDS: dict[str, tuple[Any, Any]] = {
@@ -70,6 +74,7 @@ FIELDS: dict[str, tuple[Any, Any]] = {
     "denken": (False, bool),
     "tracing": (False, bool),
     "load": (False, bool),
+    "agents": (12, AGENT_COUNTS),
 }
 
 #: Was aus dem Browser als "ja" durchgeht. Alles andere ist nein -- und
@@ -128,6 +133,13 @@ def clean(raw: Any, *, base: dict[str, Any] | None = None) -> dict[str, Any]:
         wert = raw[name]
         if erlaubt is bool:
             stand[name] = clean_flag(wert, bool(stand.get(name, standard)))
+        elif isinstance(erlaubt, range):
+            try:
+                zahl = int(wert)
+            except (TypeError, ValueError):
+                continue
+            if zahl in erlaubt:
+                stand[name] = zahl
         else:
             text = str(wert or "").strip()
             stand[name] = text if text in erlaubt else stand.get(name, standard)

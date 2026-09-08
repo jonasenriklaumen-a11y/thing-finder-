@@ -29,6 +29,7 @@ def test_the_default_state_is_complete() -> None:
     assert stand["mode"] == "normal"
     assert stand["effort"] == "medium"
     assert stand["online"] is True
+    assert stand["agents"] == 12
     # Alles, was Zeit kostet, ist aus, bis es jemand einschaltet.
     for aus in ("structured", "recheck", "sandbox", "denken", "tracing", "load"):
         assert stand[aus] is False
@@ -90,6 +91,10 @@ def test_every_allowed_value_really_passes() -> None:
         assert clean({"effort": effort})["effort"] == effort
     for palette in PALETTES:
         assert clean({"palette": palette})["palette"] == palette
+    assert clean({"agents": 1})["agents"] == 1
+    assert clean({"agents": "50"})["agents"] == 50
+    assert clean({"agents": 0})["agents"] == 12
+    assert clean({"agents": 51})["agents"] == 12
 
 
 def test_the_state_survives_a_restart(tmp_path: Path) -> None:

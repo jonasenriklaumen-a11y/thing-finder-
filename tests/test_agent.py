@@ -3057,6 +3057,18 @@ def test_the_pro_mode_may_send_more_agents(settings: Settings, toolbox: Toolbox)
     assert agent.agent_limit == 12
 
 
+def test_the_turn_slider_overrides_the_default_with_mode_caps(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent._agent_limit_override = 50
+    assert agent.agent_limit == 12
+    agent._apply_mode("pro")
+    assert agent.agent_limit == 50
+    agent._agent_limit_override = 1
+    assert agent.agent_limit == 1
+
+
 def test_nvidia_gets_a_smaller_pro_squad(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
@@ -3078,12 +3090,12 @@ def test_nvidia_gets_a_smaller_pro_squad(
     assert agent.strong_count == 2
 
 
-def test_a_high_setting_survives_the_pro_mode(settings: Settings, toolbox: Toolbox) -> None:
-    """Wer selbst mehr eingestellt hat, verliert sie im Pro-Modus nicht."""
+def test_a_high_setting_is_capped_in_the_pro_mode(settings: Settings, toolbox: Toolbox) -> None:
+    """Auch eine alte Umgebungsvariable darf die neue Obergrenze nicht umgehen."""
     settings.max_subagents = 60
     agent = Agent(settings, cache=None, toolbox=toolbox)
     agent._apply_mode("pro")
-    assert agent.agent_limit == 60
+    assert agent.agent_limit == 50
 
 
 def test_switched_off_agents_stay_off_in_the_pro_mode(

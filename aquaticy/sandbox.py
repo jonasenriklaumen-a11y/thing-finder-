@@ -61,6 +61,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 #: Wie lange die Werkstatt nach der letzten Nutzung stehen bleibt.
@@ -847,10 +848,11 @@ def sweep(runtime: Runtime | None = None) -> int:
     return len(ids)
 
 
-#: Eine Werkstatt je Programm. Mehrere gleichzeitig waeren mehrere
-#: Gigabyte, die im Hintergrund liegen -- und niemand braucht zwei.
-_shared: Sandbox | None = None
+#: Eine Werkstatt je Kontoprofil. So koennen mehrere Nutzer gleichzeitig
+#: arbeiten, ohne Dateien, Prozesse oder Ereignisse miteinander zu teilen.
+_shared: dict[str, Sandbox] = {}
 _shared_lock = threading.Lock()
+_shared_registered = False
 
 
 #: Kein Empfaenger uebergeben ist etwas anderes als "ab jetzt niemand".
@@ -858,18 +860,22 @@ _KEEP = object()
 
 
 def shared(settings: Any = None, on_event: Any = _KEEP) -> Sandbox:
-    """Die gemeinsame Werkstatt dieses Programms.
+    """Die Werkstatt des aktuellen Kontoprofils.
 
     Wer keinen Empfaenger uebergibt, laesst den bestehenden stehen: sonst
     haette ein Blick auf die Dateiliste mitten in einer Anfrage die
     Live-Anzeige stumm geschaltet.
     """
-    global _shared
+    global _shared_registered
+    data_dir = getattr(settings, "data_dir", None)
+    key = str(Path(data_dir).resolve()) if data_dir else "__default__"
     with _shared_lock:
-        if _shared is None:
-            # Genau einmal: sonst haelt atexit jede je gebaute Werkstatt fest.
+        if not _shared_registered:
             atexit.register(_stop_shared)
-            _shared = Sandbox(
+            _shared_registered = True
+        box = _shared.get(key)
+        if box is None:
+            box = Sandbox(
                 image=getattr(settings, "vm_image", "") or DEFAULT_IMAGE,
                 idle_minutes=int(
                     getattr(settings, "vm_idle_minutes", IDLE_MINUTES) or IDLE_MINUTES
@@ -878,23 +884,26 @@ def shared(settings: Any = None, on_event: Any = _KEEP) -> Sandbox:
                 disk_gb=int(getattr(settings, "vm_disk_gb", DISK_GB) or DISK_GB),
                 cpus=int(getattr(settings, "vm_cpus", CPUS) or CPUS),
             )
+            _shared[key] = box
         if on_event is not _KEEP:
-            _shared.on_event = on_event
-        return _shared
+            box.on_event = on_event
+        return box
 
 
 def _stop_shared() -> None:
-    """Beim Beenden des Programms: die Werkstatt geht mit."""
-    box = _shared
-    if box is not None:
+    """Beim Beenden des Programms: alle Werkstaetten gehen mit."""
+    for box in list(_shared.values()):
         box.stop("Programm beendet")
 
 
-def forget_shared() -> None:
-    """Vergisst die gemeinsame Werkstatt -- fuer Tests und beim Neuaufbau."""
-    global _shared
+def forget_shared(settings: Any = None) -> None:
+    """Vergisst eine Kontowerkstatt oder, ohne Konto, alle Werkstaetten."""
+    data_dir = getattr(settings, "data_dir", None)
+    key = str(Path(data_dir).resolve()) if data_dir else ""
     with _shared_lock:
-        if _shared is not None:
-            _shared.stop("neu aufgebaut")
-        _shared = None
-
+        boxes = [_shared.pop(key)] if key and key in _shared else []
+        if not key:
+            boxes = list(_shared.values())
+            _shared.clear()
+        for box in boxes:
+            box.stop("neu aufgebaut")

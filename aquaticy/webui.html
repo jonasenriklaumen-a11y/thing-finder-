@@ -524,6 +524,11 @@ body:not(.pro-mode) .only-pro{display:none}
 .picker-think .why{display:block;color:var(--text-3);font-size:11.5px;
   line-height:1.5;margin-top:2px}
 .picker-think>span{flex:1;min-width:0}
+.agent-range{border-top:1px solid var(--line);padding:12px 16px;font-size:13px}
+.agent-range .agent-head{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.agent-range output{min-width:2.4em;text-align:center;font-weight:700;color:var(--accent-text)}
+.agent-range input[type="range"]{width:100%;margin:9px 0 2px;accent-color:var(--accent)}
+.agent-range .why{display:block;color:var(--text-3);font-size:11.5px;line-height:1.5}
 
 /* Der Schalter: eine Pille, in der ein weisser Knopf hin und her faehrt --
    wie auf dem iPhone. Darunter bleibt ein echtes Ankreuzfeld, nur ohne das
@@ -1075,6 +1080,13 @@ input:focus,select:focus{border-color:var(--accent)}
         <button type="button" class="eff" data-effort="high">High</button>
       </div>
     </div>
+    <div class="agent-range">
+      <div class="agent-head"><b>Agenten</b><output id="agents-value" for="agents">12</output></div>
+      <input type="range" id="agents" min="1" max="12" value="12"
+             aria-label="Anzahl der Agenten">
+      <span class="why" id="agents-help">Normal: 1 bis 12 Agenten. Sie arbeiten bei
+        „Strukturieren“ parallel an ihren bisherigen Rollen und Aufgaben.</span>
+    </div>
     <label class="picker-think only-code" for="werkstatt">
       <input type="checkbox" role="switch" class="schalter" id="werkstatt">
       <span><b>Virtual Environment</b>
@@ -1153,7 +1165,7 @@ input:focus,select:focus{border-color:var(--accent)}
           <button class="mode on" data-mode="normal"
             title="Normales Gespräch — sucht, wenn die Frage es braucht">Normal</button>
           <button class="mode" data-mode="pro"
-            title="Volle Leistung: stärkstes Modell, bis zu 24 Agenten">Pro</button>
+            title="Volle Leistung: stärkstes Modell, bis zu 50 Agenten">Pro</button>
           <button class="mode" data-mode="code"
             title="Code statt Prosa, auf dem stärksten Modell">Code</button>
         </div>
@@ -1306,7 +1318,9 @@ input:focus,select:focus{border-color:var(--accent)}
         </div>
       </fieldset>
 
-      <fieldset><legend>Werkstatt</legend>
+      <fieldset id="workshop-settings"><legend>Werkstatt</legend>
+        <div class="pro-lock" id="vm-plus-lock" hidden>🔒 Plus gehört zu Pro.
+          Mit einem normalen Konto bleibt die sichere Normal-Werkstatt verfügbar.</div>
         <label><span class="lbl">Größe <span class="why">Gilt für die nächste Werkstatt, die
           entsteht — eine laufende ändert sich nicht mit</span></span>
           <select name="AQUATICY_VM_SIZE">
@@ -1347,7 +1361,9 @@ input:focus,select:focus{border-color:var(--accent)}
         </div>
       </fieldset>
 
-      <fieldset><legend>Auslastung</legend>
+      <fieldset id="pro-system"><legend>Auslastung · Pro</legend>
+        <div class="pro-lock" id="system-lock" hidden>🔒 Die Auslastungsanzeige
+          gehört zu Pro.</div>
         <div class="check">
           <input type="checkbox" role="switch" class="schalter" id="showload">
           <label for="showload" style="margin:0">Auslastung des Rechners anzeigen
@@ -1580,8 +1596,6 @@ input:focus,select:focus{border-color:var(--accent)}
               recherchiert. Das dauert kürzer, kostet aber mehr Aufrufe.</span></label>
         </div>
         <div class="row">
-          <label><span class="lbl">Helfer je Anfrage <span class="why">Wie viele Teilfragen gleichzeitig bearbeitet werden. 0 schaltet sie ab</span></span>
-            <input type="text" name="AQUATICY_MAX_SUBAGENTS"></label>
           <label><span class="lbl">Suchen je Helfer <span class="why">Wie oft ein Helfer suchen oder eine Seite lesen darf</span></span>
             <input type="text" name="AQUATICY_SUBAGENT_BUDGET"></label>
         </div>
@@ -1624,7 +1638,7 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
-const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.1";
+const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.2";
 $("#version").textContent = "v" + aquaticyVersion;
 document.title = `Aquaticy AI ${aquaticyVersion}`;
 
@@ -1639,6 +1653,8 @@ let recheck = false;
 let effort = "medium";
 let online = true;
 let sandbox = false;
+let agents = 12;
+const agentsByMode = {normal: 12, code: 12, pro: 44};
 // Nur die Anzeige: ob man Aquaticy beim Denken zusieht.
 let denken = false;
 
@@ -1685,13 +1701,16 @@ const PLATZHALTER = {
 };
 
 function setMode(wanted, { merken = true } = {}){
+  agentsByMode[mode] = agents;
   mode = MODI.includes(wanted) ? wanted : "normal";
+  agents = agentsByMode[mode];
   document.querySelectorAll("#modes .mode").forEach(button =>
     button.classList.toggle("on", button.dataset.mode === mode));
   document.body.classList.toggle("code-mode", mode === "code");
   document.body.classList.toggle("pro-mode", mode === "pro");
   $("#input").placeholder = PLATZHALTER[mode] || PLATZHALTER.normal;
   if (merken) merkeZustand({ mode });
+  setAgents(agents, { merken });
   zeigeWerkstattKnopf();
   refreshHeader();
   // Pro heisst vor allem: viele Agenten. Die gibt es nur mit Strukturieren
@@ -1700,6 +1719,21 @@ function setMode(wanted, { merken = true } = {}){
   // sichtbar am Schalter und jederzeit wieder umlegbar. Beim Laden nicht --
   // wer es im Pro-Modus ausgeschaltet hat, hat es so gemeint.
   if (merken && mode === "pro" && !structured) setStructured(true);
+}
+
+function setAgents(wanted, { merken = true } = {}){
+  const maximum = mode === "pro" ? 50 : 12;
+  const parsed = Number.parseInt(wanted, 10);
+  agents = Math.max(1, Math.min(maximum, Number.isFinite(parsed) ? parsed : 12));
+  agentsByMode[mode] = agents;
+  const slider = $("#agents");
+  slider.max = String(maximum);
+  slider.value = String(agents);
+  $("#agents-value").textContent = String(agents);
+  $("#agents-help").textContent = mode === "pro"
+    ? "Pro: 1 bis 50 Agenten. Rollen, Master und Gegenprüfung bleiben unverändert."
+    : "Normal: 1 bis 12 Agenten. Sie arbeiten bei „Strukturieren“ parallel an ihren bisherigen Rollen und Aufgaben.";
+  if (merken) merkeZustand({ agents });
 }
 
 function setRecheck(on, { merken = true } = {}){
@@ -1774,6 +1808,7 @@ $("#werkstatt").addEventListener("change", (e) => setSandbox(e.target.checked));
 $("#denken").addEventListener("change", (e) => setDenken(e.target.checked));
 $("#structure").addEventListener("change", (e) => setStructured(e.target.checked));
 $("#recheck").addEventListener("change", (e) => setRecheck(e.target.checked));
+$("#agents").addEventListener("input", (e) => setAgents(e.target.value));
 
 // Der Anfangszustand kommt mit der Seite mit -- der Server hat ihn beim
 // Ausliefern hineingeschrieben. Fehlt er (eine Datei, die jemand von Hand
@@ -1788,6 +1823,7 @@ setEffort(START.effort || "medium", { merken: false });
 setOnline(START.online !== false, { merken: false });
 setSandbox(START.sandbox === true, { merken: false });
 setDenken(START.denken === true, { merken: false });
+setAgents(START.agents || 12, { merken: false });
 
 // Der Abbruch der laufenden Anfrage. Zwei Dinge muessen passieren: der Server
 // soll aufhoeren zu arbeiten, und der Browser soll aufhoeren zuzuhoeren --
@@ -2310,7 +2346,7 @@ async function ask(text){
     return api("/api/chat", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
-        message: text, attachments, mode, structured, recheck, effort, sandbox,
+        message: text, attachments, mode, structured, recheck, effort, sandbox, agents,
         // Im Code-Modus gibt es den Web-Schalter nicht -- also darf er dort
         // auch nichts abschalten. Sonst haette ein "aus" aus dem
         // Standardmodus das Nachschlagen still mitgenommen, ohne dass ein
@@ -3304,7 +3340,7 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#provider-note").textContent = "";
   $("#model-note").textContent = "";
   $("#usage-note").innerHTML = "";
-  api("/api/system").then(r => r.json()).then(d => showStorage(d.storage)).catch(() => {});
+  api("/api/memory").then(r => r.json()).then(d => showStorage(d.usage)).catch(() => {});
   loadUsage();
   loadAccount(cfg.account);
   $("#job-note").textContent = "";
@@ -3335,6 +3371,20 @@ async function loadAccount(account){
   section.classList.toggle("locked-feature", !pro);
   $("#pro-lock").hidden = pro;
   section.querySelectorAll("input,select,button").forEach(field => { field.disabled = !pro; });
+  const system = $("#pro-system");
+  system.classList.toggle("locked-feature", !pro);
+  $("#system-lock").hidden = pro;
+  system.querySelectorAll("input,button").forEach(field => { field.disabled = !pro; });
+  if (!pro){
+    stopLoad();
+    $("#showload").checked = false;
+    $("#usage-note").innerHTML = "";
+  }
+  const plus = form.elements["AQUATICY_VM_SIZE"].querySelector('option[value="plus"]');
+  plus.disabled = !pro;
+  $("#vm-plus-lock").hidden = pro;
+  if (!pro && form.elements["AQUATICY_VM_SIZE"].value === "plus")
+    form.elements["AQUATICY_VM_SIZE"].value = "normal";
   try {
     const data = await (await api("/api/account")).json();
     $("#account-tokens").textContent = data.token_limit == null

@@ -45,6 +45,7 @@ class FakeAgent:
         self.closed = 0
         self.raise_error: Exception | None = None
         self.ask_handler: Any = None
+        self.seen_agent_limit: int | None = None
 
     def set_ask_handler(self, handler: Any) -> None:
         self.ask_handler = handler
@@ -69,6 +70,7 @@ class FakeAgent:
         self.online = online
         self.sandbox = sandbox
         self.recheck = recheck
+        self.seen_agent_limit = getattr(self, "_agent_limit_override", None)
         if self.raise_error is not None:
             raise self.raise_error
         for name, payload in self.script:
@@ -378,6 +380,8 @@ def test_config_post_reports_failures(
 def test_ui_file_offers_every_setting() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     for key in web.SETTING_KEYS:
+        if key == "AQUATICY_MAX_SUBAGENTS":
+            continue  # Der Turn-Regler steht jetzt direkt in der Modellauswahl.
         assert f'name="{key}"' in html, f"{key} fehlt im Formular"
     assert f'name="{web.API_KEY_FIELD}"' in html
 
@@ -744,6 +748,55 @@ def test_a_waiting_device_is_told_so(session: web.ChatSession) -> None:
     first.join(timeout=5)
     second.join(timeout=5)
     assert "waiting" in events
+
+
+def test_two_accounts_can_write_at_the_same_time(web_settings: Settings) -> None:
+    """Die Sperre gehoert dem Konto und darf andere Konten nicht aufhalten."""
+    entered = 0
+    together = threading.Event()
+    guard = threading.Lock()
+
+    class Slow(FakeAgent):
+        def ask(self, question, **kwargs):
+            nonlocal entered
+            with guard:
+                entered += 1
+                if entered == 2:
+                    together.set()
+            assert together.wait(timeout=2), "die zweite Kontositzung wurde blockiert"
+            return AgentResult(answer=question)
+
+    first, second = web.ChatSession(), web.ChatSession()
+    first._settings = web_settings
+    second._settings = web_settings
+    first._agent, second._agent = Slow(), Slow()
+    threads = [
+        threading.Thread(target=s.ask, args=(str(i), lambda *_: None))
+        for i, s in enumerate((first, second))
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+    assert together.is_set()
+    assert not any(thread.is_alive() for thread in threads)
+
+
+def test_selected_agent_count_is_limited_to_one_turn(
+    session: web.ChatSession, agent: FakeAgent
+) -> None:
+    session.ask("eins", lambda *_: None, agents=37)
+    assert agent.seen_agent_limit == 37
+    assert getattr(agent, "_agent_limit_override", None) is None
+
+
+def test_chat_route_caps_agent_slider_by_mode(client, agent: FakeAgent) -> None:
+    assert client("POST", "/api/chat", {"message": "pro", "mode": "pro", "agents": 50})[0] == 200
+    assert agent.seen_agent_limit == 50
+    assert client(
+        "POST", "/api/chat", {"message": "normal", "mode": "normal", "agents": 50}
+    )[0] == 200
+    assert agent.seen_agent_limit == 12
 
 
 # -- Aufbau der Oberflaeche ----------------------------------------------
@@ -1406,6 +1459,13 @@ def test_the_load_includes_the_storage_when_it_is_on(
 def test_no_storage_line_when_memory_is_off(client, session: web.ChatSession) -> None:
     session._settings.memory_enabled = False
     assert "storage" not in json.loads(client("GET", "/api/system")[1])
+
+
+def test_normal_account_cannot_read_server_load(client, session: web.ChatSession) -> None:
+    session.account = web.Account("normal", "normal@example.org", "normal", 0)
+    status, body = client("GET", "/api/system")
+    assert status == 403
+    assert "Pro-Konto" in json.loads(body)["error"]
 
 
 # -- Slash-Befehle fuer den Speicher --------------------------------------
@@ -3083,6 +3143,27 @@ def test_the_workshop_size_is_settable_and_checked(client, web_settings: Setting
     assert status == 200
     status, body = client("GET", "/api/config")
     assert json.loads(body)["values"]["AQUATICY_VM_SIZE"] == "plus"
+
+
+def test_normal_account_cannot_select_plus_workshop(
+    client, session: web.ChatSession
+) -> None:
+    session.account = web.Account("normal", "normal@example.org", "normal", 0)
+    status, data = client("POST", "/api/config", {"AQUATICY_VM_SIZE": "plus"})
+    assert status == 400
+    assert "Plus-Werkstatt" in json.loads(data)["error"]
+    assert client("POST", "/api/config", {"AQUATICY_VM_SIZE": "normal"})[0] == 200
+
+
+def test_agent_slider_is_in_the_model_picker_not_the_settings() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    picker = html[html.index('id="picker-models"') : html.index('<main id="main">')]
+    settings_start = html.index('<form id="settings"')
+    settings = html[settings_start : html.index('</form>', settings_start)]
+    assert 'type="range" id="agents"' in picker
+    assert 'max="12"' in picker and 'mode === "pro" ? 50 : 12' in html
+    assert 'name="AQUATICY_MAX_SUBAGENTS"' not in settings
+    assert 'message: text, attachments, mode, structured, recheck, effort, sandbox, agents' in html
 
 
 def test_an_absurdly_long_value_is_refused(client) -> None:

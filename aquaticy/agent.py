@@ -1478,10 +1478,15 @@ class Agent:
         Frage. Hat jemand die Agenten ganz abgeschaltet (0), bleibt es dabei;
         ein Modus soll keine Einstellung ueberstimmen, die "nein" heisst.
         """
+        requested = getattr(self, "_agent_limit_override", None)
+        if requested is not None:
+            return max(1, min(50 if self.pro_mode else 12, int(requested)))
         base = max(0, int(self.settings.max_subagents))
-        if not (base and self.pro_mode):
+        if not base:
             return base
-        return max(base, self._pro_subagent_cap())
+        if not self.pro_mode:
+            return min(12, base)
+        return min(50, max(base, self._pro_subagent_cap()))
 
     def _pro_subagent_cap(self) -> int:
         """Die Obergrenze fuer Agenten im Pro-Modus -- je nach Anbieter.
