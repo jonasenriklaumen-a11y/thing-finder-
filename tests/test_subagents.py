@@ -745,6 +745,22 @@ def test_a_check_lands_on_its_own_result(
     assert results[0].as_dict()["verdict"] == "ABWEICHUNG"
 
 
+def test_a_checker_does_not_close_the_shared_fetcher(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """Pruefer und Suchende lesen parallel mit demselben HTTP-Client."""
+    closed: list[int] = []
+
+    def run_one(task: str, *args: Any, **kwargs: Any) -> SubagentResult:
+        return SubagentResult(task=task, summary="BESTAETIGT")
+
+    monkeypatch.setattr("aquaticy.subagents._run_one", run_one)
+    monkeypatch.setattr(Fetcher, "close", lambda fetcher: closed.append(id(fetcher)))
+    run_subagents(["Frage"], settings, parallel=1, checkers=1)
+
+    assert len(closed) == 1, "nur der Koordinator schliesst den gemeinsamen Fetcher"
+
+
 def test_without_checkers_nothing_is_checked(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
@@ -900,3 +916,4 @@ def test_the_place_lands_in_every_subtask(
     settings.location = "Bremen"
     _, tasks = plan_request("Wo kann ich arbeiten?", settings)
     assert tasks == ["Cafés mit WLAN Bremen", "Cafés in Bremen"]
+
