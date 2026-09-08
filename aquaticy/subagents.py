@@ -887,7 +887,9 @@ def run_subagents(
                 % {"task": result.task, "summary": result.summary[:4000]},
             )
         finally:
-            box.close()
+            # Der Fetcher gehoert dem gesamten Auftrag: andere Suchende und
+            # Pruefer benutzen ihn noch parallel.
+            box.close(close_fetcher=False)
         if geprueft.error:
             return
         result.check = geprueft.summary
@@ -956,4 +958,7 @@ def run_subagents(
                 on_event("error", {"message": f"Pruefung fehlgeschlagen: {fehler}"})
         return results
     finally:
+        for box in boxes:
+            box.close(close_fetcher=False)
         shared_fetcher.close()
+
