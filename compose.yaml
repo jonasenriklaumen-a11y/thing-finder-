@@ -34,15 +34,10 @@ services:
     stdin_open: true
     tty: true
     init: true
-    # Volles Netz nach draussen -- ohne das kann aquaticy nicht recherchieren.
-    # Isoliert wird das Dateisystem, nicht die Verbindung.
-    #
-    # Fuer Heimnetz und Home Assistant braucht aquaticy die Netzwerkkarte des
-    # Rechners: aus Dockers eigenem Bruecken-Netz ist das Heimnetz nicht zu
-    # sehen, `aquaticy lan` und `connect-ha` faenden dort schlicht nichts.
-    #   AQUATICY_NETWORK=host docker compose run --rm aquaticy
-    # Ohne die Variable bleibt es beim abgeschotteten Bruecken-Netz.
-    network_mode: ${AQUATICY_NETWORK:-bridge}
+    # Das normale Compose-Netz verbindet Aquaticy mit dem optionalen Dienst
+    # `searxng` unter dessen Namen und erlaubt zugleich Recherche nach außen.
+    # Für Zugriff auf das Heimnetz gibt es compose.host.yaml als gezielten
+    # Zusatz; dieser Dienst bleibt hier bewusst im Standardnetz.
     security_opt:
       - no-new-privileges:true
     # Chromium legt seine Shared-Memory-Segmente hier ab.
