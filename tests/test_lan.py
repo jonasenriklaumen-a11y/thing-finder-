@@ -152,7 +152,7 @@ def test_the_hint_names_the_way_out(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lan, "in_container", lambda: True)
     hint = lan.container_hint("172.17.0.0/24")
     assert "Container" in hint
-    assert "AQUATICY_NETWORK=host" in hint
+    assert "compose.host.yaml" in hint
 
 
 def test_a_real_home_network_in_a_container_gets_no_hint(
