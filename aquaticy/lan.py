@@ -147,8 +147,8 @@ def container_hint(subnet: str = "") -> str:
     return (
         "Aquaticy AI laeuft in einem Container und sieht nur dessen eigenes Netz "
         f"({subnet or address}), nicht dein Heimnetz. Abhilfe: den Container mit "
-        "AQUATICY_NETWORK=host starten "
-        "(docker compose) bzw. `--network host` (docker run) -- oder aquaticy direkt auf "
+        "`docker compose -f compose.yaml -f compose.host.yaml` starten "
+        "bzw. `--network host` (docker run) -- oder aquaticy direkt auf "
         "dem Rechner laufen lassen."
     )
 
