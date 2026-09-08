@@ -489,6 +489,7 @@ class ChatSession:
         """
         # Im Netzbetrieb sitzen mehrere Geraete an derselben Sitzung. Wer
         # wartet, soll das sehen und nicht vor einem stummen Fenster sitzen.
+        reload_after = False
         if self.busy():
             emit(
                 "waiting",
@@ -499,45 +500,52 @@ class ChatSession:
                     )
                 },
             )
-        with self._lock:
-            self._drain_answers()
-            agent = self.agent()
-            try:
-                agent.on_event = lambda name, payload: emit(name, payload)
-                agent.toolbox.on_event = agent.on_event
-                # Aendert Aquaticy im Gespraech eine Einstellung, muss der Agent
-                # danach neu gebaut werden -- sonst arbeitet die naechste Frage
-                # noch mit den alten Werten weiter.
-                agent.toolbox.on_settings_changed = self._settings_dirty
-                agent.set_ask_handler(self._ask_browser)
-                if message.startswith("/image"):
-                    message = self._image_question(agent, message)
-                elif attachments:
-                    context = self.attachments_text(
-                        agent, attachments, emit, workshop=self._workshop_wanted(
-                            agent, mode, sandbox
+        try:
+            with self._lock:
+                self._drain_answers()
+                agent = self.agent()
+                try:
+                    agent.on_event = lambda name, payload: emit(name, payload)
+                    agent.toolbox.on_event = agent.on_event
+                    # Aendert Aquaticy im Gespraech eine Einstellung, muss der Agent
+                    # danach neu gebaut werden -- sonst arbeitet die naechste Frage
+                    # noch mit den alten Werten weiter.
+                    agent.toolbox.on_settings_changed = self._settings_dirty
+                    agent.set_ask_handler(self._ask_browser)
+                    if message.startswith("/image"):
+                        message = self._image_question(agent, message)
+                    elif attachments:
+                        context = self.attachments_text(
+                            agent, attachments, emit, workshop=self._workshop_wanted(
+                                agent, mode, sandbox
+                            )
                         )
+                        message = f"{context}\n\n{message}" if context else message
+                    return agent.ask(
+                        message,
+                        stream=True,
+                        mode=mode,
+                        structured=structured,
+                        recheck=recheck,
+                        effort=effort,
+                        online=online,
+                        sandbox=sandbox,
                     )
-                    message = f"{context}\n\n{message}" if context else message
-                return agent.ask(
-                    message,
-                    stream=True,
-                    mode=mode,
-                    structured=structured,
-                    recheck=recheck,
-                    effort=effort,
-                    online=online,
-                    sandbox=sandbox,
-                )
-            finally:
-                agent.on_event = None
-                agent.toolbox.on_event = None
-                agent.toolbox.on_settings_changed = None
-                if self._reload_after:
-                    self._reload_after = False
-                    self.reload()
-                # Der Handler bleibt bestehen -- das Werkzeug soll auch in der
-                # naechsten Runde angeboten werden.
+                finally:
+                    agent.on_event = None
+                    agent.toolbox.on_event = None
+                    agent.toolbox.on_settings_changed = None
+                    if self._reload_after:
+                        self._reload_after = False
+                        reload_after = True
+                    # Der Handler bleibt bestehen -- das Werkzeug soll auch in der
+                    # naechsten Runde angeboten werden.
+        finally:
+            # `reload()` nimmt dieselbe Sperre. Es darf daher erst laufen, nachdem
+            # der Turn sie freigegeben hat -- auch wenn der Agent mit einem Fehler
+            # endet.
+            if reload_after:
+                self.reload()
 
     @staticmethod
     def _workshop_wanted(agent: Any, mode: str, sandbox: bool | None) -> bool:
@@ -2313,3 +2321,4 @@ def serve(
     finally:
         server.server_close()
         TOKEN = ""
+
