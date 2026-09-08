@@ -153,6 +153,25 @@ def sse_events(raw: bytes) -> list[dict[str, Any]]:
     return events
 
 
+def test_a_closed_sse_connection_does_not_cancel_the_session(
+    session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ein Tab ist nur die Anzeige; der Auftrag muss als Chat weiterlaufen."""
+    cancelled: list[bool] = []
+
+    class ClosedStream:
+        def write(self, data: bytes) -> None:
+            raise BrokenPipeError
+
+        def flush(self) -> None: ...
+
+    handler = object.__new__(web.Handler)
+    handler.wfile = ClosedStream()
+    monkeypatch.setattr(session, "stop", lambda: cancelled.append(True))
+    assert handler._sse("data: {}\n\n") is False
+    assert cancelled == []
+
+
 def test_saved_chat_setting_reloads_after_releasing_the_turn_lock(
     session: web.ChatSession, agent: FakeAgent
 ) -> None:
