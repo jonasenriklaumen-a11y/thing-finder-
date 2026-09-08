@@ -10,6 +10,7 @@ Dort steht die Sicherheit. Faellt eine Haertung heraus, faellt hier ein Test.
 from __future__ import annotations
 
 import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -43,6 +44,11 @@ class FakeRun:
 def box(monkeypatch: pytest.MonkeyPatch) -> tuple[werkstatt.Sandbox, FakeRun]:
     fake = FakeRun({"inspect": (0, "true\n", "")})
     monkeypatch.setattr(subprocess, "run", fake)
+    monkeypatch.setattr(
+        werkstatt,
+        "_runs_capped",
+        lambda binary, *args, **kwargs: fake([binary, *args], **kwargs),
+    )
     sandkasten = werkstatt.Sandbox(image="python:3.12-slim")
     sandkasten.runtime = werkstatt.Runtime("docker", "docker", "Docker (gehaertet)")
     return sandkasten, fake
@@ -160,7 +166,16 @@ def test_long_output_is_cut(box: tuple[werkstatt.Sandbox, FakeRun]) -> None:
     assert "gekuerzt" in ergebnis.stdout
 
 
-def test_a_hanging_command_is_ended(box: tuple[werkstatt.Sandbox, FakeRun]) -> None:
+def test_host_output_is_buffered_with_a_hard_limit() -> None:
+    done = werkstatt._runs_capped(
+        sys.executable, "-c", "print('x' * 1000000)", timeout=5
+    )
+    assert len(done.stdout) <= werkstatt.MAX_OUTPUT * 2
+
+
+def test_a_hanging_command_is_ended(
+    box: tuple[werkstatt.Sandbox, FakeRun], monkeypatch: pytest.MonkeyPatch
+) -> None:
     sandkasten, fake = box
 
     def haengt(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -170,17 +185,19 @@ def test_a_hanging_command_is_ended(box: tuple[werkstatt.Sandbox, FakeRun]) -> N
         return subprocess.CompletedProcess(args, 0, "true\n", "")
 
     sandkasten.runtime = werkstatt.Runtime("docker", "docker", "Docker")
-    original = subprocess.run
-    try:
-        subprocess.run = haengt  # type: ignore[assignment]
-        ergebnis = sandkasten.run("sleep 999", timeout=1)
-    finally:
-        subprocess.run = original  # type: ignore[assignment]
+    monkeypatch.setattr(
+        werkstatt,
+        "_runs_capped",
+        lambda binary, *args, **kwargs: haengt([binary, *args], **kwargs),
+    )
+    ergebnis = sandkasten.run("sleep 999", timeout=1)
     assert ergebnis.timed_out and ergebnis.exit_code == 124
     assert "Abgebrochen" in ergebnis.as_dict()["note"]
 
 
-def test_the_timeout_has_an_upper_bound(box: tuple[werkstatt.Sandbox, FakeRun]) -> None:
+def test_the_timeout_has_an_upper_bound(
+    box: tuple[werkstatt.Sandbox, FakeRun], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Wer 10000 Sekunden verlangt, bekommt trotzdem hoechstens das Maximum."""
     sandkasten, fake = box
     aufgezeichnet: dict[str, Any] = {}
@@ -191,12 +208,12 @@ def test_the_timeout_has_an_upper_bound(box: tuple[werkstatt.Sandbox, FakeRun]) 
             aufgezeichnet["timeout"] = kwargs.get("timeout")
         return subprocess.CompletedProcess(args, 0, "true\n", "")
 
-    original = subprocess.run
-    try:
-        subprocess.run = merke  # type: ignore[assignment]
-        sandkasten.run("echo", timeout=10_000)
-    finally:
-        subprocess.run = original  # type: ignore[assignment]
+    monkeypatch.setattr(
+        werkstatt,
+        "_runs_capped",
+        lambda binary, *args, **kwargs: merke([binary, *args], **kwargs),
+    )
+    sandkasten.run("echo", timeout=10_000)
     assert aufgezeichnet["timeout"] <= werkstatt.MAX_TIMEOUT + 5
 
 
@@ -344,3 +361,4 @@ def test_dateiliste_nennt_pfad_und_groesse(monkeypatch: pytest.MonkeyPatch) -> N
 def test_ohne_laufende_werkstatt_ist_die_liste_leer(monkeypatch: pytest.MonkeyPatch) -> None:
     box = werkstatt.Sandbox()
     assert box.list_files() == []
+
