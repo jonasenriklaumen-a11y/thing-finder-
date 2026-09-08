@@ -2846,6 +2846,32 @@ def test_a_failed_second_round_keeps_the_first_answer(
     assert result.rechecked is False
 
 
+def test_a_capped_second_round_keeps_tool_calls_and_answers_paired(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
+) -> None:
+    """Auch in der Gegenpruefung darf kein unbeanworteter Call im Verlauf bleiben."""
+    settings.max_tool_calls = 2  # Die Gegenpruefung hat ihr Mindestbudget von vier.
+    calls = [_tool_call("web_search", {"query": str(number)}, f"c{number}") for number in range(5)]
+    monkeypatch.setattr(
+        "litellm.completion", ScriptedLLM(_message(tool_calls=calls), _message(content="Geprüft."))
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent_module.AgentResult(answer="Erste Antwort.")
+    agent._second_round(result, question="Frage", stream=False)
+
+    announced = {
+        call["id"]
+        for message in agent.messages
+        for call in (message.get("tool_calls") or [])
+    }
+    answered = {
+        str(message.get("tool_call_id"))
+        for message in agent.messages
+        if message.get("role") == "tool"
+    }
+    assert announced == answered == {"c0", "c1", "c2", "c3"}
+
+
 def test_a_cancelled_run_skips_the_second_round(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:
