@@ -22,6 +22,7 @@ SESSION_DAYS = 30
 NORMAL_TOKEN_LIMIT = 200_000
 EMAIL_RE = re.compile(r"^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$")
 PRO_CODE_RE = re.compile(r"^[A-Z0-9]{9}$")
+PRO_CODE_IN_TEXT_RE = re.compile(r"(?<![A-Z0-9])[A-Z0-9]{9}(?![A-Z0-9])", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +71,17 @@ def validate_password(password: str) -> None:
 def new_pro_code() -> str:
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "".join(secrets.choice(alphabet) for _ in range(9))
+
+
+def code_from_input(value: str) -> str:
+    """Holt einen neunstelligen Code aus einer kopierten Terminalzeile.
+
+    Menschen kopieren gelegentlich ``Pro-Code: ABC123XYZ (9 Zeichen)`` statt
+    nur des Codes. Die Prüfung bleibt streng: Es muss genau ein eigenständiger
+    neunstelliger alphanumerischer Block vorhanden sein.
+    """
+    matches = PRO_CODE_IN_TEXT_RE.findall(value or "")
+    return matches[0].upper() if len(matches) == 1 else ""
 
 
 def pro_code_for(data_dir: Path) -> str:
@@ -196,7 +208,7 @@ class AuthStore:
         plan = (plan or "normal").strip().lower()
         if plan not in ("normal", "pro"):
             raise ValueError("Wähle ein normales oder ein Pro-Konto.")
-        if plan == "pro" and not hmac.compare_digest(pro_code.strip().upper(), self.pro_code):
+        if plan == "pro" and not hmac.compare_digest(code_from_input(pro_code), self.pro_code):
             raise ValueError("Der Pro-Code stimmt nicht.")
         salt = secrets.token_bytes(16)
         user_id = secrets.token_hex(16)

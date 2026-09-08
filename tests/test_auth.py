@@ -30,6 +30,16 @@ def test_pro_needs_the_secret_code(store: AuthStore) -> None:
     assert account.pro
 
 
+def test_pro_accepts_the_terminal_label_when_copied(store: AuthStore) -> None:
+    account = store.register(
+        "copy@example.org",
+        "eine sehr lange Passphrase",
+        "pro",
+        f"Pro-Code: {store.pro_code} (9 Zeichen, geheim halten)",
+    )
+    assert account.pro
+
+
 def test_duplicate_email_and_short_password_are_rejected(store: AuthStore) -> None:
     with pytest.raises(ValueError, match="15 Zeichen"):
         store.register("a@example.org", "zu kurz", "normal")
