@@ -1046,8 +1046,14 @@ class Toolbox:
         #: Oberflaeche baut daraufhin den Agenten fuer die naechste Frage neu.
         self.on_settings_changed: Any = None
 
-    def close(self) -> None:
-        self._fetcher.close()
+    def close(self, *, close_fetcher: bool = True) -> None:
+        """Gibt eigene Ressourcen frei.
+
+        Mehrere Subagenten teilen sich absichtlich einen Fetcher. In diesem
+        Fall schliesst nur ihr Koordinator ihn, nachdem alle fertig sind.
+        """
+        if close_fetcher:
+            self._fetcher.close()
         if self._google_client is not None:
             self._google_client.close()
         if self._storage_client is not None:
@@ -2526,3 +2532,4 @@ def looks_like_product_page(html: str, url: str) -> bool:
     if extract_product(html, url) is not None:
         return True
     return has_spec_heading(HTMLParser(html))
+
