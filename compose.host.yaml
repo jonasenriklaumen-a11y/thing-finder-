@@ -1,0 +1,6 @@
+# Optionaler Zusatz für Home Assistant und andere Dienste im Heimnetz.
+# Auf Linux verwenden mit:
+#   docker compose -f compose.yaml -f compose.host.yaml run --rm aquaticy
+services:
+  aquaticy:
+    network_mode: host
