@@ -63,6 +63,35 @@ def test_duckduckgo_errors_become_search_error(monkeypatch: pytest.MonkeyPatch) 
         search_web("test", backend="duckduckgo")
 
 
+def test_tls_error_in_ddgs_uses_the_http1_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ein fehlerhaft geschlossenes rustls/HTTP2 darf die Suche nicht beenden."""
+    from ddgs.exceptions import DDGSException
+
+    class FailingDDGS:
+        def __init__(self, *args, **kwargs) -> None: ...
+
+        def text(self, query: str, **kwargs):
+            raise DDGSException("peer closed connection without sending TLS close_notify")
+
+    def html(url: str, **kwargs):
+        assert url == "https://html.duckduckgo.com/html/"
+        return httpx.Response(
+            200,
+            text=(
+                '<a class="result__a" href="https://example.org/a">Treffer</a>'
+                '<div class="result__snippet">Kurz erklärt.</div>'
+            ),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("ddgs.DDGS", FailingDDGS)
+    monkeypatch.setattr(httpx, "get", html)
+    results = search_web("TLS-Test", backend="duckduckgo")
+    assert [(item.title, item.url, item.snippet) for item in results] == [
+        ("Treffer", "https://example.org/a", "Kurz erklärt.")
+    ]
+
+
 def test_dedupe_and_count_limit() -> None:
     raw = [
         SearchResult(title="a", url="https://x.de/1"),
