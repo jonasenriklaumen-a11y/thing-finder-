@@ -2852,6 +2852,7 @@ def test_a_capped_second_round_keeps_tool_calls_and_answers_paired(
     """Auch in der Gegenpruefung darf kein unbeanworteter Call im Verlauf bleiben."""
     settings.max_tool_calls = 2  # Die Gegenpruefung hat ihr Mindestbudget von vier.
     calls = [_tool_call("web_search", {"query": str(number)}, f"c{number}") for number in range(5)]
+    monkeypatch.setattr(Agent, "_fresh_hits", lambda self, question: "")
     monkeypatch.setattr(
         "litellm.completion", ScriptedLLM(_message(tool_calls=calls), _message(content="Geprüft."))
     )
