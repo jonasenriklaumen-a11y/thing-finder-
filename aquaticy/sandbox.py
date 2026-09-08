@@ -151,6 +151,52 @@ def _runs(binary: str, *args: str, timeout: float = 8.0) -> subprocess.Completed
     )
 
 
+def _runs_capped(
+    binary: str, *args: str, timeout: float = 8.0
+) -> subprocess.CompletedProcess[str]:
+    """Fuehrt einen Werkstatt-Befehl mit begrenzten Empfangspuffern aus.
+
+    Die Begrenzung muss hier am Host-Rohr liegen: ein Container-Speicherlimit
+    verhindert nicht, dass sein Client beliebig viel Ausgabe in Aquaticys
+    Hauptprozess puffert.
+    """
+    command = [binary, *args]
+    stdout = bytearray()
+    stderr = bytearray()
+
+    def drain(pipe: Any, target: bytearray, limit: int) -> None:
+        while chunk := pipe.read(8192):
+            remaining = limit - len(target)
+            if remaining > 0:
+                target.extend(chunk[:remaining])
+
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert process.stdout is not None and process.stderr is not None
+    # `_cut()` braucht etwas mehr als seine Anzeigegrenze, um den Hinweis auf
+    # die Kuerzung einzublenden. Der Host behaelt trotzdem nur kleine Puffer.
+    readers = [
+        threading.Thread(target=drain, args=(process.stdout, stdout, MAX_OUTPUT * 2)),
+        threading.Thread(target=drain, args=(process.stderr, stderr, MAX_OUTPUT)),
+    ]
+    for reader in readers:
+        reader.start()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        for reader in readers:
+            reader.join()
+    return subprocess.CompletedProcess(
+        command,
+        process.returncode,
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+    )
+
+
 def _works(binary: str) -> bool:
     """Antwortet die Laufzeit ueberhaupt? Ein installierter Client ohne
     laufenden Dienst ist so gut wie keiner."""
@@ -469,7 +515,7 @@ class Sandbox:
         self._emit("vm_run", command=command[:200])
         started = time.monotonic()
         try:
-            done = _runs(
+            done = _runs_capped(
                 runtime.binary,
                 "exec", "--user", RUN_AS, "--workdir", WORKDIR, name,
                 "sh", "-c", command,
@@ -835,3 +881,4 @@ def forget_shared() -> None:
         if _shared is not None:
             _shared.stop("neu aufgebaut")
         _shared = None
+
