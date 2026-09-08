@@ -1982,17 +1982,14 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         """Schreibt ein Stueck in den Ereignisstrom. `False` = niemand mehr da.
 
         Bricht die Verbindung ab -- Tab zu, Seite neu geladen, Handy im
-        Standby -- dann wird der Lauf beendet. Frueher lief er im Hintergrund
-        zu Ende und hielt die Sitzung dabei besetzt; die naechste Frage
-        bekam dann minutenlang "Ein anderes Geraet fragt gerade" zu sehen,
-        obwohl gar kein anderes Geraet da war. Es war die eigene, laengst
-        verlassene Anfrage.
+        Standby -- läuft der Auftrag weiter. Ein Lauf gehört der Sitzung,
+        nicht der einzelnen HTTP-Verbindung; das Ergebnis bleibt danach als
+        Chat erhalten und kann auf einem anderen Gerät geöffnet werden.
         """
         try:
             self.wfile.write(text.encode("utf-8"))
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
-            SESSION.stop()
             return False
         return True
 
