@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import time
 from datetime import datetime
@@ -57,7 +58,8 @@ def test_tokens_are_not_readable_on_disk(store: TokenStore) -> None:
 
 def test_the_token_file_is_private(store: TokenStore) -> None:
     store.save(Tokens(refresh_token="rt"))
-    assert store.path.stat().st_mode & 0o077 == 0
+    if os.name != "nt":
+        assert store.path.stat().st_mode & 0o077 == 0
 
 
 def test_without_a_file_nothing_is_connected(store: TokenStore) -> None:
