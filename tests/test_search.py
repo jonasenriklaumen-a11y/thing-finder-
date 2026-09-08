@@ -59,6 +59,13 @@ def test_duckduckgo_errors_become_search_error(monkeypatch: pytest.MonkeyPatch) 
             raise DDGSException("boom")
 
     monkeypatch.setattr("ddgs.DDGS", FailingDDGS)
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda url, **kwargs: (_ for _ in ()).throw(
+            httpx.ConnectError("kein Netz", request=httpx.Request("GET", url))
+        ),
+    )
     with pytest.raises(SearchError, match="Suche fehlgeschlagen"):
         search_web("test", backend="duckduckgo")
 
@@ -209,6 +216,13 @@ def test_engine_failure_message_points_to_the_alternatives(
             raise DDGSException("alle Engines tot")
 
     monkeypatch.setattr("ddgs.DDGS", FailingDDGS)
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        lambda url, **kwargs: (_ for _ in ()).throw(
+            httpx.ConnectError("kein Netz", request=httpx.Request("GET", url))
+        ),
+    )
     with pytest.raises(SearchError) as excinfo:
         search_web("q", backend="open")
     message = str(excinfo.value)
