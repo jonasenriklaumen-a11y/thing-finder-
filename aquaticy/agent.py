@@ -2054,12 +2054,18 @@ class Agent:
                     self._emit("error", message=f"Gegenpruefung: {exc}")
                     return
                 calls = message.get("tool_calls") or []
-                self.messages.append(_assistant_message(message))
                 if not calls:
+                    self.messages.append(_assistant_message(message))
                     result.answer = message.get("content", "") or result.answer
                     result.rechecked = True
                     return
                 calls = calls[: budget - used]
+                # Die API verlangt zu jedem Aufruf eine Tool-Antwort. Wenn
+                # das Budget die Liste kuerzt, darf der abgeschnittene Rest
+                # deshalb nicht in der Assistant-Nachricht stehen.
+                message = dict(message)
+                message["tool_calls"] = calls
+                self.messages.append(_assistant_message(message))
                 used += len(calls)
                 self._run_round(calls)
             # Budget alle, aber noch keine Antwort: einmal ohne Werkzeuge.
