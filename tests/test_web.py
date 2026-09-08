@@ -1668,15 +1668,10 @@ def test_searching_the_network_says_so_when_nothing_answers(
     assert "Nichts gefunden" in data["error"]
 
 
-def test_a_closed_tab_ends_the_run(
+def test_a_closed_tab_keeps_the_run_alive(
     client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Sonst haelt die verlassene Anfrage die Sitzung minutenlang besetzt.
-
-    Genau das war der Fehler: die naechste Frage bekam "Ein anderes Geraet
-    fragt gerade" zu sehen, obwohl gar kein anderes Geraet da war -- es war
-    die eigene, laengst geschlossene Anfrage.
-    """
+    """Der Lauf gehoert zum Chat und bleibt nach einem Tab-Wechsel erhalten."""
     monkeypatch.setattr(web, "HEARTBEAT_SECONDS", 0.05)
     started = threading.Event()
     cancelled = threading.Event()
@@ -1718,15 +1713,13 @@ def test_a_closed_tab_ends_the_run(
     assert started.wait(timeout=5)
     conn.close()
 
-    assert cancelled.wait(timeout=10), "der Lauf muss enden, wenn niemand mehr zuhoert"
-    # Der Arbeitsthread braucht noch einen Wimpernschlag, um die Sperre
-    # freizugeben -- darauf warten, statt es im selben Atemzug zu pruefen.
+    assert not cancelled.wait(timeout=0.2), "ein geschlossener Tab bricht den Chat nicht ab"
+    # Der Arbeitsthread darf normal fertig werden und gibt die Sitzung danach frei.
     for _ in range(100):
         if not session.busy():
             break
         time.sleep(0.05)
     assert not session.busy(), "und die Sitzung danach wieder frei sein"
-
 
 def test_the_waiting_notice_does_not_invent_another_device(
     client, session: web.ChatSession, monkeypatch: pytest.MonkeyPatch
