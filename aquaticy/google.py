@@ -526,6 +526,8 @@ class Google:
             payload["location"] = str(location)[:300]
         if start:
             payload["start"], payload["end"] = _times(start, end, whole_day)
+        elif end:
+            payload["end"] = _end_time(end, whole_day)
         if not payload:
             raise GoogleError("Es wurde nichts genannt, was sich aendern soll.")
         data = self._write(
@@ -582,8 +584,9 @@ def _times(start: str, end: str, whole_day: bool) -> tuple[dict[str, str], dict[
     """Macht aus zwei Zeitangaben das, was der Kalender erwartet.
 
     Ohne Ende wird eine Stunde angenommen -- bei einem ganzen Tag ein Tag.
-    Die Zeitzone bleibt weg: Google nimmt dann die des Kalenders, und das ist
-    genau die, in der der Nutzer denkt.
+    Uhrzeiten bekommen immer einen Offset. Google verlangt ihn, wenn kein
+    separates ``timeZone``-Feld gesetzt ist; bei einer naiven Eingabe gilt die
+    Ortszeit des Rechners.
     """
     roh_start = str(start).strip()
     roh_ende = str(end).strip()
@@ -594,13 +597,31 @@ def _times(start: str, end: str, whole_day: bool) -> tuple[dict[str, str], dict[
                 naechster = datetime.fromisoformat(tag) + timedelta(days=1)
                 roh_ende = naechster.date().isoformat()
         return ({"date": tag}, {"date": roh_ende[:10] or tag})
-    if not roh_ende:
-        with contextlib.suppress(ValueError):
-            spaeter = datetime.fromisoformat(roh_start) + timedelta(hours=1)
-            roh_ende = spaeter.isoformat()
-    if not roh_ende:
-        raise GoogleError(f"Mit '{start}' kann der Kalender nichts anfangen.")
-    return ({"dateTime": roh_start}, {"dateTime": roh_ende})
+    try:
+        beginn = _calendar_datetime(roh_start)
+        ende = _calendar_datetime(roh_ende) if roh_ende else beginn + timedelta(hours=1)
+    except ValueError as exc:
+        raise GoogleError(f"Mit '{start}' kann der Kalender nichts anfangen.") from exc
+    return ({"dateTime": beginn.isoformat()}, {"dateTime": ende.isoformat()})
+
+
+def _calendar_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
+def _end_time(end: str, whole_day: bool) -> dict[str, str]:
+    """Formatiert eine einzelne PATCH-Endzeit ohne den Start anzufassen."""
+    value = str(end).strip()
+    if whole_day:
+        try:
+            return {"date": datetime.fromisoformat(value[:10]).date().isoformat()}
+        except ValueError as exc:
+            raise GoogleError(f"Mit '{end}' kann der Kalender nichts anfangen.") from exc
+    try:
+        return {"dateTime": _calendar_datetime(value).isoformat()}
+    except ValueError as exc:
+        raise GoogleError(f"Mit '{end}' kann der Kalender nichts anfangen.") from exc
 
 
 def _event(item: dict[str, Any]) -> dict[str, Any]:
