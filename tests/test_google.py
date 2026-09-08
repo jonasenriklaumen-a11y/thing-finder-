@@ -6,6 +6,7 @@ import base64
 import json
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -399,7 +400,9 @@ def test_an_event_is_created_with_the_given_times(linked: TokenStore) -> None:
     assert gesehen["method"] == "POST"
     assert "calendars/primary/events" in gesehen["url"]
     # Ohne Ende: eine Stunde, nicht ein Fehler.
-    assert gesehen["body"]["end"] == {"dateTime": "2026-09-08T15:00:00"}
+    ende = datetime.fromisoformat(gesehen["body"]["end"]["dateTime"])
+    assert (ende.hour, ende.minute) == (15, 0)
+    assert ende.utcoffset() is not None
 
 
 def test_a_whole_day_event_uses_dates_not_times(linked: TokenStore) -> None:
@@ -428,6 +431,21 @@ def test_editing_only_sends_what_changes(linked: TokenStore) -> None:
     api.update_event("ev-1", summary="Zahnarzt (verschoben)")
     assert gesehen["method"] == "PATCH"
     assert set(gesehen["body"]) == {"summary"}
+
+
+def test_editing_only_the_end_time_keeps_the_existing_start(linked: TokenStore) -> None:
+    gesehen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesehen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": "ev-1"})
+
+    api = Google("id", "secret", linked, client=_client(handler))
+    api.update_event("ev-1", end="2026-09-08T16:30:00")
+    assert set(gesehen["body"]) == {"end"}
+    ende = datetime.fromisoformat(gesehen["body"]["end"]["dateTime"])
+    assert (ende.hour, ende.minute) == (16, 30)
+    assert ende.utcoffset() is not None
 
 
 def test_editing_nothing_is_refused(linked: TokenStore) -> None:
