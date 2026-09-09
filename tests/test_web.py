@@ -225,6 +225,24 @@ def test_save_values_writes_env_and_reloads(
     assert session._agent is None
 
 
+def test_a_users_saved_vision_model_is_active_immediately(
+    session: web.ChatSession,
+    web_settings: Settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = tmp_path / "user"
+    profile.mkdir()
+    session.profile = profile
+    session.account = web.Account("u1", "user@example.org", "normal", 0, "User")
+    session._settings = None
+    monkeypatch.setattr(web, "get_settings", lambda: web_settings)
+
+    web.save_values({"AQUATICY_VISION_MODEL": "ollama_chat/llava:7b"})
+
+    assert session.settings().vision_model == "ollama_chat/llava:7b"
+
+
 def test_api_key_is_stored_under_the_provider_name(
     session: web.ChatSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -325,6 +343,28 @@ def test_public_visual_sources_require_an_explicit_vision_model(client) -> None:
     )
     assert status == 400
     assert "Vision-Modell" in body.decode("utf-8")
+
+
+def test_a_vision_capable_main_model_enables_public_visual_sources(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    session.settings().model = "ollama_chat/gemma4:latest"
+    status, _ = client(
+        "POST", "/api/chat", {"message": "Was passiert in Köln?", "visual_sources": True}
+    )
+    assert status == 200
+    assert agent.asked == ["Was passiert in Köln?"]
+
+
+def test_a_separately_selected_vision_model_enables_public_visual_sources(
+    client, session: web.ChatSession, agent: FakeAgent
+) -> None:
+    session.settings().vision_model = "ollama_chat/llava:7b"
+    status, _ = client(
+        "POST", "/api/chat", {"message": "Prüfe das Satellitenbild", "visual_sources": True}
+    )
+    assert status == 200
+    assert agent.asked == ["Prüfe das Satellitenbild"]
 
 
 def test_done_arrives_exactly_once(client, session: web.ChatSession) -> None:

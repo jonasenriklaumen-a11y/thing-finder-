@@ -98,6 +98,28 @@ def provider_of(model: str) -> str:
     return model.split("/", 1)[0].lower() if "/" in model else model.split("-", 1)[0].lower()
 
 
+VISION_MODEL_MARKERS = (
+    "gemma3", "gemma4", "qwen2-vl", "qwen2.5-vl", "qwen3-vl", "llava",
+    "minicpm-v", "moondream", "pixtral", "vision", "gemini", "claude",
+    "gpt-4o", "gpt-4.1", "gpt-5",
+)
+
+
+def selected_vision_model(settings: Settings) -> str:
+    """Gibt das gewählte Bildmodell zurück, ohne ein Textmodell dafür auszugeben.
+
+    Ein Eintrag im eigenen Vision-Feld ist eine ausdrückliche Auswahl. Bleibt
+    es leer, darf das Hauptmodell übernehmen, sofern seine Modell-ID eine
+    bekannte bildfähige Familie bezeichnet.
+    """
+    explicit = settings.vision_model.strip()
+    if explicit:
+        return explicit
+    main = settings.model.strip()
+    lowered = main.lower()
+    return main if any(marker in lowered for marker in VISION_MODEL_MARKERS) else ""
+
+
 #: Fuer Anbieter, die in PROVIDER_KEYS nicht stehen. LiteLLM kennt weit mehr
 #: Provider, als hier sinnvoll aufzuzaehlen sind -- damit laesst sich jeder
 #: davon nutzen, ohne dass aquaticy angepasst werden muss.

@@ -45,6 +45,7 @@ from aquaticy.config import (
     load_env,
     reset_settings_cache,
     resolve_model,
+    selected_vision_model,
     suggest_model,
     write_env_file,
 )
@@ -2487,10 +2488,10 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         if mode == "code":
             online = True
             visual_sources = False
-        if visual_sources and not SESSION.settings().vision_model.strip():
+        if visual_sources and not selected_vision_model(SESSION.settings()):
             self._json(
-                {"error": "Webcams und Satellitenbilder brauchen ein ausgewähltes "
-                 "Vision-Modell unter Einstellungen → Modell."}, 400
+                {"error": "Webcams und Satellitenbilder brauchen ein bildfähiges "
+                 "Hauptmodell oder ein Vision-Modell unter Einstellungen → Modell."}, 400
             )
             return
         if not message and not attachments:

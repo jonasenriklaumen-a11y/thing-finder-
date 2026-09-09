@@ -141,6 +141,25 @@ def test_tools_are_offered_to_the_llm(
     ]
 
 
+def test_public_visual_mode_names_the_preferred_official_sources(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    settings.vision_model = "ollama_chat/llava:7b"
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    agent.visual_sources = True
+    agent._refresh_system()
+    prompt = agent.messages[0]["content"]
+    for domain in (
+        "worldview.earthdata.nasa.gov",
+        "firms.modaps.eosdis.nasa.gov",
+        "browser.dataspace.copernicus.eu",
+        "view.eumetsat.int",
+        "star.nesdis.noaa.gov/GOES",
+    ):
+        assert domain in prompt
+    assert "offizielle Seite der Stadt" in prompt
+
+
 def test_subagents_can_be_switched_off(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, toolbox: Toolbox
 ) -> None:

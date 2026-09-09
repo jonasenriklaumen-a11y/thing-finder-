@@ -1330,7 +1330,8 @@ input:focus,select:focus{border-color:var(--accent)}
         <label><span class="lbl">Hauptmodell <span class="why">Anbieter und Name, z.B. mistral/mistral-large-latest</span></span>
           <input type="text" name="AQUATICY_MODEL" placeholder="ollama_chat/gemma4:12b"></label>
         <div class="row">
-          <label><span class="lbl">Vision-Modell (leer = Hauptmodell)</span>
+          <label><span class="lbl">Vision-Modell
+            <span class="why">Leer = ein bildfähiges Hauptmodell wie Gemma 4 übernimmt</span></span>
             <input type="text" name="AQUATICY_VISION_MODEL"></label>
           <label><span class="lbl">Subagenten-Modell
             <span class="why">Leer = das schnelle kleine Modell des Anbieters</span></span>
@@ -1680,7 +1681,7 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
-const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.4";
+const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.5";
 $("#version").textContent = "v" + aquaticyVersion;
 document.title = `Aquaticy AI ${aquaticyVersion}`;
 
@@ -3887,11 +3888,12 @@ $("#save-model").addEventListener("click", async () => {
   // Der Server ergaenzt ein fehlendes Anbieter-Praefix -- das soll man sehen.
   const fresh = await (await api("/api/config")).json();
   const saved = fresh.values.AQUATICY_MODEL;
+  const vision = fresh.values.AQUATICY_VISION_MODEL || saved;
   form.elements["AQUATICY_MODEL"].value = saved;
   form.elements["__API_KEY__"].value = "";
-  note.textContent = saved !== values.AQUATICY_MODEL
+  note.textContent = (saved !== values.AQUATICY_MODEL
     ? `Gespeichert als ${saved} — das Anbieter-Kürzel hat gefehlt.`
-    : `${saved} ist jetzt aktiv.`;
+    : `${saved} ist jetzt aktiv.`) + ` Bildanalyse: ${vision}.`;
   refreshHeader();
 });
 

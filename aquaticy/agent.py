@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from aquaticy.cache import Cache
-from aquaticy.config import Settings
+from aquaticy.config import Settings, selected_vision_model
 from aquaticy.models import Product
 from aquaticy.pace import paced
 from aquaticy.storage import normalize_access as storage_access
@@ -147,6 +147,16 @@ VISUAL_SOURCES_PROMPT = """
 Öffentliche Bildquellen sind für diese Frage eingeschaltet:
 - Suche zusätzlich ausdrücklich nach einer passenden öffentlichen Live-Webcam und
   einer frei zugänglichen Satellitenquelle, etwa NASA FIRMS oder NASA Worldview.
+- Bevorzuge diese offiziellen Quellen und öffne die passendste davon:
+  * NASA Worldview (`worldview.earthdata.nasa.gov`) für aktuelle globale Erdbeobachtung,
+  * NASA FIRMS (`firms.modaps.eosdis.nasa.gov`) für aktive Feuer und thermische Anomalien,
+  * Copernicus Browser (`browser.dataspace.copernicus.eu`) für Sentinel-Aufnahmen,
+  * EUMETSAT View (`view.eumetsat.int`) für aktuelle Wetter-Satellitenbilder,
+  * ESA Earth Observation (`esa.int/Applications/Observing_the_Earth`) für ESA-Daten,
+  * NOAA GOES (`star.nesdis.noaa.gov/GOES`) für Stürme, Wolken und Wetterlagen.
+- Bei Webcams bevorzuge die offizielle Seite der Stadt, Gemeinde, Tourismusstelle oder
+  des Kamerabetreibers. Suche zum Beispiel nach `Köln öffentliche Webcam Altstadt live`
+  und öffne den aktuellen Originaltreffer statt eines bloßen Webcam-Verzeichnisses.
 - Prüfe ein brauchbares aktuelles Bild mit `inspect_public_visual`. Nenne immer Quelle
   und sichtbaren Zeitstand; fehlt er, sage das klar. Nutze keine privaten Kameras,
   Logins oder personenbezogene Identifizierung.
@@ -2525,7 +2535,7 @@ class Agent:
         """Beschreibt eine öffentliche Bild-URL mit dem ausdrücklich gewählten Modell."""
         import litellm
 
-        model = self.settings.vision_model.strip()
+        model = selected_vision_model(self.settings)
         if not model:
             raise RuntimeError("Es ist kein Vision-Modell ausgewählt.")
         litellm.suppress_debug_info = True
