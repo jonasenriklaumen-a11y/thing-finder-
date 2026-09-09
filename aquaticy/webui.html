@@ -994,7 +994,7 @@ input:focus,select:focus{border-color:var(--accent)}
     <ul>
       <li>Ein notwendiges Cookie hält deine Anmeldung auf diesem Gerät.</li>
       <li>IP-Adresse und Browserangaben werden gehasht zur Absicherung der Sitzung gespeichert.</li>
-      <li>E-Mail, Einstellungen, Chats und Speicher liegen getrennt in deinem Konto.</li>
+      <li>Nutzername, E-Mail, Einstellungen, Chats und Speicher liegen getrennt in deinem Konto.</li>
       <li>Es gibt keine Werbung und keine Analyse-Cookies.</li>
     </ul>
     <p>Wenn du ablehnst, speichert Aquaticy kein Konto und du kannst die Web-App nicht nutzen.</p>
@@ -1022,11 +1022,14 @@ input:focus,select:focus{border-color:var(--accent)}
         <label><input type="radio" name="plan" value="normal" checked>Normal</label>
         <label><input type="radio" name="plan" value="pro">Pro</label>
       </div>
+      <label id="username-row"><span class="lbl">Nutzername</span>
+        <input type="text" id="auth-username" required autocomplete="username"
+               minlength="2" maxlength="40"></label>
       <label><span class="lbl">E-Mail-Adresse</span>
         <input type="email" id="auth-email" required autocomplete="email" maxlength="254"></label>
-      <label><span class="lbl">Passwort <span class="why">mindestens 15 Zeichen</span></span>
+      <label><span class="lbl">Passwort <span class="why">mindestens 7 Zeichen</span></span>
         <input type="password" id="auth-password" required autocomplete="new-password"
-               minlength="15" maxlength="128"></label>
+               minlength="7" maxlength="128"></label>
       <label id="pro-code-row" hidden><span class="lbl">9-stelliger Pro-Code</span>
         <input type="password" id="auth-pro-code" inputmode="text" maxlength="9"
                autocomplete="one-time-code"></label>
@@ -1133,6 +1136,14 @@ input:focus,select:focus{border-color:var(--accent)}
           kein Seitenabruf, keine Agenten. Er antwortet dann aus seinem eigenen
           Wissen, aus dem Gespräch, aus angehängten Dateien und aus seinem
           Speicher — und sagt dazu, wo sein Wissen alt sein könnte.</span></span>
+    </label>
+    <label class="picker-think only-normal" for="visual-sources">
+      <input type="checkbox" role="switch" class="schalter" id="visual-sources">
+      <span><b>Öffentliche Webcams &amp; Satellitenbilder</b>
+        <span class="why">Sucht zusätzlich nach frei zugänglichen, aktuellen
+          Webcam- und Satellitenquellen und lässt sichtbare Hinweise vom
+          ausgewählten Vision-Modell einordnen. Aufnahmezeit und Quelle werden
+          genannt; Beobachtungen sind Hinweise und keine bestätigten Ereignisse.</span></span>
     </label>
     <label class="picker-think only-normal" for="denken">
       <input type="checkbox" role="switch" class="schalter" id="denken">
@@ -1305,6 +1316,7 @@ input:focus,select:focus{border-color:var(--accent)}
     <form id="settings">
       <fieldset><legend>Konto</legend>
         <div class="account-grid">
+          <span>Nutzername</span><strong id="account-username">…</strong>
           <span>E-Mail</span><strong id="account-email">…</strong>
           <span>Kontotyp</span><strong id="account-plan">…</strong>
           <span>Token</span><strong id="account-tokens">…</strong>
@@ -1668,7 +1680,7 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
-const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.3";
+const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.4";
 $("#version").textContent = "v" + aquaticyVersion;
 document.title = `Aquaticy AI ${aquaticyVersion}`;
 
@@ -1683,6 +1695,8 @@ let recheck = false;
 let effort = "medium";
 let online = true;
 let sandbox = false;
+let visualSources = false;
+let currentUsername = "";
 let agents = 12;
 const agentsByMode = {normal: 12, code: 12, pro: 44};
 // Nur die Anzeige: ob man Aquaticy beim Denken zusieht.
@@ -1791,7 +1805,16 @@ function zeigeWerkstattKnopf(){
 function setOnline(on, { merken = true } = {}){
   online = !!on;
   $("#online").checked = online;
+  $("#visual-sources").disabled = !online;
+  if (!online) setVisualSources(false, { merken });
   if (merken) merkeZustand({ online });
+  refreshHeader();
+}
+
+function setVisualSources(on, { merken = true } = {}){
+  visualSources = !!on && online;
+  $("#visual-sources").checked = visualSources;
+  if (merken) merkeZustand({ visual_sources: visualSources });
   refreshHeader();
 }
 
@@ -1829,11 +1852,13 @@ document.querySelectorAll("#modes .mode").forEach(button =>
     // im Chat, gibt es auch nichts anzufangen.
     const anders = button.dataset.mode !== mode;
     setMode(button.dataset.mode);
+    greet();
     if (anders && thread.children.length) neuerChat({ leiste: false });
   }));
 document.querySelectorAll("#efforts .eff").forEach(button =>
   button.addEventListener("click", () => setEffort(button.dataset.effort)));
 $("#online").addEventListener("change", (e) => setOnline(e.target.checked));
+$("#visual-sources").addEventListener("change", (e) => setVisualSources(e.target.checked));
 $("#werkstatt").addEventListener("change", (e) => setSandbox(e.target.checked));
 $("#denken").addEventListener("change", (e) => setDenken(e.target.checked));
 $("#structure").addEventListener("change", (e) => setStructured(e.target.checked));
@@ -1851,6 +1876,7 @@ setStructured(START.structured === true, { merken: false });
 setRecheck(START.recheck === true, { merken: false });
 setEffort(START.effort || "medium", { merken: false });
 setOnline(START.online !== false, { merken: false });
+setVisualSources(START.visual_sources === true, { merken: false });
 setSandbox(START.sandbox === true, { merken: false });
 setDenken(START.denken === true, { merken: false });
 setAgents(START.agents || 12, { merken: false });
@@ -1904,6 +1930,8 @@ function setAuthMode(mode){
   $("#tab-register").classList.toggle("active", registering);
   $("#tab-login").classList.toggle("active", !registering);
   $("#plan-choice").hidden = !registering;
+  $("#username-row").hidden = !registering;
+  $("#auth-username").required = registering;
   $("#terms-row").hidden = !registering;
   $("#auth-terms").required = registering;
   $("#auth-submit").textContent = registering ? "Konto erstellen" : "Anmelden";
@@ -1939,6 +1967,7 @@ $("#auth-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const error = $("#auth-error"); error.textContent = "";
   const body = {
+    username: $("#auth-username").value.trim(),
     email: $("#auth-email").value.trim(),
     password: $("#auth-password").value,
     plan: document.querySelector('input[name="plan"]:checked')?.value || "normal",
@@ -1959,6 +1988,8 @@ async function bootAuth(){
     const state = await (await api("/api/auth/status")).json();
     if (!state.consent){ showAuth(consentCard); return; }
     if (!state.authenticated){ setAuthMode("register"); showAuth(loginCard); return; }
+    currentUsername = state.account?.username || "";
+    greet();
     authGate.hidden = true;
   } catch { showAuth(loginCard); $("#auth-error").textContent = "Der Server ist nicht erreichbar."; }
 }
@@ -2381,6 +2412,7 @@ async function ask(text){
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({
         message: text, attachments, mode, structured, recheck, effort, sandbox, agents,
+        visual_sources: mode === "code" ? false : visualSources,
         // Im Code-Modus gibt es den Web-Schalter nicht -- also darf er dort
         // auch nichts abschalten. Sonst haette ein "aus" aus dem
         // Standardmodus das Nachschlagen still mitgenommen, ohne dass ein
@@ -3399,7 +3431,10 @@ $("#btn-settings").addEventListener("click", async () => {
 });
 
 async function loadAccount(account){
+  currentUsername = account?.username || currentUsername;
+  $("#account-username").textContent = currentUsername || "…";
   $("#account-email").textContent = account?.email || "…";
+  greet();
   $("#account-plan").textContent = account?.pro ? "Pro" : "Normal";
   const pro = account?.pro === true;
   const section = $("#pro-features");
@@ -4159,9 +4194,41 @@ form.addEventListener("submit", async (e) => {
 /* ---------- Start ---------- */
 function greet(){
   const hour = new Date().getHours();
-  const when = hour < 5 ? "Gute Nacht" : hour < 11 ? "Guten Morgen"
-             : hour < 18 ? "Guten Tag" : "Guten Abend";
-  $("#greeting").textContent = `${when} — was soll ich herausfinden?`;
+  const when = hour < 5 ? "Noch wach" : hour < 11 ? "Guten Morgen"
+             : hour < 14 ? "Hallo" : hour < 18 ? "Guten Nachmittag"
+             : hour < 23 ? "Guten Abend" : "Gute Nacht";
+  const phrases = mode === "code"
+    ? ["was wollen wir bauen?", "welches Problem lösen wir?", "woran programmieren wir heute?"]
+    : ["was möchtest du herausfinden?", "wobei kann ich dir helfen?", "was schauen wir uns heute an?"];
+  const turn = Math.floor(Date.now() / 60000) + document.querySelectorAll(".msg.user").length;
+  const name = currentUsername ? ` ${currentUsername}` : "";
+  $("#greeting").textContent = `${when}${name} — ${phrases[turn % phrases.length]}`;
+  rotateSuggestions(turn);
+}
+
+const SUGGESTIONS = {
+  normal: [
+    "Was ist heute in meiner Stadt los?", "Finde ein gutes Café mit WLAN in meiner Nähe",
+    "Vergleiche drei Laptops für Bildbearbeitung", "Erkläre mir dieses Thema einfach",
+    "Welche Geräte hängen in meinem Netz?", "Plane einen entspannten Tagesausflug",
+    "Fasse die wichtigsten Nachrichten zusammen", "Hilf mir bei einer Kaufentscheidung",
+    "Prüfe diese Behauptung mit mehreren Quellen"
+  ],
+  code: [
+    "Schreib ein Python-Skript, das Ordner nach Datum sortiert",
+    "Warum wirft dieser Code einen IndexError?", "Baue eine kleine REST-API mit FastAPI",
+    "Verbessere die Fehlermeldungen in diesem Programm", "Schreib Tests für diese Funktion",
+    "Vereinfache diesen Code ohne sein Verhalten zu ändern", "Finde den Fehler in diesem Stacktrace",
+    "Entwirf eine kleine Kommandozeilen-App", "Optimiere diese Datenbankabfrage"
+  ]
+};
+function rotateSuggestions(seed = Date.now()){
+  const list = mode === "code" ? SUGGESTIONS.code : SUGGESTIONS.normal;
+  const target = mode === "code" ? $("#chips-code") : $("#chips");
+  const start = Math.abs(Number(seed) || 0) % list.length;
+  target.querySelectorAll(".chip").forEach((chip, index) => {
+    chip.textContent = list[(start + index * 2) % list.length];
+  });
 }
 // Die Kopfzeile wird von jedem Schalter angestossen. Beim Laden sind das
 // sieben Aufrufe hintereinander -- also sieben Abfragen fuer dasselbe
@@ -4197,6 +4264,7 @@ async function kopfNeuZeichnen(){
     // das Ergebnis spuerbar, und man sieht es sonst nirgends.
     if (mode === "code" && sandbox) bits.push("Werkstatt");
     else if (!online) bits.push("ohne Web");
+    if (mode !== "code" && visualSources) bits.push("Webcams & Satelliten");
     if (mode === "pro") bits.push("Pro");
     if (structured) bits.push("strukturiert");
     // Im Pro-Modus pruefen vier Agenten mit -- der Schalter heisst gleich,

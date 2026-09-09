@@ -14,7 +14,9 @@ Gesperrte Inhalte (Paywall, Login, Captcha) werden **nie** umgangen.
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 import threading
 import time
 import urllib.robotparser
@@ -41,6 +43,9 @@ MAX_TEXT_CHARS = 20_000
 MAX_HTML_BYTES = 4_000_000
 #: Obergrenze fuer PDFs -- Datenblaetter sind klein, Scans riesig.
 MAX_PDF_BYTES = 25_000_000
+#: Webcams liefern manchmal Videostreams statt Einzelbilder. Die Bildprüfung
+#: lädt nur überschaubare Standbilder.
+MAX_VISUAL_BYTES = 10_000_000
 #: Mehr Seiten liest niemand am Stueck; haelt auch pypdf im Zaum.
 MAX_PDF_PAGES = 40
 
@@ -317,6 +322,19 @@ class DomainThrottle:
 # Fetcher
 # ---------------------------------------------------------------------------
 HTML_CONTENT_TYPES = ("text/html", "application/xhtml", "text/plain", "application/xml")
+IMAGE_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif")
+
+
+def public_web_url(url: str) -> bool:
+    """Erlaubt nur öffentliche HTTP-Ziele; schützt die Bildsuche vor SSRF."""
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, parsed.port)}
+        return bool(addresses) and all(ipaddress.ip_address(value).is_global for value in addresses)
+    except (OSError, ValueError):
+        return False
 
 
 class Fetcher:
@@ -419,6 +437,63 @@ class Fetcher:
 
         html = response.text[:MAX_HTML_BYTES]
         return self._finish(result, html, want_products=want_products)
+
+    def find_public_visual(self, url: str) -> tuple[str, str]:
+        """Findet auf einer öffentlichen Seite ein Bild für das Vision-Modell."""
+        current = (url or "").strip()
+        for _ in range(6):
+            if not public_web_url(current):
+                return "", "Die Adresse ist nicht öffentlich erreichbar."
+            domain = domain_of(current)
+            if self.respect_robots and not self.robots.allows(current):
+                return "", "robots.txt erlaubt diesen Abruf nicht."
+            self.throttle.wait(domain)
+            try:
+                response = self._client.get(current, follow_redirects=False)
+            except httpx.HTTPError:
+                return "", "Die Bildquelle ist nicht erreichbar."
+            if response.is_redirect:
+                target = response.headers.get("location", "")
+                if not target:
+                    return "", "Die Bildquelle enthält eine ungültige Weiterleitung."
+                current = urljoin(current, target)
+                continue
+            if response.status_code >= 400:
+                return "", f"Die Bildquelle antwortet mit HTTP {response.status_code}."
+            final = str(response.url)
+            if not public_web_url(final):
+                return "", "Die Weiterleitung führt nicht zu einer öffentlichen Adresse."
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+            if content_type in IMAGE_CONTENT_TYPES:
+                if len(response.content) > MAX_VISUAL_BYTES:
+                    return "", "Das Bild ist für eine sichere Prüfung zu groß."
+                return final, ""
+            if not any(kind in content_type for kind in HTML_CONTENT_TYPES):
+                return "", "Die Quelle liefert kein unterstütztes Bild."
+            tree = HTMLParser(response.text[:MAX_HTML_BYTES])
+            candidates: list[tuple[int, str]] = []
+            for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
+                node = tree.css_first(selector)
+                if node and node.attributes.get("content"):
+                    candidates.append((0, node.attributes["content"]))
+            for node in tree.css("img")[:80]:
+                source = node.attributes.get("src") or node.attributes.get("data-src") or ""
+                hint = " ".join(str(node.attributes.get(key) or "") for key in
+                                ("alt", "title", "id", "class", "src")).lower()
+                visual_words = ("webcam", "camera", "live", "satellite", "firms", "worldview")
+                rank = 0 if any(word in hint for word in visual_words) else 1
+                if source:
+                    candidates.append((rank, source))
+            selected = ""
+            for _, candidate in sorted(candidates, key=lambda item: item[0]):
+                absolute = urljoin(final, candidate)
+                if public_web_url(absolute):
+                    selected = absolute
+                    break
+            if not selected:
+                return "", "Auf der Seite wurde kein öffentliches Bild gefunden."
+            current = selected
+        return "", "Die Bildquelle leitet zu oft weiter."
 
     def _finish_pdf(self, result: PageResult, data: bytes) -> PageResult:
         """Text aus einem PDF ziehen -- Datenblaetter, Speisekarten, Preislisten."""

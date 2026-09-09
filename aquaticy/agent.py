@@ -35,6 +35,7 @@ from aquaticy.tools import (
     MEMORY_READ_SCHEMA,
     MEMORY_SCHEMA,
     MEMORY_WRITE_SCHEMA,
+    PUBLIC_VISUAL_SCHEMA,
     SETTING_SCHEMA,
     STORAGE_ADD_SCHEMA,
     STORAGE_BROWSE_SCHEMA,
@@ -137,8 +138,23 @@ nebeneinander lesen kann. Fehlende Werte als "–", niemals geraten.
 #: Die Werkzeuge, die hinaus ins Web gehen. Sie fallen weg, wenn jemand das
 #: Suchen abschaltet.
 WEB_TOOLS = frozenset(
-    {"web_search", "fetch_page", "search_news", "local_places", "find_profiles"}
+    {"web_search", "fetch_page", "search_news", "local_places", "find_profiles",
+     "inspect_public_visual"}
 )
+
+VISUAL_SOURCES_PROMPT = """
+
+Öffentliche Bildquellen sind für diese Frage eingeschaltet:
+- Suche zusätzlich ausdrücklich nach einer passenden öffentlichen Live-Webcam und
+  einer frei zugänglichen Satellitenquelle, etwa NASA FIRMS oder NASA Worldview.
+- Prüfe ein brauchbares aktuelles Bild mit `inspect_public_visual`. Nenne immer Quelle
+  und sichtbaren Zeitstand; fehlt er, sage das klar. Nutze keine privaten Kameras,
+  Logins oder personenbezogene Identifizierung.
+- Trenne das im Bild Sichtbare von deiner Deutung. Rauch, Licht, Wolken oder ein
+  FIRMS-Hotspot sind Hinweise und allein kein bestätigter Brand oder anderes Ereignis.
+- Ist für die Frage keine sinnvolle Bildquelle vorhanden, sage knapp, was du gesucht
+  hast und warum daraus keine belastbare Beobachtung möglich ist.
+"""
 
 #: Die drei Arbeitsweisen. "normal" fuehrt ein Gespraech, "code" schreibt
 #: Code, "pro" ist der Normalmodus mit voller Leistung: staerkstes Modell,
@@ -959,6 +975,8 @@ class Agent:
         self.online = True
         #: Die Werkstatt im Code-Modus. Nur dort sichtbar, nur dort nutzbar.
         self.sandbox = False
+        #: Zusätzliche, ausschließlich öffentliche Webcam- und Satellitenquellen.
+        self.visual_sources = False
         #: Der Zaehler. Er haengt an derselben Datenbank wie der Cache; ohne
         #: Datenverzeichnis (Tests) wird schlicht nichts mitgeschrieben.
         self._usage: Any = None
@@ -979,6 +997,7 @@ class Agent:
             cache=cache,
             on_event=on_event,
             spec_extractor=self.extract_specs,
+            visual_inspector=self.inspect_public_visual,
         )
         # Erst der Werkzeugkasten, dann der Text: ob Rueckfragen moeglich sind,
         # steht am Werkzeugkasten und gehoert in den Systemtext.
@@ -1036,6 +1055,8 @@ class Agent:
         # soll, waere eine Bitte statt einer Entscheidung.
         if self.use_subagents and self.structured and self.online:
             extra.append(SUBAGENT_SCHEMA)
+        if self.visual_sources and self.online and clean_mode(self.mode) != "code":
+            extra.append(PUBLIC_VISUAL_SCHEMA)
         # Die Werkstatt gibt es nur im Code-Modus -- beim Recherchieren waere
         # eine Maschine, in der man Programme startet, nur eine Ablenkung.
         if self.workshop_on:
@@ -1636,6 +1657,8 @@ class Agent:
             }
         if not self.online:
             text += OFFLINE_PROMPT
+        elif self.visual_sources and clean_mode(self.mode) != "code":
+            text += VISUAL_SOURCES_PROMPT
         return text + self._person_prompt()
 
     def _person_prompt(self) -> str:
@@ -1895,6 +1918,7 @@ class Agent:
         effort: str = "",
         online: bool | None = None,
         sandbox: bool | None = None,
+        visual_sources: bool | None = None,
     ) -> AgentResult:
         """Beantwortet *question* -- sucht, liest und wertet aus.
 
@@ -1912,6 +1936,7 @@ class Agent:
                 Stand stehen.
             sandbox: Werkstatt im Code-Modus. `None` laesst den bisherigen
                 Stand stehen.
+            visual_sources: Öffentliche Webcams und Satellitenbilder zusätzlich prüfen.
         """
         question = question.strip()
         # `/max` gehoert zur Frage, nicht zu den Einstellungen: es gilt genau
@@ -1930,11 +1955,14 @@ class Agent:
             return self._finish(AgentResult(answer=standard), question)
         if effort:
             self.effort = clean_effort(effort)
-        before = (self.mode, self.structured, self.online, self.workshop_on)
+        before = (self.mode, self.structured, self.online, self.workshop_on,
+                  self.visual_sources)
         if online is not None:
             self.online = bool(online)
         if sandbox is not None:
             self.sandbox = bool(sandbox)
+        if visual_sources is not None:
+            self.visual_sources = bool(visual_sources)
         if mode:
             self.mode = clean_mode(mode)
         if structured is not None:
@@ -1944,7 +1972,8 @@ class Agent:
         # Der Systemtext haengt an beidem. Nur neu schreiben, wenn sich etwas
         # geaendert hat: er sitzt am Anfang des Verlaufs, und wer ihn bei jeder
         # Frage anfasst, wirft beim Anbieter den zwischengespeicherten Prefix weg.
-        if (self.mode, self.structured, self.online, self.workshop_on) != before:
+        if (self.mode, self.structured, self.online, self.workshop_on,
+                self.visual_sources) != before:
             self._refresh_system()
         self.max_run = bool(gewuenscht_max) and self.pro_mode
         if gewuenscht_max and not self.pro_mode:
@@ -2491,6 +2520,36 @@ class Agent:
         description = (response.choices[0].message.content or "").strip()
         self._emit("image_done", description=description)
         return description
+
+    def inspect_public_visual(self, url: str, question: str) -> str:
+        """Beschreibt eine öffentliche Bild-URL mit dem ausdrücklich gewählten Modell."""
+        import litellm
+
+        model = self.settings.vision_model.strip()
+        if not model:
+            raise RuntimeError("Es ist kein Vision-Modell ausgewählt.")
+        litellm.suppress_debug_info = True
+        prompt = (
+            "Analysiere ausschließlich, was in diesem öffentlichen Webcam- oder "
+            "Satellitenbild sichtbar ist. Prüffrage: " + (question or "Was ist sichtbar?")
+            + " Beschreibe Unsicherheit, mögliche Verwechslungen und ob ein sichtbarer "
+              "Zeitstempel erkennbar ist. Behaupte kein Ereignis allein aufgrund des Bildes."
+        )
+        kwargs = self.settings.llm_kwargs_for(model)
+        try:
+            with paced(model):
+                response = litellm.completion(
+                    model=model,
+                    messages=[{"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": url}},
+                    ]}],
+                    max_tokens=500,
+                    **kwargs,
+                )
+        except Exception as exc:
+            raise RuntimeError(f"Öffentliches Bild konnte nicht geprüft werden: {exc}") from exc
+        return (response.choices[0].message.content or "").strip()
 
     # -- LLM-Fallback fuer Specs (Quelle 5 der Produktextraktion) ---------
     def extract_specs(self, text: str, url: str) -> dict[str, str]:

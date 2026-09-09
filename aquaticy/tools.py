@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from aquaticy.cache import Cache, cache_key
@@ -37,6 +38,7 @@ EventHook = Callable[[str, dict[str, Any]], None]
 SpecExtractor = Callable[[str, str], dict[str, str]]
 #: Rueckfrage an den Nutzer: (frage, moeglichkeiten) -> antwort ("" = keine)
 AskHandler = Callable[[str, list[str]], str]
+VisualInspector = Callable[[str, str], str]
 
 #: So oft darf der Agent je Anfrage nachfragen. Wer dreimal fragt, hat die
 #: Anfrage nicht verstanden -- dann ist eine begruendete Annahme besser.
@@ -147,6 +149,27 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
 ]
+
+PUBLIC_VISUAL_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "inspect_public_visual",
+        "description": (
+            "Öffnet ein frei zugängliches Webcam- oder Satellitenbild (oder eine Seite, "
+            "die ein solches Bild enthält) und lässt es vom Vision-Modell beschreiben. "
+            "Nutze nur öffentliche Quellen und übergib den sichtbaren Sachverhalt, den "
+            "du prüfen möchtest. Das Ergebnis ist eine Beobachtung, kein Ereignisnachweis."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Öffentliche http(s)-Adresse."},
+                "question": {"type": "string", "description": "Was im Bild geprüft werden soll."},
+            },
+            "required": ["url", "question"],
+        },
+    },
+}
 
 
 
@@ -1092,11 +1115,13 @@ class Toolbox:
         on_event: EventHook | None = None,
         spec_extractor: SpecExtractor | None = None,
         fetcher: Fetcher | None = None,
+        visual_inspector: VisualInspector | None = None,
     ) -> None:
         self.settings = settings
         self.cache = cache
         self.on_event = on_event
         self.spec_extractor = spec_extractor
+        self.visual_inspector = visual_inspector
         self.rules = load_rules()
         self.stats = ToolStats()
         #: Setzt der Agent, wenn Subagenten erlaubt sind.
@@ -1939,6 +1964,23 @@ class Toolbox:
             )
         if name == "fetch_page":
             return self.fetch_page(url=str(arguments.get("url", "")))
+        if name == "inspect_public_visual":
+            if self.visual_inspector is None:
+                return {"error": "Es ist kein Vision-Modell ausgewählt."}
+            url, error = self._fetcher.find_public_visual(str(arguments.get("url", "")))
+            if error:
+                return {"error": error}
+            question = str(arguments.get("question", "")).strip()
+            try:
+                analysis = self.visual_inspector(url, question)
+            except Exception as exc:
+                return {"error": str(exc), "url": url}
+            self.stats.fetched.append(url)
+            return {
+                "url": url,
+                "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "observation": analysis,
+            }
         if name == "search_news":
             return self.search_news(
                 query=str(arguments.get("query", "")), count=int(arguments.get("count") or 0)

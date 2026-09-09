@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.3                                      │
+│ Aquaticy AI 9.4.4                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -826,7 +826,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.3                                                   │
+│ Aquaticy AI 9.4.4                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1990,7 +1990,7 @@ Zähler lässt sich nicht zurücksetzen. Pro-Konten haben kein Tokenlimit und k�
 zusätzlich die LAN-Suche, Home Assistant und die Lagerverwaltung verwenden.
 
 ```bash
-aquaticy list       # E-Mail, Kontotyp, Token- und Speicherverbrauch
+aquaticy list       # Nutzername, E-Mail, Kontotyp, Token- und Speicherverbrauch
 aquaticy pro-code   # geheimen Pro-Code anzeigen
 ```
 
@@ -2004,18 +2004,7 @@ Barrierefreiheit sind schon vor der Anmeldung erreichbar. Die Zustimmung zu Date
 Nutzungsbedingungen wird bei der Registrierung zusätzlich auf dem Server geprüft und mit der
 geltenden Textfassung gespeichert.
 
-Da Aquaticy selbst gehostet wird, muss der jeweilige Serverbetreiber seine echten Kontaktdaten
-angeben. Dafür stehen diese Variablen in der serverweiten `.env`; normale Webkonten können sie
-nicht ändern:
-
-```dotenv
-AQUATICY_OPERATOR_NAME=Name oder Organisation
-AQUATICY_OPERATOR_EMAIL=kontakt@example.org
-AQUATICY_OPERATOR_ADDRESS=Straße, PLZ Ort
-```
-
-Fehlen die Angaben, weist die Rechteseite offen darauf hin, statt eine Firma oder Anschrift zu
-erfinden. Aquaticy enthält keine Werbe- oder Tracking-SDKs, veröffentlicht keine
+Aquaticy enthält keine Werbe- oder Tracking-SDKs, veröffentlicht keine
 Nutzerbewertungen und verarbeitet selbst keine Zahlungen. Verlangt ein Betreiber Geld für den
 Zugang, muss er Preise, Kündigung und Erstattung vor dem Kauf selbst klar ausweisen.
 

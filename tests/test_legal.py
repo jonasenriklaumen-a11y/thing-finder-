@@ -14,19 +14,14 @@ def test_each_legal_page_is_standalone_and_has_navigation() -> None:
         assert "<script" not in page
 
 
-def test_operator_details_are_escaped(monkeypatch) -> None:
-    monkeypatch.setenv("AQUATICY_OPERATOR_NAME", '<script>alert("x")</script>')
+def test_legal_pages_do_not_render_external_values() -> None:
     page = legal_page("/privacy").decode("utf-8")
     assert "<script>alert" not in page
-    assert "&lt;script&gt;" in page
 
 
-def test_unconfigured_operator_is_not_invented(monkeypatch) -> None:
-    for key in (
-        "AQUATICY_OPERATOR_NAME",
-        "AQUATICY_OPERATOR_EMAIL",
-        "AQUATICY_OPERATOR_ADDRESS",
-    ):
-        monkeypatch.delenv(key, raising=False)
+def test_accessibility_page_has_no_repository_link() -> None:
     page = legal_page("/terms").decode("utf-8")
-    assert "noch nicht hinterlegt" in page
+    assert "Nutzungsbedingungen" in page
+    accessibility = legal_page("/accessibility").decode("utf-8")
+    assert "Projekt auf GitHub" not in accessibility
+    assert "github.com" not in accessibility

@@ -32,6 +32,16 @@ def test_normal_account_and_login(store: AuthStore) -> None:
     assert store.authenticate(account.email, "falsch und trotzdem lang genug") is None
 
 
+def test_registration_keeps_the_chosen_username_and_accepts_seven_characters(
+    store: AuthStore,
+) -> None:
+    account = store.register(
+        "jonas@example.org", "1234567", "normal", username="Jonas", **TERMS
+    )
+    assert account.username == "Jonas"
+    assert store.authenticate(account.email, "1234567") == account
+
+
 def test_free_accounts_receive_four_hundred_thousand_tokens() -> None:
     assert NORMAL_TOKEN_LIMIT == 400_000
 
@@ -73,8 +83,8 @@ def test_pro_accepts_the_terminal_label_when_copied(store: AuthStore) -> None:
 
 
 def test_duplicate_email_and_short_password_are_rejected(store: AuthStore) -> None:
-    with pytest.raises(ValueError, match="15 Zeichen"):
-        store.register("a@example.org", "zu kurz", "normal", **TERMS)
+    with pytest.raises(ValueError, match="7 Zeichen"):
+        store.register("a@example.org", "kurz", "normal", **TERMS)
     store.register("a@example.org", "eine sehr lange Passphrase", "normal", **TERMS)
     with pytest.raises(ValueError, match="bereits"):
         store.register("A@example.org", "noch eine lange Passphrase", "normal", **TERMS)

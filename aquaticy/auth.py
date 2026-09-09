@@ -22,6 +22,7 @@ from aquaticy.memory import secure_file
 SESSION_DAYS = 30
 NORMAL_TOKEN_LIMIT = 400_000
 EMAIL_RE = re.compile(r"^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$")
+USERNAME_RE = re.compile(r"^[^\x00-\x1f\x7f]{2,40}$")
 PRO_CODE_RE = re.compile(r"^[A-Z0-9]{9}$")
 PRO_CODE_IN_TEXT_RE = re.compile(r"(?<![A-Z0-9])[A-Z0-9]{9}(?![A-Z0-9])", re.IGNORECASE)
 
@@ -32,6 +33,7 @@ class Account:
     email: str
     plan: str
     created_at: float
+    username: str = ""
 
     @property
     def pro(self) -> bool:
@@ -63,10 +65,17 @@ def normalize_email(email: str) -> str:
 
 
 def validate_password(password: str) -> None:
-    if len(password) < 15:
-        raise ValueError("Das Passwort braucht mindestens 15 Zeichen. Eine Passphrase ist ideal.")
+    if len(password) < 7:
+        raise ValueError("Das Passwort braucht mindestens 7 Zeichen.")
     if len(password) > 128:
         raise ValueError("Das Passwort darf höchstens 128 Zeichen lang sein.")
+
+
+def normalize_username(username: str) -> str:
+    value = " ".join((username or "").strip().split())
+    if not USERNAME_RE.fullmatch(value):
+        raise ValueError("Der Nutzername braucht 2 bis 40 sichtbare Zeichen.")
+    return value
 
 
 def new_pro_code() -> str:
@@ -202,6 +211,7 @@ class AuthStore:
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
                     email TEXT NOT NULL UNIQUE,
+                    username TEXT NOT NULL,
                     password_hash BLOB NOT NULL,
                     password_salt BLOB NOT NULL,
                     plan TEXT NOT NULL CHECK(plan IN ('normal','pro')),
@@ -232,6 +242,13 @@ class AuthStore:
                 conn.execute(
                     "ALTER TABLE users ADD COLUMN terms_accepted_at REAL NOT NULL DEFAULT 0"
                 )
+            if "username" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
+                conn.execute(
+                    "UPDATE users SET username=CASE "
+                    "WHEN instr(email, '@') > 1 THEN substr(email, 1, instr(email, '@') - 1) "
+                    "ELSE 'Nutzer' END WHERE username=''"
+                )
         secure_file(self.db_path)
 
     def profile_dir(self, user_id: str) -> Path:
@@ -240,7 +257,10 @@ class AuthStore:
     def _account(self, row: sqlite3.Row | None) -> Account | None:
         if row is None:
             return None
-        return Account(str(row["id"]), str(row["email"]), str(row["plan"]), row["created_at"])
+        return Account(
+            str(row["id"]), str(row["email"]), str(row["plan"]), row["created_at"],
+            str(row["username"])
+        )
 
     def register(
         self,
@@ -249,10 +269,15 @@ class AuthStore:
         plan: str,
         pro_code: str = "",
         *,
+        username: str = "",
         terms_accepted: bool = False,
         terms_version: str = "",
     ) -> Account:
         email = normalize_email(email)
+        fallback_username = email.split("@", 1)[0]
+        if len(fallback_username) < 2:
+            fallback_username += "1"
+        username = normalize_username(username or fallback_username)
         validate_password(password)
         if not terms_accepted or not terms_version.strip():
             raise ValueError(
@@ -270,11 +295,12 @@ class AuthStore:
             with self._lock, self._connect() as conn:
                 conn.execute(
                     "INSERT INTO users "
-                    "(id, email, password_hash, password_salt, plan, created_at, "
-                    "terms_version, terms_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(id, email, username, password_hash, password_salt, plan, created_at, "
+                    "terms_version, terms_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user_id,
                         email,
+                        username,
                         _password_hash(password, salt),
                         salt,
                         plan,
@@ -287,7 +313,7 @@ class AuthStore:
             raise ValueError("Für diese E-Mail-Adresse gibt es bereits ein Konto.") from exc
         folder = self.profile_dir(user_id)
         secure_directory(folder)
-        return Account(user_id, email, plan, now)
+        return Account(user_id, email, plan, now, username)
 
     def authenticate(self, email: str, password: str) -> Account | None:
         try:

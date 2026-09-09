@@ -453,10 +453,11 @@ def list_users_command() -> None:
     settings = get_settings()
     store = AuthStore(settings.data_dir, pro_code_for(settings.data_dir))
     accounts = store.accounts()
-    table = Table("E-Mail", "Konto", "Token", "Speicher", box=None, pad_edge=False)
+    table = Table("Nutzername", "E-Mail", "Konto", "Token", "Speicher", box=None, pad_edge=False)
     for account in accounts:
         profile = store.profile_dir(account.id)
         table.add_row(
+            account.username,
             account.email,
             "Pro" if account.pro else "Normal",
             f"{UsageLog(profile / 'aquaticy.sqlite3').total_tokens():,}".replace(",", "."),

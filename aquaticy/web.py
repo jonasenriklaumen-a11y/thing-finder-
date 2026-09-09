@@ -595,6 +595,7 @@ class ChatSession:
         online: bool | None = None,
         sandbox: bool | None = None,
         agents: int | None = None,
+        visual_sources: bool | None = None,
     ) -> Any:
         """Fuehrt eine Anfrage aus und meldet jeden Zwischenschritt an *emit*.
 
@@ -637,16 +638,18 @@ class ChatSession:
                             )
                         )
                         message = f"{context}\n\n{message}" if context else message
-                    return agent.ask(
-                        message,
-                        stream=True,
-                        mode=mode,
-                        structured=structured,
-                        recheck=recheck,
-                        effort=effort,
-                        online=online,
-                        sandbox=sandbox,
-                    )
+                    ask_options = {
+                        "stream": True, "mode": mode, "structured": structured,
+                        "recheck": recheck, "effort": effort, "online": online,
+                        "sandbox": sandbox,
+                    }
+                    # Testadapter und ältere Erweiterungen kennen den neuen
+                    # Schalter noch nicht. Der eingebaute Agent bekommt ihn
+                    # ausdrücklich; fremde Agenten behalten ihre Signatur.
+                    from aquaticy.agent import Agent as BuiltinAgent
+                    if isinstance(agent, BuiltinAgent):
+                        ask_options["visual_sources"] = visual_sources
+                    return agent.ask(message, **ask_options)
                 finally:
                     agent._agent_limit_override = previous_agent_limit
                     agent.on_event = None
@@ -1783,7 +1786,8 @@ class Handler(BaseHTTPRequestHandler):
                     "consent": self._cookie(CONSENT_COOKIE) == "yes",
                     "authenticated": account is not None,
                     "account": (
-                        {"email": account.email, "plan": account.plan} if account else None
+                        {"email": account.email, "username": account.username,
+                         "plan": account.plan} if account else None
                     ),
                 }
             )
@@ -1798,6 +1802,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 {
                     "email": account.email,
+                    "username": account.username,
                     "plan": account.plan,
                     "tokens_used": used,
                     "token_limit": None if account.pro else NORMAL_TOKEN_LIMIT,
@@ -1814,11 +1819,12 @@ class Handler(BaseHTTPRequestHandler):
                     "account": (
                         {
                             "email": SESSION.account.email,
+                            "username": SESSION.account.username,
                             "plan": SESSION.plan,
                             "pro": SESSION.pro,
                         }
                         if SESSION.account is not None
-                        else {"email": "lokal", "plan": "pro", "pro": True}
+                        else {"email": "lokal", "username": "", "plan": "pro", "pro": True}
                     ),
                     "values": current_values(),
                     "key_name": api_key_name_for(settings.model),
@@ -1997,6 +2003,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             payload = self._read_json()
             if route.endswith("register"):
+                if not str(payload.get("username", "")).strip():
+                    self._json({"ok": False, "error": "Bitte wähle einen Nutzernamen."}, 400)
+                    return
                 if payload.get("terms_accepted") is not True:
                     self._json(
                         {
@@ -2015,6 +2024,7 @@ class Handler(BaseHTTPRequestHandler):
                         str(payload.get("password", "")),
                         str(payload.get("plan", "normal")),
                         str(payload.get("pro_code", "")),
+                        username=str(payload.get("username", "")),
                         terms_accepted=True,
                         terms_version=LEGAL_VERSION,
                     )
@@ -2032,7 +2042,8 @@ class Handler(BaseHTTPRequestHandler):
                 start_user_scheduler(account)
             token = AUTH.create_session(account, self._device(), self._client_ip())
             self._json_cookie(
-                {"ok": True, "account": {"email": account.email, "plan": account.plan}},
+                {"ok": True, "account": {"email": account.email,
+                  "username": account.username, "plan": account.plan}},
                 AUTH_COOKIE,
                 token,
                 30 * 86400,
@@ -2441,7 +2452,8 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         wunsch = {
             name: payload[name]
             for name in (
-                "mode", "effort", "structured", "recheck", "online", "sandbox", "agents"
+                "mode", "effort", "structured", "recheck", "online", "sandbox", "agents",
+                "visual_sources"
             )
             if name in payload
         }
@@ -2456,6 +2468,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         gewuenscht = str(clean_state(wunsch, base=ui_state().read())["mode"])
         if gewuenscht == "code":
             wunsch.pop("online", None)
+            wunsch.pop("visual_sources", None)
         stand = ui_state().write(wunsch) if wunsch else ui_state().read()
         mode = str(stand["mode"])
         effort = str(stand["effort"])
@@ -2464,6 +2477,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         online = bool(stand["online"])
         sandbox = bool(stand["sandbox"])
         agents = int(stand.get("agents", 12))
+        visual_sources = bool(stand.get("visual_sources", False))
         agents = max(1, min(50 if mode == "pro" else 12, agents))
         # Und was der Modus ausblendet, gilt auch nicht -- das entscheidet der
         # Server, nicht der Browser: im Code-Modus wird immer nachgeschlagen.
@@ -2472,6 +2486,13 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         # sonst die zweite Runde).
         if mode == "code":
             online = True
+            visual_sources = False
+        if visual_sources and not SESSION.settings().vision_model.strip():
+            self._json(
+                {"error": "Webcams und Satellitenbilder brauchen ein ausgewähltes "
+                 "Vision-Modell unter Einstellungen → Modell."}, 400
+            )
+            return
         if not message and not attachments:
             self._json({"error": "leere Nachricht"}, 400)
             return
@@ -2509,6 +2530,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                     online=online,
                     sandbox=sandbox,
                     agents=agents,
+                    visual_sources=visual_sources,
                 )
             except Exception as exc:
                 lauf.add({"type": "error", "message": f"{type(exc).__name__}: {exc}"})

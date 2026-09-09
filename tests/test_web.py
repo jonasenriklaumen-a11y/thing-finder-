@@ -319,6 +319,14 @@ def test_chat_streams_steps_and_answer(client, session: web.ChatSession) -> None
     assert events[0]["query"] == "Kaffee Bremen"
 
 
+def test_public_visual_sources_require_an_explicit_vision_model(client) -> None:
+    status, body = client(
+        "POST", "/api/chat", {"message": "Was passiert in Köln?", "visual_sources": True}
+    )
+    assert status == 400
+    assert "Vision-Modell" in body.decode("utf-8")
+
+
 def test_done_arrives_exactly_once(client, session: web.ChatSession) -> None:
     # Der Agent sendet sein eigenes "done" -- der Server darf keines anhaengen.
     session._agent = FakeAgent([("done", {"tool_calls": 0, "hit_limit": False})])
@@ -622,6 +630,7 @@ def test_consent_registration_and_account_isolation(
         "/api/auth/register",
         {
             "email": "person@example.org",
+            "username": "Person",
             "password": "eine sehr lange Passphrase",
             "plan": "normal",
         },
@@ -634,6 +643,7 @@ def test_consent_registration_and_account_isolation(
         "/api/auth/register",
         {
             "email": "person@example.org",
+            "username": "Person",
             "password": "eine sehr lange Passphrase",
             "plan": "normal",
             "terms_accepted": True,

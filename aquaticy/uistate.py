@@ -75,6 +75,7 @@ FIELDS: dict[str, tuple[Any, Any]] = {
     "tracing": (False, bool),
     "load": (False, bool),
     "agents": (12, AGENT_COUNTS),
+    "visual_sources": (False, bool),
 }
 
 #: Was aus dem Browser als "ja" durchgeht. Alles andere ist nein -- und

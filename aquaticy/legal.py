@@ -1,49 +1,23 @@
 """Transparente Rechtstexte fuer die selbst gehostete Weboberflaeche.
 
-Die Seiten beschreiben nur Verhalten, das im Code nachpruefbar ist. Angaben
-zum Betreiber kommen aus der Serverumgebung; Aquaticy erfindet weder eine
-Firma noch eine Adresse, wenn der Betreiber sie nicht hinterlegt hat.
+Die Seiten beschreiben nur Verhalten, das im Code nachpruefbar ist.
 """
 
 from __future__ import annotations
-
-import os
-from html import escape
 
 LEGAL_VERSION = "2026-09-09"
 LEGAL_ROUTES = ("/privacy", "/cookies", "/terms", "/accessibility")
 
 
-def _operator_details() -> str:
-    name = os.environ.get("AQUATICY_OPERATOR_NAME", "").strip()
-    email = os.environ.get("AQUATICY_OPERATOR_EMAIL", "").strip()
-    address = os.environ.get("AQUATICY_OPERATOR_ADDRESS", "").strip()
-    if not any((name, email, address)):
-        return (
-            "<p><strong>Betreiber dieser Installation:</strong> noch nicht hinterlegt. "
-            "Bitte frage die Person oder Organisation, von der du die Webadresse erhalten "
-            "hast. Betreiber sollten Name, Kontakt und gegebenenfalls Anschrift über die "
-            "AQUATICY_OPERATOR_-Variablen eintragen.</p>"
-        )
-    rows = []
-    if name:
-        rows.append(f"<dt>Name</dt><dd>{escape(name)}</dd>")
-    if email:
-        rows.append(f"<dt>Kontakt</dt><dd>{escape(email)}</dd>")
-    if address:
-        rows.append(f"<dt>Anschrift</dt><dd>{escape(address)}</dd>")
-    return "<h2>Betreiber dieser Installation</h2><dl>" + "".join(rows) + "</dl>"
-
-
 def _privacy() -> str:
-    return f"""
+    return """
 <h1>Datenschutz</h1>
 <p class="lead">Aquaticy ist eine selbst gehostete Web-App. Der Betreiber dieser
 Installation entscheidet, wo sie läuft und welche optionalen Dienste eingeschaltet sind.</p>
-{_operator_details()}
 <h2>Welche Daten Aquaticy verarbeitet</h2>
 <ul>
-  <li><strong>Konto:</strong> E-Mail-Adresse, Tarif und Erstellungszeit. Das Passwort wird
+  <li><strong>Konto:</strong> Nutzername, E-Mail-Adresse, Tarif und Erstellungszeit.
+    Das Passwort wird
     mit scrypt, einem eigenen Salz und einem geheimen Serverwert gehasht; Klartextpasswörter
     werden nicht gespeichert.</li>
   <li><strong>Sitzung:</strong> zufällige Sitzungsschlüssel sowie Hashes aus IP-Adresse und
@@ -96,7 +70,6 @@ def _terms() -> str:
 <h1>Nutzungsbedingungen</h1>
 <p class="lead">Diese Bedingungen gelten für die Aquaticy-Web-App in der Version der
 Rechtstexte vom {LEGAL_VERSION}.</p>
-{_operator_details()}
 <h2>Nutzung und Verantwortung</h2>
 <p>Aquaticy recherchiert, fasst Quellen zusammen und kann – nach Freigabe – lokale Werkzeuge
 verwenden. KI-Antworten und externe Quellen können falsch, unvollständig oder veraltet sein.
@@ -109,13 +82,12 @@ muss er Preis, Laufzeit, Kündigung und Erstattungsregeln vor dem Kauf gesondert
 mitteilen. Solche Vereinbarungen bestehen dann zwischen dir und diesem Betreiber.</p>
 <h2>Bewertungen und geschäftliche Angaben</h2>
 <p>Aquaticy sammelt oder veröffentlicht keine Nutzerbewertungen. Rechercheergebnisse sollen
-Behauptungen mit den gelesenen Quellen kennzeichnen. Betreiberangaben stehen oben; fehlende
-Angaben werden ausdrücklich als nicht hinterlegt angezeigt.</p>
+Behauptungen mit den gelesenen Quellen kennzeichnen.</p>
 """
 
 
 def _accessibility() -> str:
-    return f"""
+    return """
 <h1>Barrierefreiheit</h1>
 <p class="lead">Aquaticy soll mit Tastatur, Vergrößerung und unterstützenden Technologien
 bedienbar sein.</p>
@@ -128,9 +100,8 @@ bedienbar sein.</p>
   <li>Dekorative Grafiken sind für Screenreader ausgeblendet; informative Bilder brauchen
     eine Textalternative.</li>
 </ul>
-<p>Wenn du eine Barriere findest, melde sie bitte beim Betreiber dieser Installation oder im
-<a href="https://github.com/jonasenriklaumen-a11y/thing-finder-">Projekt auf GitHub</a>.</p>
-{_operator_details()}
+<p>Wenn du eine Barriere findest, melde sie bitte der Person oder Organisation, von der du
+die Adresse dieser Installation erhalten hast.</p>
 """
 
 

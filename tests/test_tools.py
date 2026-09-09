@@ -46,6 +46,25 @@ def test_core_tool_schemas() -> None:
     ]
 
 
+def test_public_visual_is_resolved_and_sent_to_the_vision_callback(settings: Settings) -> None:
+    class VisualFetcher:
+        def find_public_visual(self, url: str) -> tuple[str, str]:
+            assert url == "https://example.org/webcam"
+            return "https://example.org/current.jpg", ""
+
+    box = Toolbox(
+        settings,
+        fetcher=VisualFetcher(),  # type: ignore[arg-type]
+        visual_inspector=lambda url, question: f"{question}: {url}",
+    )
+    result = box.call(
+        "inspect_public_visual",
+        {"url": "https://example.org/webcam", "question": "Ist Rauch sichtbar?"},
+    )
+    assert result["url"] == "https://example.org/current.jpg"
+    assert "Ist Rauch sichtbar?" in result["observation"]
+
+
 def test_web_search_uses_settings_defaults(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
