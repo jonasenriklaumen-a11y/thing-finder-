@@ -64,9 +64,9 @@ eigene Datenschutzhinweise.</p>
 <h2>Speicherdauer und Kontrolle</h2>
 <p>Sitzungen laufen nach 30 Tagen ab. Alte Werkstätten werden nach ihrer Leerlaufzeit entfernt.
 Chats, Uploads, Erinnerungen und Aufträge bleiben bis zum Löschen durch den Nutzer oder
-Betreiber erhalten. In den Einstellungen kannst du Erinnerungen einsehen und löschen; Chats
-lassen sich einzeln oder vollständig entfernen. Für Auskunft oder die vollständige Löschung
-des Kontos wende dich an den Betreiber der Installation.</p>
+Betreiber erhalten. In der Web-App kannst du Chats einzeln entfernen, Uploads leeren und
+Erinnerungen einsehen oder löschen. Für Auskunft oder die vollständige Löschung des Kontos
+wende dich an den Betreiber der Installation.</p>
 """
 
 
