@@ -388,6 +388,19 @@ body:not(.start) .hint{display:none}
 .bubble th{background:var(--surface-2)}
 .bubble blockquote{border-left:2px solid var(--line-2);margin:.8em 0;padding-left:14px;
   color:var(--text-2)}
+.result-media{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:12px;margin-top:14px}
+.result-card{border:1px solid var(--line);border-radius:13px;background:var(--surface);
+  overflow:hidden;min-width:0}
+.result-card img{display:block;width:100%;height:180px;object-fit:contain;background:var(--surface-2)}
+.result-card.visual img{object-fit:cover}
+.result-card .body{padding:11px 13px}
+.result-card .title{font-weight:600;line-height:1.35;color:var(--text)}
+.result-card .price{color:var(--accent-text);font-weight:700;margin-top:5px}
+.result-card dl{display:grid;grid-template-columns:auto 1fr;gap:3px 9px;margin:9px 0 0;
+  font-size:12.5px;color:var(--text-2)}
+.result-card dt{color:var(--text-3)} .result-card dd{margin:0;overflow-wrap:anywhere}
+.result-card .source{display:inline-block;margin-top:9px;font-size:12px}
 
 /* ========================== Zwischenschritte ============================ */
 .steps{display:flex;flex-direction:column;gap:4px;margin:0 0 14px}
@@ -1681,7 +1694,7 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
-const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.5";
+const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.6";
 $("#version").textContent = "v" + aquaticyVersion;
 document.title = `Aquaticy AI ${aquaticyVersion}`;
 
@@ -2112,6 +2125,77 @@ function answerTools(bubble, text, question){
     downloadText(dateiname(question || "antwort") + ".md", kopf + text);
   });
   bubble.parentNode.appendChild(box);
+}
+
+function safeHttpUrl(raw){
+  try {
+    const url = new URL(String(raw || ""));
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
+  } catch { return ""; }
+}
+function resultImage(url, alt){
+  const safe = safeHttpUrl(url);
+  if (!safe) return null;
+  const image = document.createElement("img");
+  image.src = safe; image.alt = alt || "Recherchebild";
+  image.loading = "lazy"; image.decoding = "async"; image.referrerPolicy = "no-referrer";
+  image.addEventListener("error", () => image.remove());
+  return image;
+}
+function sourceLink(raw, label){
+  const safe = safeHttpUrl(raw);
+  if (!safe) return null;
+  const link = document.createElement("a");
+  link.href = safe; link.target = "_blank"; link.rel = "noopener noreferrer nofollow";
+  link.className = "source"; link.textContent = label;
+  return link;
+}
+function renderResultMedia(bubble, products = [], visuals = []){
+  if (!bubble?.parentNode) return;
+  bubble.parentNode.querySelector(".result-media")?.remove();
+  const grid = document.createElement("div"); grid.className = "result-media";
+  const seen = new Set();
+  (Array.isArray(visuals) ? visuals : []).slice(0, 6).forEach(visual => {
+    const url = safeHttpUrl(visual?.url);
+    if (!url || seen.has(url)) return; seen.add(url);
+    const card = document.createElement("article"); card.className = "result-card visual";
+    const image = resultImage(url, visual.title || "Öffentliches Webcam- oder Satellitenbild");
+    if (image) card.appendChild(image);
+    const body = document.createElement("div"); body.className = "body";
+    const title = document.createElement("div"); title.className = "title";
+    title.textContent = visual.title || "Aktuelles öffentliches Bild"; body.appendChild(title);
+    const link = sourceLink(visual.source_url || url, "Bildquelle öffnen");
+    if (link) body.appendChild(link); card.appendChild(body); grid.appendChild(card);
+  });
+  (Array.isArray(products) ? products : []).slice(0, 6).forEach(product => {
+    const page = safeHttpUrl(product?.url), imageUrl = safeHttpUrl(product?.image_url);
+    if (!page && !imageUrl) return;
+    const card = document.createElement("article"); card.className = "result-card product";
+    const image = resultImage(imageUrl, product.name || "Produktbild");
+    if (image) card.appendChild(image);
+    const body = document.createElement("div"); body.className = "body";
+    const title = document.createElement("div"); title.className = "title";
+    title.textContent = product.name || "Produkt"; body.appendChild(title);
+    if (product.price){
+      const price = document.createElement("div"); price.className = "price";
+      price.textContent = `${product.price} ${product.currency || ""}`.trim(); body.appendChild(price);
+    }
+    const specs = product.specs && typeof product.specs === "object"
+      ? Object.entries(product.specs).slice(0, 12) : [];
+    if (specs.length){
+      const list = document.createElement("dl");
+      specs.forEach(([key, value]) => {
+        const dt = document.createElement("dt"), dd = document.createElement("dd");
+        dt.textContent = String(key); dd.textContent = String(value);
+        list.append(dt, dd);
+      });
+      body.appendChild(list);
+    }
+    const label = product.source_domain ? `Quelle: ${product.source_domain}` : "Quelle öffnen";
+    const link = sourceLink(page, label);
+    if (link) body.appendChild(link); card.appendChild(body); grid.appendChild(card);
+  });
+  if (grid.children.length) bubble.parentNode.insertBefore(grid, bubble.nextSibling);
 }
 
 // Der moderne Weg braucht einen sicheren Kontext; ueber http:// im eigenen
@@ -2676,6 +2760,7 @@ async function verfolge(hole, steps, bubble, text){
         break;
       case "done":
         bubble.innerHTML = md(answer || "(keine Antwort)");
+        renderResultMedia(bubble, ev.products, ev.visuals);
         answerTools(bubble, answer, text);
         scroll(); loadRecents(); break;
     }
@@ -3224,6 +3309,7 @@ async function openChat(sessionId){
     const { steps, bubble } = addBot();
     steps.remove();
     bubble.innerHTML = md(turn.answer || "");
+    renderResultMedia(bubble, turn.products, turn.visuals);
     answerTools(bubble, turn.answer || "", turn.question);
   });
   stagger(thread.querySelectorAll(".msg"), 30, 8);
@@ -4289,3 +4375,4 @@ input.focus();
 </script>
 </body>
 </html>
+

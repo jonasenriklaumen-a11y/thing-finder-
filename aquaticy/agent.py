@@ -927,6 +927,7 @@ class AgentResult:
     sources: list[dict[str, str]] = field(default_factory=list)
     skipped: dict[str, str] = field(default_factory=dict)
     products: list[Product] = field(default_factory=list)
+    visuals: list[dict[str, str]] = field(default_factory=list)
     hit_limit: bool = False
     #: Jemand hat den Durchlauf abgebrochen -- die Antwort ist unvollstaendig.
     stopped: bool = False
@@ -940,6 +941,8 @@ class AgentResult:
             "searches": self.searches,
             "sources": self.sources,
             "skipped": self.skipped,
+            "products": [product.model_dump(exclude_none=True) for product in self.products],
+            "visuals": self.visuals,
             "hit_limit": self.hit_limit,
         }
 
@@ -2461,8 +2464,15 @@ class Agent:
         result.sources = list(stats.sources)
         result.skipped = dict(stats.skipped)
         result.products = list(stats.products)
+        result.visuals = list(stats.visuals)
         self.last_result = result
-        self._emit("done", tool_calls=result.tool_calls, hit_limit=result.hit_limit)
+        self._emit(
+            "done",
+            tool_calls=result.tool_calls,
+            hit_limit=result.hit_limit,
+            products=[product.model_dump(exclude_none=True) for product in result.products],
+            visuals=result.visuals,
+        )
         if self.cache and result.answer:
             self.cache.add_history(
                 session_id=self.session_id,
@@ -2784,3 +2794,4 @@ def _parse_spec_json(raw: str) -> dict[str, str]:
 
 
 SpecExtractorType = Callable[[str, str], dict[str, str]]
+

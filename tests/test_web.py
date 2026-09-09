@@ -1792,6 +1792,33 @@ def test_opening_a_chat_returns_its_turns(client, session: web.ChatSession) -> N
     assert payload["title"] == "erste Frage"
 
 
+def test_opening_a_chat_returns_saved_products_and_images(
+    client, session: web.ChatSession
+) -> None:
+    meta = {
+        "products": [{"name": "Laptop", "url": "https://shop.example/p", "price": "999"}],
+        "visuals": [{"url": "https://images.example/satellite.jpg", "kind": "public_visual"}],
+    }
+    Cache(session.settings().db_path, 24).add_history(
+        session_id="bilder", question="Zeig sie mir", answer="Hier.", meta=meta
+    )
+    _, body = client("POST", "/api/open", {"session_id": "bilder"})
+    turn = json.loads(body)["turns"][0]
+    assert turn["products"] == meta["products"]
+    assert turn["visuals"] == meta["visuals"]
+
+
+def test_result_images_are_built_with_safe_dom_operations() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert "function renderResultMedia(" in html
+    assert 'url.protocol === "https:" || url.protocol === "http:"' in html
+    assert 'image.referrerPolicy = "no-referrer"' in html
+    assert "title.textContent = product.name" in html
+    assert "dd.textContent = String(value)" in html
+    assert "renderResultMedia(bubble, ev.products, ev.visuals)" in html
+    assert "renderResultMedia(bubble, turn.products, turn.visuals)" in html
+
+
 def test_opening_a_chat_restores_the_context(session: web.ChatSession) -> None:
     """Nachfragen wie "und davon nur die guenstigen" muessen weiter gehen."""
     cache = Cache(session.settings().db_path, 24)
@@ -3698,3 +3725,4 @@ def test_the_whole_picker_scrolls_not_just_the_list() -> None:
     assert "display:flex;flex-direction:column" in picker
     # Die Liste bekommt einen kleineren Anteil, sonst füllt sie alles.
     assert "min(38vh,320px)" in picker
+

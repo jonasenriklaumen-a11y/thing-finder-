@@ -1044,6 +1044,7 @@ class ToolStats:
     fetched: list[str] = field(default_factory=list)
     skipped: dict[str, str] = field(default_factory=dict)
     products: list[Product] = field(default_factory=list)
+    visuals: list[dict[str, str]] = field(default_factory=list)
     sources: list[dict[str, str]] = field(default_factory=list)
     calculations: int = 0
     notes_saved: int = 0
@@ -1089,6 +1090,7 @@ class ToolStats:
         self.fetched.clear()
         self.skipped.clear()
         self.products.clear()
+        self.visuals.clear()
         self.sources.clear()
         self.calculations = 0
         self.notes_saved = 0
@@ -1976,8 +1978,15 @@ class Toolbox:
             except Exception as exc:
                 return {"error": str(exc), "url": url}
             self.stats.fetched.append(url)
-            return {
+            visual = {
                 "url": url,
+                "source_url": str(arguments.get("url", "")).strip(),
+                "title": question or "Öffentliches aktuelles Bild",
+                "kind": "public_visual",
+            }
+            self.stats.visuals.append(visual)
+            return {
+                **visual,
                 "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
                 "observation": analysis,
             }
@@ -2714,3 +2723,4 @@ def looks_like_product_page(html: str, url: str) -> bool:
     if extract_product(html, url) is not None:
         return True
     return has_spec_heading(HTMLParser(html))
+

@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.5                                      │
+│ Aquaticy AI 9.4.6                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -826,7 +826,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.5                                                   │
+│ Aquaticy AI 9.4.6                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1385,6 +1385,11 @@ Observation und NOAA GOES. Bei Webcams sucht es zuerst nach offiziellen Angebote
 Stadt, Gemeinde, Tourismusstelle oder des Kamerabetreibers. Aufnahmezeit und Quelle werden
 genannt; sichtbare Auffälligkeiten bleiben Hinweise und gelten nicht allein als bestätigtes
 Ereignis.
+
+Gefundene öffentliche Webcam- und Satellitenbilder erscheinen direkt unter der Antwort.
+Bei Produktrecherchen zeigt die Weboberfläche gefundene Produktbilder zusammen mit Preis,
+technischen Daten und dem Link zur Quelle. Die Bilder bleiben auch beim erneuten Öffnen des
+Chats erhalten.
 
 ## Im Container laufen lassen
 
@@ -2088,3 +2093,4 @@ Captcha).
 ## Lizenz
 
 MIT
+

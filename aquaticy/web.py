@@ -524,7 +524,13 @@ class ChatSession:
             "session_id": session_id,
             "title": entries[0].question,
             "turns": [
-                {"question": entry.question, "answer": entry.answer} for entry in entries
+                {
+                    "question": entry.question,
+                    "answer": entry.answer,
+                    "products": entry.meta.get("products", []),
+                    "visuals": entry.meta.get("visuals", []),
+                }
+                for entry in entries
             ],
         }
 
@@ -2784,3 +2790,4 @@ def serve(
         server.server_close()
         TOKEN = ""
         AUTH = None
+

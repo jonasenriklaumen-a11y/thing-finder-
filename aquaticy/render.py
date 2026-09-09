@@ -501,3 +501,15 @@ def print_products(console: Console, products: list[Product], show_images: bool 
     if len(products) > 1:
         console.print()
         console.print(comparison_table(products[:6]))
+
+
+def print_visuals(console: Console, visuals: list[dict[str, str]]) -> None:
+    """Zeigt geprüfte öffentliche Webcam- und Satellitenbilder im Terminal."""
+    for visual in visuals[:6]:
+        url = str(visual.get("url") or "")
+        if not url:
+            continue
+        console.print()
+        render_image(console, url)
+        console.print(f"[Bild] [blue]{url}[/blue]")
+

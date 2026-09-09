@@ -13,7 +13,7 @@ from aquaticy import agent as agent_module
 from aquaticy.agent import Agent, _parse_spec_json
 from aquaticy.config import Settings
 from aquaticy.fetch import Fetcher, RobotsPolicy
-from aquaticy.models import SearchResult
+from aquaticy.models import Product, SearchResult
 from aquaticy.tools import Toolbox
 
 
@@ -158,6 +158,36 @@ def test_public_visual_mode_names_the_preferred_official_sources(
     ):
         assert domain in prompt
     assert "offizielle Seite der Stadt" in prompt
+
+
+def test_done_event_contains_product_cards_and_public_images(
+    settings: Settings, toolbox: Toolbox
+) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    product = Product(
+        name="Laptop 14", url="https://shop.example/laptop", image_url="https://img.example/laptop.jpg",
+        price="999", currency="EUR", specs={"RAM": "16 GB"}, source_domain="shop.example",
+    )
+    visual = {
+        "url": "https://example.org/satellite.jpg", "source_url": "https://example.org/live",
+        "title": "Satellitenbild", "kind": "public_visual",
+    }
+    toolbox.stats.products.append(product)
+    toolbox.stats.visuals.append(visual)
+    agent = Agent(
+        settings,
+        cache=None,
+        toolbox=toolbox,
+        on_event=lambda name, payload: events.append((name, payload)),
+    )
+
+    result = agent._finish(agent_module.AgentResult(answer="Fertig."), "Zeig mir Bilder")
+
+    assert result.products == [product] and result.visuals == [visual]
+    done = [payload for name, payload in events if name == "done"][-1]
+    assert done["products"][0]["specs"] == {"RAM": "16 GB"}
+    assert done["visuals"][0]["url"].endswith("satellite.jpg")
+    assert result.meta()["products"][0]["price"] == "999"
 
 
 def test_subagents_can_be_switched_off(
@@ -3756,3 +3786,4 @@ def test_the_coding_models_are_offered_for_code(monkeypatch: pytest.MonkeyPatch)
     fuer_die_recherche = [e["id"] for e in strongest_models(settings, purpose="work")]
     assert fuer_die_recherche == ["mistral/mistral-large-latest",
                                   "nvidia_nim/meta/llama-3.3-70b-instruct"]
+

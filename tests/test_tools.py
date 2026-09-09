@@ -63,6 +63,12 @@ def test_public_visual_is_resolved_and_sent_to_the_vision_callback(settings: Set
     )
     assert result["url"] == "https://example.org/current.jpg"
     assert "Ist Rauch sichtbar?" in result["observation"]
+    assert box.stats.visuals == [{
+        "url": "https://example.org/current.jpg",
+        "source_url": "https://example.org/webcam",
+        "title": "Ist Rauch sichtbar?",
+        "kind": "public_visual",
+    }]
 
 
 def test_web_search_uses_settings_defaults(
@@ -1488,3 +1494,4 @@ def test_vm_schemas_do_not_mutate_the_shared_template() -> None:
     original = next(s for s in VM_SCHEMAS if s["function"]["name"] == "vm_run")
     assert "1024 MB" in original["function"]["description"]
     assert "6144 MB" not in original["function"]["description"]
+

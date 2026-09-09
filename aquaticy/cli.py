@@ -1442,6 +1442,10 @@ def _run_turn(agent, renderer, question: str, stream: bool, show_images: bool) -
         from aquaticy.render import print_products
 
         print_products(console, result.products, show_images=show_images)
+    if show_images and result.visuals:
+        from aquaticy.render import print_visuals
+
+        print_visuals(console, result.visuals)
     console.print()
     return result
 
@@ -1905,3 +1909,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
