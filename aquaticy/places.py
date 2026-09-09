@@ -58,6 +58,7 @@ DEFAULT_RADIUS_M = 4000
 #: gesucht -- auch das findet den "Radladen Meier".
 CATEGORIES: dict[str, str] = {
     "cafe": 'nwr[amenity=cafe]',
+    "café": 'nwr[amenity=cafe]',
     "kaffee": 'nwr[amenity=cafe]',
     "restaurant": 'nwr[amenity=restaurant]',
     "essen": 'nwr[amenity~"^(restaurant|fast_food|cafe)$"]',
@@ -232,13 +233,31 @@ def find_places(
     except Exception as exc:
         raise PlacesError(f"Die Karte antwortet gerade nicht: {type(exc).__name__}") from exc
 
+    if not isinstance(daten, dict):
+        raise PlacesError("Die Karte gab etwas Unerwartetes zurück.")
+    elements = daten.get("elements", [])
+    if not isinstance(elements, list):
+        raise PlacesError("Die Karte gab etwas Unerwartetes zurück.")
+
     orte: list[Place] = []
-    for eintrag in (daten or {}).get("elements", []) or []:
-        tags = {str(k): str(v) for k, v in (eintrag.get("tags") or {}).items()}
+    for eintrag in elements:
+        if not isinstance(eintrag, dict):
+            continue
+        raw_tags = eintrag.get("tags") or {}
+        if not isinstance(raw_tags, dict):
+            continue
+        tags = {str(k): str(v) for k, v in raw_tags.items()}
         name = tags.get("name", "").strip()
         if not name:
             continue  # ohne Namen ist ein Punkt auf der Karte keine Auskunft
         mitte = eintrag.get("center") or {}
+        if not isinstance(mitte, dict):
+            mitte = {}
+        try:
+            lat = float(eintrag.get("lat") or mitte.get("lat") or 0.0)
+            lon = float(eintrag.get("lon") or mitte.get("lon") or 0.0)
+        except (TypeError, ValueError):
+            lat, lon = 0.0, 0.0
         orte.append(
             Place(
                 name=name,
@@ -254,8 +273,8 @@ def find_places(
                 website=(tags.get("website") or tags.get("contact:website") or "").strip(),
                 phone=(tags.get("phone") or tags.get("contact:phone") or "").strip(),
                 opening_hours=tags.get("opening_hours", "").strip(),
-                lat=float(eintrag.get("lat") or mitte.get("lat") or 0.0),
-                lon=float(eintrag.get("lon") or mitte.get("lon") or 0.0),
+                lat=lat,
+                lon=lon,
                 tags=tags,
             )
         )

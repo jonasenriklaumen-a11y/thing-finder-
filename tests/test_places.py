@@ -182,6 +182,7 @@ def test_an_unknown_word_is_searched_by_name() -> None:
     """"Radladen Meier" steht in keiner Kategorienliste -- gefunden werden
     soll er trotzdem."""
     assert _filter_for("Cafe") == "nwr[amenity=cafe]"
+    assert _filter_for("bestes Café") == "nwr[amenity=cafe]"
     assert _filter_for("Fahrradladen") == "nwr[shop=bicycle]"
     assert 'name~"segelmacher"' in _filter_for("Segelmacher")
     # Sonderzeichen fliegen raus, bevor sie in die Abfrage kommen: aus einem
@@ -200,6 +201,43 @@ def test_the_map_failing_is_not_the_end(monkeypatch: pytest.MonkeyPatch) -> None
     _fake_client(monkeypatch, kaputt)
     with pytest.raises(PlacesError):
         find_places("Cafe", "Bremen", "aquaticy-test/1.0")
+
+
+@pytest.mark.parametrize("payload", [[], "kaputt", {"elements": "kaputt"}])
+def test_an_unexpected_map_answer_becomes_a_places_error(
+    monkeypatch: pytest.MonkeyPatch, payload: Any
+) -> None:
+    def unexpected(request: httpx.Request) -> httpx.Response:
+        if "nominatim" in request.url.host:
+            return _antwort(request)
+        return httpx.Response(200, json=payload)
+
+    _fake_client(monkeypatch, unexpected)
+    with pytest.raises(PlacesError, match="Unerwartetes"):
+        find_places("Café", "Bremen", "aquaticy-test/1.0")
+
+
+def test_broken_map_rows_are_skipped_instead_of_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def rows(request: httpx.Request) -> httpx.Response:
+        if "nominatim" in request.url.host:
+            return _antwort(request)
+        return httpx.Response(
+            200,
+            json={
+                "elements": [
+                    None,
+                    {"tags": "kaputt"},
+                    {"tags": {"name": "Café Sicher"}, "lat": "keine-zahl"},
+                ]
+            },
+        )
+
+    _fake_client(monkeypatch, rows)
+    places, _ = find_places("Café", "Bremen", "aquaticy-test/1.0")
+    assert [place.name for place in places] == ["Café Sicher"]
+    assert places[0].lat == 0.0
 
 
 def test_an_unknown_place_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,6 +295,15 @@ def test_the_tool_without_any_place_explains_itself(settings: Settings) -> None:
     box.close()
 
 
+def test_the_tool_rejects_a_broken_radius_without_crashing(settings: Settings) -> None:
+    settings.location = "Bremen"
+    box = Toolbox(settings, cache=None)
+    payload = box.local_places(what="Café", radius_km="weit weg")  # type: ignore[arg-type]
+    assert payload["results"] == []
+    assert "Zahl" in payload["error"]
+    box.close()
+
+
 def test_a_broken_map_does_not_break_the_answer(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
@@ -265,8 +312,13 @@ def test_a_broken_map_does_not_break_the_answer(
 
     monkeypatch.setattr("aquaticy.places.find_places", kaputt)
     settings.location = "Bremen"
-    box = Toolbox(settings, cache=None)
+    events: list[tuple[str, dict[str, Any]]] = []
+    box = Toolbox(settings, cache=None, on_event=lambda name, data: events.append((name, data)))
     payload = box.local_places(what="Café")
     assert payload["results"] == []
     assert "antwortet gerade nicht" in payload["error"]
+    assert payload["fallback"] == "web_search"
+    assert any(name == "places_done" and data["hits"] == 0 for name, data in events)
+    assert any(name == "note" and "Web" in data["text"] for name, data in events)
+    assert not any(name == "error" for name, _ in events)
     box.close()

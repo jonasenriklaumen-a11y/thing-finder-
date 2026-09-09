@@ -2269,7 +2269,13 @@ class Toolbox:
                     "Ortsfilter ein -- ohne Ort gibt es keine Umgebung."
                 ),
             }
-        radius_m = int(float(radius_km or 0) * 1000) or DEFAULT_RADIUS_M
+        try:
+            radius_m = int(float(radius_km or 0) * 1000) or DEFAULT_RADIUS_M
+        except (TypeError, ValueError, OverflowError):
+            return {
+                "results": [],
+                "error": "Der Umkreis muss eine Zahl in Kilometern sein.",
+            }
 
         key = cache_key("places", what.lower(), where.lower(), radius_m)
         cached = self.cache.get(key) if self.cache else None
@@ -2288,8 +2294,12 @@ class Toolbox:
                 timeout=max(15.0, self.settings.fetch_timeout),
             )
         except PlacesError as exc:
-            self._emit("error", message=str(exc))
-            return {"results": [], "error": str(exc)}
+            self._emit("places_done", what=what, hits=0)
+            self._emit(
+                "note",
+                text=f"{exc} Ich suche stattdessen im Web weiter.",
+            )
+            return {"results": [], "error": str(exc), "fallback": "web_search"}
 
         payload: dict[str, Any] = {
             "what": what,
@@ -2662,4 +2672,3 @@ def looks_like_product_page(html: str, url: str) -> bool:
     if extract_product(html, url) is not None:
         return True
     return has_spec_heading(HTMLParser(html))
-

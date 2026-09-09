@@ -21,7 +21,7 @@ $ aquaticy
 
   1. Café Nordwand — Hindenburgstr. 12
      WLAN ausdrücklich erwähnt, Steckdosen an den Fensterplätzen.
-     Quelle: cafe-nordwand.de, Google-Bewertungen 4,6 (212)
+     Quelle: die gelesene Café-Seite; Stand und Link stehen direkt an der Angabe
   ...
 
 > davon nur die, die sonntags offen haben
@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.2                                      │
+│ Aquaticy AI 9.4.3                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -225,8 +225,9 @@ Genauigkeit: gekürzt wird nur, wo sonst geraten werden müsste.
 ### Subagenten: Teilfragen parallel
 
 Vor jeder Planung schaut aquaticy kurz auf die Nachricht: **Braucht das überhaupt eine
-Recherche?** Offensichtlicher Small-Talk („hallo", „danke") wird per Heuristik erkannt und
-kostet keinen einzigen Modellaufruf. Bei allem anderen liefert **ein einziger Aufruf**
+Recherche?** Offensichtlicher Small-Talk („hallo", „wie geht es dir?", „wer bin ich?",
+„danke") bekommt sofort eine kurze, natürliche Standardantwort und kostet keinen einzigen
+Modellaufruf. Bei allem anderen liefert **ein einziger Aufruf**
 Entscheidung *und* Teilfragen — auf dem kleinen Subagenten-Modell, mit abgeschaltetem
 Denk-Modus, kleinem Fenster und erzwungenem JSON-Schema. Fällt er aus oder dauert zu
 lange (`AQUATICY_PLANNER_TIMEOUT`, Default 20 s), gilt sicherheitshalber „Recherche" —
@@ -784,7 +785,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Systemtext und das ganze Gespräch bei *jedem* Aufruf (die Schnittstelle ist
   zustandslos, genau so rechnen die Anbieter auch ab) plus die Antwort und die
   Argumente der Werkzeugaufrufe. Bei normalen Konten endet das Kontingent bei insgesamt
-  200.000 Token. Pro-Konten bleiben unbegrenzt. Der Zähler lässt sich nicht zurücksetzen.
+  400.000 Token. Pro-Konten bleiben unbegrenzt. Der Zähler lässt sich nicht zurücksetzen.
 * **Aufträge** unter *Einstellungen → Aufträge*: Fragen, die Aquaticy AI von selbst
   stellt — stündlich, täglich oder wöchentlich zu einer festen Uhrzeit. Die Antwort
   landet als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
@@ -825,7 +826,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.2                                                   │
+│ Aquaticy AI 9.4.3                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1984,7 +1985,7 @@ im Terminal. Später zeigt `aquaticy pro-code` denselben Code erneut. Alternativ
 ihn vor dem Start mit `AQUATICY_PRO_CODE`.
 
 Normale Konten können recherchieren, chatten und ihre eigenen Einstellungen und Daten
-nutzen. Nach insgesamt 200.000 Token nehmen sie keine weiteren Modellanfragen an. Der
+nutzen. Nach insgesamt 400.000 Token nehmen sie keine weiteren Modellanfragen an. Der
 Zähler lässt sich nicht zurücksetzen. Pro-Konten haben kein Tokenlimit und können
 zusätzlich die LAN-Suche, Home Assistant und die Lagerverwaltung verwenden.
 
@@ -1996,6 +1997,27 @@ aquaticy pro-code   # geheimen Pro-Code anzeigen
 Passwörter werden mit scrypt und einem eigenen Salz gehasht. Sitzungen liegen in
 HttpOnly-Cookies; IP-Adresse und Browsermerkmale speichert Aquaticy nur als Hash für die
 Sitzungsprüfung. Es gibt keine Werbe- oder Analyse-Cookies.
+
+Vor der Registrierung zeigt die Web-App verständlich, welche notwendigen Cookies und Daten
+sie verwendet. Datenschutz, Cookie-Richtlinie, Nutzungsbedingungen und Hinweise zur
+Barrierefreiheit sind schon vor der Anmeldung erreichbar. Die Zustimmung zu Datenschutz und
+Nutzungsbedingungen wird bei der Registrierung zusätzlich auf dem Server geprüft und mit der
+geltenden Textfassung gespeichert.
+
+Da Aquaticy selbst gehostet wird, muss der jeweilige Serverbetreiber seine echten Kontaktdaten
+angeben. Dafür stehen diese Variablen in der serverweiten `.env`; normale Webkonten können sie
+nicht ändern:
+
+```dotenv
+AQUATICY_OPERATOR_NAME=Name oder Organisation
+AQUATICY_OPERATOR_EMAIL=kontakt@example.org
+AQUATICY_OPERATOR_ADDRESS=Straße, PLZ Ort
+```
+
+Fehlen die Angaben, weist die Rechteseite offen darauf hin, statt eine Firma oder Anschrift zu
+erfinden. Aquaticy enthält keine Werbe- oder Tracking-SDKs, veröffentlicht keine
+Nutzerbewertungen und verarbeitet selbst keine Zahlungen. Verlangt ein Betreiber Geld für den
+Zugang, muss er Preise, Kündigung und Erstattung vor dem Kauf selbst klar ausweisen.
 
 ## Aufbau
 

@@ -20,7 +20,7 @@ from pathlib import Path
 from aquaticy.memory import secure_file
 
 SESSION_DAYS = 30
-NORMAL_TOKEN_LIMIT = 200_000
+NORMAL_TOKEN_LIMIT = 400_000
 EMAIL_RE = re.compile(r"^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$")
 PRO_CODE_RE = re.compile(r"^[A-Z0-9]{9}$")
 PRO_CODE_IN_TEXT_RE = re.compile(r"(?<![A-Z0-9])[A-Z0-9]{9}(?![A-Z0-9])", re.IGNORECASE)
@@ -205,7 +205,9 @@ class AuthStore:
                     password_hash BLOB NOT NULL,
                     password_salt BLOB NOT NULL,
                     plan TEXT NOT NULL CHECK(plan IN ('normal','pro')),
-                    created_at REAL NOT NULL
+                    created_at REAL NOT NULL,
+                    terms_version TEXT NOT NULL,
+                    terms_accepted_at REAL NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     token_hash TEXT PRIMARY KEY,
@@ -219,6 +221,17 @@ class AuthStore:
                 CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);
                 """
             )
+            # Konten aus 9.4.2 bleiben gültig. Für neue Konten wird die
+            # ausdrücklich bestätigte Fassung unten beim INSERT festgehalten.
+            columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(users)")}
+            if "terms_version" not in columns:
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN terms_version TEXT NOT NULL DEFAULT ''"
+                )
+            if "terms_accepted_at" not in columns:
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN terms_accepted_at REAL NOT NULL DEFAULT 0"
+                )
         secure_file(self.db_path)
 
     def profile_dir(self, user_id: str) -> Path:
@@ -229,9 +242,22 @@ class AuthStore:
             return None
         return Account(str(row["id"]), str(row["email"]), str(row["plan"]), row["created_at"])
 
-    def register(self, email: str, password: str, plan: str, pro_code: str = "") -> Account:
+    def register(
+        self,
+        email: str,
+        password: str,
+        plan: str,
+        pro_code: str = "",
+        *,
+        terms_accepted: bool = False,
+        terms_version: str = "",
+    ) -> Account:
         email = normalize_email(email)
         validate_password(password)
+        if not terms_accepted or not terms_version.strip():
+            raise ValueError(
+                "Bitte stimme den Datenschutz- und Nutzungsbedingungen ausdrücklich zu."
+            )
         plan = (plan or "normal").strip().lower()
         if plan not in ("normal", "pro"):
             raise ValueError("Wähle ein normales oder ein Pro-Konto.")
@@ -243,8 +269,19 @@ class AuthStore:
         try:
             with self._lock, self._connect() as conn:
                 conn.execute(
-                    "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
-                    (user_id, email, _password_hash(password, salt), salt, plan, now),
+                    "INSERT INTO users "
+                    "(id, email, password_hash, password_salt, plan, created_at, "
+                    "terms_version, terms_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id,
+                        email,
+                        _password_hash(password, salt),
+                        salt,
+                        plan,
+                        now,
+                        terms_version.strip(),
+                        now,
+                    ),
                 )
         except sqlite3.IntegrityError as exc:
             raise ValueError("Für diese E-Mail-Adresse gibt es bereits ein Konto.") from exc

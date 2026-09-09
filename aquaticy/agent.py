@@ -453,10 +453,41 @@ SMALL_TALK_RE = re.compile(
     r"danke(\s+(dir|schoen|schön|sehr))?|vielen\s+dank|thx|thanks|"
     r"ok(ay)?|cool|super|top|passt|perfekt|nice|"
     r"tsch(ue|ü)ss|bye|ciao|bis\s+(dann|morgen|spaeter|später)|gute\s+nacht|"
-    r"wie\s+geht('?s|\s+es)(\s+dir)?|alles\s+klar|aha|hm+|test)"
+    r"wie\s+geht('?s|\s+es)(\s+dir)?|wer\s+bin\s+ich|"
+    r"wer\s+bist\s+du|was\s+bist\s+du|wie\s+hei(ss|ß)t\s+du|"
+    r"alles\s+klar|aha|hm+|test)"
     r"[\s!?.,:;)~-]*$",
     re.IGNORECASE,
 )
+
+
+def standard_chat_reply(question: str) -> str:
+    """Eine kurze, verlaessliche Antwort auf eindeutige Alltagsnachrichten.
+
+    Dafuer braucht es weder Anbieter noch Modell. Die Muster gelten nur fuer
+    die vollstaendige Nachricht; ein angehaengtes echtes Anliegen wird daher
+    weiterhin normal beantwortet.
+    """
+    text = " ".join((question or "").strip().lower().split())
+    text = re.sub(r"[\s!?.,:;)~-]+$", "", text)
+    if re.fullmatch(r"wie\s+geht('?s|\s+es)(\s+dir)?", text):
+        return "Mir geht’s gut, danke! Was möchtest du heute herausfinden?"
+    if re.fullmatch(r"wer\s+bin\s+ich", text):
+        return (
+            "Du bist die Person, mit der ich gerade schreibe. Mehr über dich weiß ich "
+            "nur, wenn du es mir erzählt hast und mein Speicher eingeschaltet ist."
+        )
+    if re.fullmatch(r"(wer|was)\s+bist\s+du|wie\s+hei(ss|ß)t\s+du", text):
+        return "Ich bin Aquaticy, ein KI-Assistent von Jonas. Wobei kann ich dir helfen?"
+    if re.fullmatch(r"hallo|hi|hey|moin|servus|guten\s+(morgen|tag|abend)", text):
+        return "Hallo! Schön, dass du da bist. Wobei kann ich dir helfen?"
+    if re.fullmatch(r"danke(\s+(dir|schoen|schön|sehr))?|vielen\s+dank|thx|thanks", text):
+        return "Sehr gern! Wenn noch etwas offen ist, sag einfach Bescheid."
+    if re.fullmatch(r"tsch(ue|ü)ss|bye|ciao|bis\s+(dann|morgen|spaeter|später)|gute\s+nacht", text):
+        return "Bis bald! Pass auf dich auf."
+    if SMALL_TALK_RE.fullmatch(question.strip()):
+        return "Alles klar. Was möchtest du als Nächstes machen?"
+    return ""
 
 TRIAGE_PROMPT = (
     "Entscheide, ob die folgende Nutzernachricht eine Web-Recherche braucht oder nur "
@@ -1887,6 +1918,16 @@ class Agent:
         # diesen einen Turn. Ausserhalb des Pro-Modus wird es abgetrennt und
         # ignoriert -- ohne Master gibt es nichts zu erzwingen.
         question, gewuenscht_max = strip_max(question)
+        standard = standard_chat_reply(question)
+        if standard:
+            self.max_run = False
+            self._stop.clear()
+            self.toolbox.stats.reset()
+            self._emit("triage", decision="chat", source="standardantwort")
+            self.messages.append({"role": "user", "content": question})
+            self.messages.append({"role": "assistant", "content": standard})
+            self._emit("answer_chunk", text=standard)
+            return self._finish(AgentResult(answer=standard), question)
         if effort:
             self.effort = clean_effort(effort)
         before = (self.mode, self.structured, self.online, self.workshop_on)
@@ -1911,18 +1952,19 @@ class Agent:
                 "note",
                 text="/max gibt es nur im Pro-Modus -- die Frage laeuft normal.",
             )
-        if self.workshop_on:
-            self._touch_workshop()
-        if clean_mode(self.mode) in ("code", "pro"):
-            picked = self._strongest_model()
-            if picked and picked != self.settings.model:
-                self._emit("code_model", model=picked)
         self._stop.clear()
         self.toolbox.stats.reset()
         result = AgentResult(answer="")
         if not question:
             result.answer = ""
             return result
+
+        if self.workshop_on:
+            self._touch_workshop()
+        if clean_mode(self.mode) in ("code", "pro"):
+            picked = self._strongest_model()
+            if picked and picked != self.settings.model:
+                self._emit("code_model", model=picked)
 
         # Alles ab hier gehoert zu diesem Turn. Scheitert das LLM endgueltig,
         # wird bis hierher zurueckgeschnitten -- ein halber Turn (Assistant-

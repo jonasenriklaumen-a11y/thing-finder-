@@ -386,6 +386,42 @@ def test_ui_file_offers_every_setting() -> None:
     assert f'name="{web.API_KEY_FIELD}"' in html
 
 
+def test_ui_exposes_legal_links_and_keyboard_controls() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    for route in ("/privacy", "/cookies", "/terms", "/accessibility"):
+        assert f'href="{route}"' in html
+    assert 'id="auth-terms" required' in html
+    assert 'role="log" aria-live="polite"' in html
+    assert 'class="skip-link" href="#main"' in html
+    assert '<span class="chip">' not in html
+    assert html.count('<button type="button" class="chip">') == 6
+
+
+def test_every_palette_keeps_small_text_at_wcag_aa_contrast() -> None:
+    css = web.UI_FILE.read_text(encoding="utf-8")
+
+    def luminance(colour: str) -> float:
+        channels = [int(colour[pos : pos + 2], 16) / 255 for pos in (1, 3, 5)]
+        linear = [
+            value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+            for value in channels
+        ]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    checked = 0
+    for match in re.finditer(r"([^{}]+)\{([^{}]*--text-3:[^{}]*)\}", css):
+        values = dict(re.findall(r"(--[\w-]+):\s*(#[0-9a-fA-F]{6})", match.group(2)))
+        background = luminance(values["--surface"])
+        for key in ("--text-2", "--text-3"):
+            foreground = luminance(values[key])
+            contrast = (max(background, foreground) + 0.05) / (
+                min(background, foreground) + 0.05
+            )
+            assert contrast >= 4.5, f"{match.group(1).strip()} {key}: {contrast:.2f}:1"
+            checked += 1
+    assert checked == 16 * 2
+
+
 # -- Slash-Befehle --------------------------------------------------------
 def test_help_lists_the_commands(client) -> None:
     status, body = client("POST", "/api/command", {"line": "/help"})
@@ -580,6 +616,18 @@ def test_consent_registration_and_account_isolation(
     status, headers, _ = json_request(port, "POST", "/api/consent", {"accepted": True})
     assert status == 200
     consent = headers["Set-Cookie"].split(";", 1)[0]
+    status, _, payload = json_request(
+        port,
+        "POST",
+        "/api/auth/register",
+        {
+            "email": "person@example.org",
+            "password": "eine sehr lange Passphrase",
+            "plan": "normal",
+        },
+        consent,
+    )
+    assert status == 400 and "ausdrücklich" in payload["error"]
     status, headers, payload = json_request(
         port,
         "POST",
@@ -588,6 +636,7 @@ def test_consent_registration_and_account_isolation(
             "email": "person@example.org",
             "password": "eine sehr lange Passphrase",
             "plan": "normal",
+            "terms_accepted": True,
         },
         consent,
     )
@@ -605,6 +654,20 @@ def test_consent_registration_and_account_isolation(
     assert status == 200 and json.loads(body)["account"]["pro"] is False
     status, _, payload = json_request(port, "POST", "/api/ha", {}, cookies)
     assert status == 403 and "Pro" in payload["error"]
+
+
+def test_legal_pages_are_available_before_account_login(port: int) -> None:
+    for route, heading in (
+        ("/privacy", "Datenschutz"),
+        ("/cookies", "Cookie-Richtlinie"),
+        ("/terms", "Nutzungsbedingungen"),
+        ("/accessibility", "Barrierefreiheit"),
+    ):
+        status, headers, body = raw_request(port, "GET", route)
+        text = body.decode("utf-8")
+        assert status == 200 and f"<h1>{heading}</h1>" in text
+        assert headers["Cache-Control"] == "no-store"
+        assert "<script" not in text
 
 
 def test_security_headers_and_origin_check(port: int) -> None:
@@ -2992,11 +3055,12 @@ def test_the_switch_looks_like_a_switch_and_moves() -> None:
 
 
 def test_no_plain_checkbox_is_left_over() -> None:
-    """Zwei Bauarten für dieselbe Ja/Nein-Frage wären nur verwirrend."""
+    """Funktionsschalter bleiben Schalter; nur Zustimmung ist ein Kontrollkästchen."""
     html = web.UI_FILE.read_text(encoding="utf-8")
     roh = html.count('<input type="checkbox"')
     angezogen = html.count('<input type="checkbox" role="switch" class="schalter"')
-    assert roh == angezogen, f"{roh - angezogen} Ankreuzfelder ohne Schalter-Anstrich"
+    assert roh == angezogen + 1
+    assert '<input type="checkbox" id="auth-terms" required>' in html
 
 
 # ---------------------------------------------------------------------------

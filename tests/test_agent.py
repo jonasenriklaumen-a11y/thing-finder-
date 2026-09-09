@@ -979,9 +979,71 @@ def test_small_talk_skips_planning_without_any_llm_call(
     )
     result = Agent(settings, cache=None, toolbox=toolbox).ask(greeting, stream=False)
     assert researched == []
-    # Genau ein Aufruf: die Antwort selbst. Keine Triage, kein Planer.
-    assert len(calls) == 1
+    # Auch die Antwort ist lokal festgelegt: kein Anbieter, kein Planer.
+    assert calls == []
     assert result.answer
+
+
+@pytest.mark.parametrize(
+    ("question", "answer"),
+    [
+        ("Hallo!", "Hallo! Schön, dass du da bist. Wobei kann ich dir helfen?"),
+        ("Wie geht es dir?", "Mir geht’s gut, danke! Was möchtest du heute herausfinden?"),
+        (
+            "Wer bin ich?",
+            "Du bist die Person, mit der ich gerade schreibe. Mehr über dich weiß ich "
+            "nur, wenn du es mir erzählt hast und mein Speicher eingeschaltet ist.",
+        ),
+        (
+            "Wer bist du?",
+            "Ich bin Aquaticy, ein KI-Assistent von Jonas. Wobei kann ich dir helfen?",
+        ),
+    ],
+)
+def test_common_personal_questions_have_a_natural_standard_answer(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Settings,
+    toolbox: Toolbox,
+    question: str,
+    answer: str,
+) -> None:
+    monkeypatch.setattr(
+        "litellm.completion",
+        lambda **kwargs: pytest.fail("eine Standardantwort darf kein Modell brauchen"),
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    agent = Agent(
+        settings,
+        cache=None,
+        toolbox=toolbox,
+        on_event=lambda name, payload: events.append((name, payload)),
+    )
+    result = agent.ask(question, stream=False)
+    assert result.answer == answer
+    assert ("answer_chunk", {"text": answer}) in events
+    assert events[-1][0] == "done"
+
+
+@pytest.mark.parametrize("mode", ["normal", "pro", "code"])
+def test_standard_answers_work_in_every_mode_without_starting_extra_work(
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Settings,
+    toolbox: Toolbox,
+    mode: str,
+) -> None:
+    monkeypatch.setattr(
+        Agent,
+        "_strongest_model",
+        lambda *args, **kwargs: pytest.fail("die Standardantwort braucht kein Modell"),
+    )
+    monkeypatch.setattr(
+        Agent,
+        "_touch_workshop",
+        lambda *args, **kwargs: pytest.fail("die Standardantwort braucht keine Werkstatt"),
+    )
+    agent = Agent(settings, cache=None, toolbox=toolbox)
+    result = agent.ask("Hallo", stream=False, mode=mode, sandbox=True)
+    assert result.answer.startswith("Hallo!")
 
 
 def test_ambiguous_messages_ask_the_small_model_with_a_time_limit(
@@ -1117,6 +1179,7 @@ def test_real_questions_are_never_smalltalk() -> None:
         "wie geht das mit dem export?",
         "test von notebooks bis 1200 euro",
         "ok und sonntags?",
+        "wer bin ich laut meinem gespeicherten Profil?",
     ):
         assert not SMALL_TALK_RE.match(question), question
 
@@ -2916,8 +2979,9 @@ def test_nothing_read_means_nothing_to_check(
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
     result = agent.ask("Hallo", stream=False, recheck=True)
-    assert result.answer == "Hallo!"
+    assert result.answer == "Hallo! Schön, dass du da bist. Wobei kann ich dir helfen?"
     assert result.rechecked is False
+    assert llm.calls == []
 
 
 def test_a_failed_second_round_keeps_the_first_answer(

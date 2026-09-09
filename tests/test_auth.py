@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from aquaticy.auth import Account, AuthStore, RateLimiter, new_pro_code, pro_code_for
+from aquaticy.auth import (
+    NORMAL_TOKEN_LIMIT,
+    Account,
+    AuthStore,
+    RateLimiter,
+    new_pro_code,
+    pro_code_for,
+)
 from aquaticy.web import ChatSession
+
+TERMS = {"terms_accepted": True, "terms_version": "test"}
 
 
 @pytest.fixture
@@ -14,18 +23,40 @@ def store(tmp_path):
 
 
 def test_normal_account_and_login(store: AuthStore) -> None:
-    account = store.register("Mensch@Example.org", "eine sehr lange Passphrase", "normal")
+    account = store.register(
+        "Mensch@Example.org", "eine sehr lange Passphrase", "normal", **TERMS
+    )
     assert account.email == "mensch@example.org"
     assert account.plan == "normal"
     assert store.authenticate(account.email, "eine sehr lange Passphrase") == account
     assert store.authenticate(account.email, "falsch und trotzdem lang genug") is None
 
 
+def test_free_accounts_receive_four_hundred_thousand_tokens() -> None:
+    assert NORMAL_TOKEN_LIMIT == 400_000
+
+
+def test_registration_requires_and_records_explicit_terms(store: AuthStore) -> None:
+    with pytest.raises(ValueError, match="ausdrücklich"):
+        store.register("nein@example.org", "eine sehr lange Passphrase", "normal")
+    account = store.register(
+        "ja@example.org", "eine sehr lange Passphrase", "normal", **TERMS
+    )
+    with store._connect() as conn:
+        row = conn.execute(
+            "SELECT terms_version, terms_accepted_at FROM users WHERE id=?", (account.id,)
+        ).fetchone()
+    assert row["terms_version"] == "test"
+    assert row["terms_accepted_at"] > 0
+
+
 def test_pro_needs_the_secret_code(store: AuthStore) -> None:
     with pytest.raises(ValueError, match="Pro-Code"):
-        store.register("a@example.org", "eine sehr lange Passphrase", "pro", "FALSCH123")
+        store.register(
+            "a@example.org", "eine sehr lange Passphrase", "pro", "FALSCH123", **TERMS
+        )
     account = store.register(
-        "a@example.org", "eine sehr lange Passphrase", "pro", "pro123456"
+        "a@example.org", "eine sehr lange Passphrase", "pro", "pro123456", **TERMS
     )
     assert account.pro
 
@@ -36,20 +67,23 @@ def test_pro_accepts_the_terminal_label_when_copied(store: AuthStore) -> None:
         "eine sehr lange Passphrase",
         "pro",
         f"Pro-Code: {store.pro_code} (9 Zeichen, geheim halten)",
+        **TERMS,
     )
     assert account.pro
 
 
 def test_duplicate_email_and_short_password_are_rejected(store: AuthStore) -> None:
     with pytest.raises(ValueError, match="15 Zeichen"):
-        store.register("a@example.org", "zu kurz", "normal")
-    store.register("a@example.org", "eine sehr lange Passphrase", "normal")
+        store.register("a@example.org", "zu kurz", "normal", **TERMS)
+    store.register("a@example.org", "eine sehr lange Passphrase", "normal", **TERMS)
     with pytest.raises(ValueError, match="bereits"):
-        store.register("A@example.org", "noch eine lange Passphrase", "normal")
+        store.register("A@example.org", "noch eine lange Passphrase", "normal", **TERMS)
 
 
 def test_session_is_random_device_bound_and_revocable(store: AuthStore) -> None:
-    account = store.register("a@example.org", "eine sehr lange Passphrase", "normal")
+    account = store.register(
+        "a@example.org", "eine sehr lange Passphrase", "normal", **TERMS
+    )
     token = store.create_session(account, "Firefox|de", "192.168.1.4")
     assert token != store.create_session(account, "Firefox|de", "192.168.1.4")
     assert store.session_account(token, "Firefox|de") == account

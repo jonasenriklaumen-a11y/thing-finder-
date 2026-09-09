@@ -48,6 +48,7 @@ from aquaticy.config import (
     suggest_model,
     write_env_file,
 )
+from aquaticy.legal import LEGAL_ROUTES, LEGAL_VERSION, legal_page
 
 UI_FILE = Path(__file__).with_name("webui.html")
 
@@ -1773,6 +1774,8 @@ class Handler(BaseHTTPRequestHandler):
         route = self._route()
         if route in ("/", "/index.html"):
             self._send_ui()
+        elif route in LEGAL_ROUTES:
+            self._send(200, legal_page(route), "text/html; charset=utf-8")
         elif route == "/api/auth/status":
             account = self._account()
             self._json(
@@ -1994,12 +1997,26 @@ class Handler(BaseHTTPRequestHandler):
                 return
             payload = self._read_json()
             if route.endswith("register"):
+                if payload.get("terms_accepted") is not True:
+                    self._json(
+                        {
+                            "ok": False,
+                            "error": (
+                                "Bitte stimme den Datenschutz- und "
+                                "Nutzungsbedingungen ausdrücklich zu."
+                            ),
+                        },
+                        400,
+                    )
+                    return
                 try:
                     account = AUTH.register(
                         str(payload.get("email", "")),
                         str(payload.get("password", "")),
                         str(payload.get("plan", "normal")),
                         str(payload.get("pro_code", "")),
+                        terms_accepted=True,
+                        terms_version=LEGAL_VERSION,
                     )
                 except ValueError as exc:
                     self._json({"ok": False, "error": str(exc)}, 400)
@@ -2391,7 +2408,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                 self._json(
                     {
                         "error": (
-                            "Dein Kontingent von 200.000 Token ist aufgebraucht. "
+                            "Dein Kontingent von 400.000 Token ist aufgebraucht. "
                             "Mit einem Pro-Konto gibt es kein Tokenlimit."
                         ),
                         "code": "token_limit",
