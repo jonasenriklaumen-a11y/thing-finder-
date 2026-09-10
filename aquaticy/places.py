@@ -41,6 +41,16 @@ import httpx
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
+#: Overpass ist gespendete Rechenzeit und entsprechend oft ausgelastet -- ein
+#: Zeitlimit dort heisst nicht, dass es den Laden nicht gibt. Deshalb steht
+#: hinter dem Hauptserver ein zweiter, oeffentlich zum Ausweichen gedachter.
+#: Der Takt gilt weiter fuer beide zusammen: ausweichen ist kein Freibrief,
+#: doppelt so oft zu fragen.
+OVERPASS_MIRRORS = (
+    OVERPASS_URL,
+    "https://overpass.kumi.systems/api/interpreter",
+)
+
 #: Hoechstens ein Aufruf je Sekunde -- so steht es in der Nutzungsregel von
 #: Nominatim, und Overpass bittet um dasselbe Mass. Das Schloss ist
 #: modulweit: es hilft nichts, wenn jeder Agent fuer sich hoeflich ist.
@@ -224,14 +234,22 @@ def find_places(
         f"{_filter_for(what)}(around:{radius},{lat},{lon});"
         f"out center tags {limit};"
     )
-    _warte()
-    try:
-        with _client(user_agent, timeout) as client:
-            antwort = client.post(OVERPASS_URL, data={"data": abfrage})
-            antwort.raise_for_status()
-            daten = antwort.json()
-    except Exception as exc:
-        raise PlacesError(f"Die Karte antwortet gerade nicht: {type(exc).__name__}") from exc
+    daten: Any = None
+    letzter: Exception | None = None
+    for server in OVERPASS_MIRRORS:
+        _warte()
+        try:
+            with _client(user_agent, timeout) as client:
+                antwort = client.post(server, data={"data": abfrage})
+                antwort.raise_for_status()
+                daten = antwort.json()
+            break
+        except Exception as exc:
+            letzter = exc
+    if daten is None:
+        raise PlacesError(
+            f"Die Karte antwortet gerade nicht: {type(letzter).__name__}"
+        ) from letzter
 
     if not isinstance(daten, dict):
         raise PlacesError("Die Karte gab etwas Unerwartetes zurück.")

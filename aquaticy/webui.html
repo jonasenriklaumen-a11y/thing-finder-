@@ -1763,6 +1763,11 @@ let zustandOffen = {};
 // einen ReferenceError -- der stoppt das ganze Skript, und dann bleibt auf
 // dem Handy die Seitenleiste offen ueber dem Chat liegen.
 let kopfTimer = null;
+// Aus demselben Grund hier oben: vor der Anmeldung beantwortet der Server jede
+// geschuetzte Abfrage mit einer Absage, und die Schalter stossen die Kopfzeile
+// schon beim Aufbauen an. Dieser Riegel haelt sie zurueck, bis wirklich jemand
+// angemeldet ist -- sonst stehen drei Fehlversuche in der Konsole.
+let angemeldet = false;
 function merkeZustand(teil){
   Object.assign(zustandOffen, teil);
   clearTimeout(zustandTimer);
@@ -2038,8 +2043,8 @@ async function bootAuth(){
     if (!state.consent){ showAuth(consentCard); return; }
     if (!state.authenticated){ setAuthMode("register"); showAuth(loginCard); return; }
     currentUsername = state.account?.username || "";
-    greet();
     authGate.hidden = true;
+    starteOberflaeche();
   } catch { showAuth(loginCard); $("#auth-error").textContent = "Der Server ist nicht erreichbar."; }
 }
 bootAuth();
@@ -2824,7 +2829,10 @@ async function wiederAufnehmen(){
   let stand;
   try {
     const res = await api("/api/runstate");
-    if (!res.ok) return;
+    // Auch eine Absage will gelesen werden: eine Antwort, deren Koerper
+    // niemand abholt, bleibt im Browser eine offene Anfrage -- die Seite
+    // gilt dann dauerhaft als "laedt noch".
+    if (!res.ok){ await res.text().catch(() => ""); return; }
     stand = await res.json();
   } catch { return; }
   if (!stand || !stand.resume || busy) return;
@@ -3120,6 +3128,7 @@ function drawRecents(){
 }
 
 async function loadRecents(){
+  if (!angemeldet) return;
   const gesucht = chatQuery;
   try {
     const pfad = gesucht ? `/api/chats?q=${encodeURIComponent(gesucht)}` : "/api/chats";
@@ -4436,6 +4445,7 @@ function rotateSuggestions(seed = Date.now()){
 // davon nichts, die Zeile steht ohnehin erst da, wenn die Antwort kommt.
 // (Die Variable dazu steht weit oben -- siehe dort, warum.)
 function refreshHeader(){
+  if (!angemeldet) return;
   clearTimeout(kopfTimer);
   kopfTimer = setTimeout(kopfNeuZeichnen, 60);
 }
@@ -4479,11 +4489,17 @@ async function kopfNeuZeichnen(){
     $("#status").title = cfg.problems?.length ? cfg.problems.join("; ") : "";
   } catch { /* Server weg -- die Oberflaeche bleibt trotzdem bedienbar */ }
 }
-greet();
-refreshHeader();
-loadRecents();
-wiederAufnehmen();
-input.focus();
+// Wird von `bootAuth` gerufen, sobald jemand angemeldet ist -- vorher gibt
+// es nichts zu holen. Die Deklaration steht hier unten, gilt aber im ganzen
+// Skript, also auch dort oben.
+async function starteOberflaeche(){
+  angemeldet = true;
+  greet();
+  refreshHeader();
+  loadRecents();
+  await wiederAufnehmen();
+  input.focus();
+}
 </script>
 </body>
 </html>

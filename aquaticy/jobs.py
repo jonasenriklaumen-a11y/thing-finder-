@@ -189,7 +189,8 @@ def next_time(rhythm: str, hour: int, minute: int, weekday: int, now: float = 0.
     Gerechnet wird in Ortszeit: wer "jeden Morgen um acht" sagt, meint acht
     Uhr bei sich, nicht in UTC.
     """
-    jetzt = datetime.fromtimestamp(now or time.time())
+    stempel = now or time.time()
+    jetzt = datetime.fromtimestamp(stempel)
     rhythm = clean_rhythm(rhythm)
     hour = max(0, min(23, int(hour)))
     minute = max(0, min(59, int(minute)))
@@ -198,7 +199,10 @@ def next_time(rhythm: str, hour: int, minute: int, weekday: int, now: float = 0.
     # laenger dauert als ein Takt, folgt der naechste erst, wenn der vorige
     # fertig ist -- die Beobachtung laeuft also am Stueck, ohne sich zu stapeln.
     if rhythm == "always":
-        return jetzt.timestamp()
+        # Der Rohstempel, nicht der Umweg ueber datetime: der rundet auf
+        # Mikrosekunden und kann dabei aufrunden -- dann waere "sofort" um
+        # ein Haar in der Zukunft und der Auftrag bliebe einen Takt liegen.
+        return stempel
 
     intervals = {"minutes1": 1, "minutes5": 5, "minutes15": 15, "minutes30": 30}
     if rhythm in intervals:

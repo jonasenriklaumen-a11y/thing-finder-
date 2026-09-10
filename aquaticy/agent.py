@@ -174,6 +174,12 @@ VISUAL_SOURCES_PROMPT = """
   FIRMS-Hotspot sind Hinweise und allein kein bestätigter Brand oder anderes Ereignis.
 - Ist für die Frage keine sinnvolle Bildquelle vorhanden, sage knapp, was du gesucht
   hast und warum daraus keine belastbare Beobachtung möglich ist.
+- Dieser Schalter ist eingeschaltet, weil der Nutzer ein Bild sehen will. Eine Liste
+  von Webcam-Adressen zum Selbstanklicken ist keine Antwort: öffne mindestens eine
+  davon wirklich mit `inspect_public_visual`. Geht die erste nicht, nimm die nächste.
+- Schreibe niemals einen Platzhalter wie "[Bild: …]" in den Text. Das Bild kommt aus
+  dem Werkzeug und wird von der Oberfläche angezeigt; ein Platzhalter täuscht eins vor,
+  das es nicht gibt.
 """
 
 #: Die drei Arbeitsweisen. "normal" fuehrt ein Gespraech, "code" schreibt
@@ -773,6 +779,54 @@ fragen -- weil die Angabe schon im Gespraech steht, weil du sie selbst herausfin
 kannst oder weil sie fuer die Antwort gar nicht noetig ist --, dann antworte \
 stattdessen und nenne in einem Halbsatz, wovon du ausgehst. Beides ist recht; nur \
 die Frage im Text ist es nicht."""
+
+#: Was der Agent zu hoeren bekommt, wenn er mit eingeschalteten Bildquellen
+#: ohne ein einziges Bild fertig geworden ist. Der Schalter ist eine Ansage:
+#: wer ihn umlegt, will sehen und nicht lesen. Eine Liste von Webcam-Adressen
+#: ist deshalb keine Antwort -- die haette auch eine Suchmaschine geliefert.
+FORCE_VISUAL_PROMPT = """\
+Du hast kein einziges Bild geoeffnet. Der Nutzer hat die oeffentlichen Bildquellen \
+ausdruecklich eingeschaltet: er will ein Bild sehen, keine Liste von Adressen, die \
+er selbst anklicken soll.
+
+Ruf jetzt `inspect_public_visual` auf -- fuer jede ernsthafte Kandidatenseite eine, \
+bis eine ein brauchbares Bild liefert. Kommt eine Quelle nicht durch, nimm die \
+naechste; gib erst auf, wenn du wirklich alle versucht hast.%(kandidaten)s
+
+Erst danach antwortest du. Hat am Ende keine einzige Quelle ein Bild hergegeben, \
+sag in einem Satz, welche du versucht hast und woran es lag."""
+
+#: Hoechstens so viele Adressen wandern in den Nachfass-Text. Mehr waere eine
+#: Aufgabenliste statt eines Hinweises -- und jeder Aufruf kostet Budget.
+FORCE_VISUAL_CANDIDATES = 4
+
+#: So viele Adressen probiert der Agent am Ende selbst durch, wenn das Modell
+#: auch nach dem Nachfassen keins geoeffnet hat. Das ist die letzte Stufe:
+#: keine Bitte mehr, sondern der Aufruf von Hand.
+FALLBACK_VISUAL_TRIES = 3
+
+#: Adressen aus einem Antworttext. Bewusst grob -- was hier zu viel gefunden
+#: wird, faellt beim Abrufen ohnehin durch die Pruefung in `fetch.py`.
+ANSWER_URL_RE = re.compile(r"https?://[^\s<>\]\)\"'`]{6,}")
+
+#: Endungen, die am Ende einer Adresse fast immer Satzzeichen sind: "siehe
+#: example.com/webcam." liefert sonst eine Adresse mit Punkt am Schluss.
+URL_TRAILING = ".,;:!?"
+
+
+def answer_urls(text: str) -> list[str]:
+    """Die Adressen aus *text*, in Reihenfolge und ohne Doppelte."""
+    gefunden: list[str] = []
+    for roh in ANSWER_URL_RE.findall(text or ""):
+        adresse = roh.rstrip(URL_TRAILING)
+        # Markdown-Links enden auf ")" -- das gehoert zur Klammer, nicht zur
+        # Adresse, ausser die Adresse hat selbst eine offene Klammer.
+        if adresse.endswith(")") and adresse.count("(") < adresse.count(")"):
+            adresse = adresse[:-1].rstrip(URL_TRAILING)
+        if adresse and adresse not in gefunden:
+            gefunden.append(adresse)
+    return gefunden
+
 
 #: Kuerzer als das ist keine Antwort mehr, sondern Beiwerk um eine Frage
 #: herum ("Klar, mach ich."). Grosszuegig gewaehlt: im Zweifel gilt der Text
@@ -2029,6 +2083,8 @@ class Agent:
         used = 0
         #: Hoechstens einmal je Anfrage zurueckschicken (siehe unten).
         genudged = False
+        #: Dasselbe fuer das fehlende Bild -- ebenfalls hoechstens einmal.
+        gebildert = False
 
         # Automatische Vorrecherche: die Anfrage wird zerlegt und die Teile
         # laufen parallel, bevor der Hauptagent uebernimmt. Was die
@@ -2095,6 +2151,17 @@ class Agent:
                     self._emit("answer_reset", reason="rueckfrage")
                     self.messages.append({"role": "user", "content": FORCE_ASK_PROMPT})
                     continue
+                # Eingeschaltete Bildquellen ohne ein einziges Bild sind
+                # kein Ergebnis, sondern ein uebersehener Schalter. Einmal
+                # zurueckschicken, mit den Adressen, die schon dastehen --
+                # danach greift die Notloesung nach der Schleife.
+                if not gebildert and self._should_force_visual():
+                    gebildert = True
+                    self._emit("answer_reset", reason="bildquelle")
+                    self.messages.append(
+                        {"role": "user", "content": self._visual_nudge(antwort)}
+                    )
+                    continue
                 result.answer = antwort
                 break
 
@@ -2127,6 +2194,8 @@ class Agent:
 
         if self.recheck_on and self.online and not result.stopped:
             self._second_round(result, question=question, stream=stream)
+        if not result.stopped:
+            self._fallback_visual(result)
         return self._finish(result, question)
 
     def _second_round(self, result: AgentResult, *, question: str, stream: bool) -> None:
@@ -2466,6 +2535,104 @@ class Agent:
             and self.mode != "code"
             and is_only_a_question(answer)
         )
+
+    def _visual_candidates(self, answer: str) -> list[str]:
+        """Adressen, hinter denen ein Bild stecken koennte -- beste zuerst.
+
+        Zuerst das, was in der Antwort steht: hat das Modell drei Webcam-
+        Seiten aufgezaehlt, sind genau die gemeint. Danach die Seiten, die es
+        selbst gelesen hat -- dort steht oft das eigentliche Kamerabild.
+        Schon geprueftes faellt raus, sonst laeuft der Nachfass ins Leere.
+        """
+        stats = self.toolbox.stats
+        gesehen = {eintrag.get("source_url", "") for eintrag in stats.visuals}
+        gesehen |= {eintrag.get("url", "") for eintrag in stats.visuals}
+        kandidaten: list[str] = []
+        for adresse in answer_urls(answer):
+            if adresse not in gesehen and adresse not in kandidaten:
+                kandidaten.append(adresse)
+        for eintrag in stats.sources:
+            adresse = str(eintrag.get("url", "")).strip()
+            if adresse and adresse not in gesehen and adresse not in kandidaten:
+                kandidaten.append(adresse)
+        return kandidaten
+
+    def _should_force_visual(self) -> bool:
+        """Muss der Agent zurueck, weil kein einziges Bild kam?
+
+        Der Schalter ist eine Ansage und keine Anregung: wer die
+        oeffentlichen Bildquellen einschaltet, will ein Bild sehen. Drei
+        Faelle bleiben trotzdem aussen vor, weil Nachfassen dort falsch
+        waere: ohne Web geht es nicht, im Code-Modus gibt es das Werkzeug
+        nicht, und wer gerade eine Rueckfrage gestellt hat, wartet auf eine
+        Antwort statt auf ein Bild.
+        """
+        return (
+            self.visual_sources
+            and self.online
+            and clean_mode(self.mode) != "code"
+            and not self.toolbox.stats.visuals
+            and not self.toolbox.stats.questions
+        )
+
+    def _visual_nudge(self, answer: str) -> str:
+        """Der Nachfass-Text, wenn moeglich mit konkreten Adressen."""
+        kandidaten = self._visual_candidates(answer)[:FORCE_VISUAL_CANDIDATES]
+        if not kandidaten:
+            return FORCE_VISUAL_PROMPT % {"kandidaten": ""}
+        liste = "\n".join(f"- {adresse}" for adresse in kandidaten)
+        return FORCE_VISUAL_PROMPT % {
+            "kandidaten": "\n\nDiese Adressen stehen schon fest, fang damit an:\n" + liste
+        }
+
+    def _fallback_visual(self, result: AgentResult) -> None:
+        """Letzte Stufe: die Bildquelle selbst oeffnen.
+
+        Zweimal gebeten ist genug. Bleibt das Modell dabei, nur Adressen
+        aufzuzaehlen, ruft der Agent das Werkzeug eben von Hand auf und
+        haengt das Ergebnis an die Antwort. Das ist kein schoener Weg, aber
+        der einzige, der das Versprechen des Schalters unabhaengig davon
+        haelt, wie gut das gewaehlte Modell zuhoert.
+        """
+        if not self._should_force_visual():
+            return
+        frage = "Was ist auf diesem aktuellen Bild zu sehen?"
+        versucht: list[str] = []
+        for adresse in self._visual_candidates(result.answer)[:FALLBACK_VISUAL_TRIES]:
+            if self.stopped:
+                return
+            versucht.append(adresse)
+            # Auch der Notgriff gehoert ins Mitlesen -- sonst taucht ein
+            # Bild in der Antwort auf, das im Protokoll niemand angefasst hat.
+            self._emit("action", tool="inspect_public_visual",
+                       arguments={"url": adresse, "question": frage})
+            try:
+                antwort = self.toolbox.call(
+                    "inspect_public_visual", {"url": adresse, "question": frage}
+                )
+            except Exception:
+                continue
+            self._emit("action_done", tool="inspect_public_visual",
+                       result=json.dumps(antwort, ensure_ascii=False,
+                                         default=str)[:TRACE_CHARS])
+            if not isinstance(antwort, dict) or antwort.get("error"):
+                continue
+            beobachtung = str(antwort.get("observation", "")).strip()
+            nachtrag = (
+                f"\n\nBild von {antwort.get('url') or adresse}"
+                + (f":\n{beobachtung}" if beobachtung else ".")
+            )
+            result.answer = (result.answer or "").rstrip() + nachtrag
+            self._emit("answer_chunk", text=nachtrag)
+            return
+        if versucht:
+            nachtrag = (
+                "\n\nEin eigenes Bild kam nicht zustande: "
+                + ", ".join(versucht)
+                + " haben keins hergegeben."
+            )
+            result.answer = (result.answer or "").rstrip() + nachtrag
+            self._emit("answer_chunk", text=nachtrag)
 
     def _finish(self, result: AgentResult, question: str = "") -> AgentResult:
         stats = self.toolbox.stats

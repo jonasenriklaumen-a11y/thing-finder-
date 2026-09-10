@@ -390,8 +390,15 @@ def live_player_page(html: str) -> bool:
 
 
 def placeholder_image(url: str) -> bool:
-    """Sieht diese Bildadresse nach Ladeanzeige oder Platzhalter aus?"""
-    name = (url or "").rsplit("/", 1)[-1].lower()
+    """Sieht diese Bildadresse nach Ladeanzeige oder Platzhalter aus?
+
+    Gewertet wird nur der Dateiname. Der Rest der Adresse gehoert nicht dazu:
+    Webcams haengen gegen den Zwischenspeicher gern Parameter an
+    (`cam.jpg?mode=default`), und ein Wort im Query-Teil sagt nichts darueber,
+    was auf dem Bild ist.
+    """
+    ohne_frage = (url or "").split("?", 1)[0].split("#", 1)[0]
+    name = ohne_frage.rsplit("/", 1)[-1].lower()
     return any(marker in name for marker in PLACEHOLDER_MARKERS)
 
 

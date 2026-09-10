@@ -450,6 +450,10 @@ def test_player_and_placeholder_are_recognised() -> None:
     assert placeholder_image("https://cam.example/loading.gif")
     assert placeholder_image("https://cam.example/logo.png")
     assert not placeholder_image("https://cam.example/webcam-nord.jpg")
+    # Gegen den Zwischenspeicher haengen Webcams gern Parameter an. Was dort
+    # steht, sagt nichts darueber, was auf dem Bild ist.
+    assert not placeholder_image("https://cam.example/cam.jpg?mode=default")
+    assert placeholder_image("https://cam.example/spinner.png?t=17")
 
 
 def test_fetch_extracts_products(fixture_html) -> None:

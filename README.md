@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.9                                      │
+│ Aquaticy AI 9.4.10                                     │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -838,7 +838,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.9                                                   │
+│ Aquaticy AI 9.4.10                                                  │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1291,7 +1291,10 @@ erst den Ort (Nominatim), dann die Umgebung (Overpass). Zurück kommen Name,
 Adresse, Telefon, Öffnungszeiten und, wenn es eine gibt, die **Website**:
 eingetragen von Leuten vor Ort, nicht von einer Marketingabteilung. Was dabei
 herauskommt, liest Aquaticy danach ganz normal mit `fetch_page`. Für alles
-Örtliche ist das der beste erste Griff, nicht der letzte.
+Örtliche ist das der beste erste Griff, nicht der letzte. Antwortet der
+Overpass-Server nicht — er ist gespendete Rechenzeit und entsprechend oft
+ausgelastet —, fragt Aquaticy einmal beim öffentlichen Ausweichserver nach,
+bevor es aufgibt. Der Takt von einem Aufruf pro Sekunde gilt für beide zusammen.
 
 Beide Dienste gehören der OpenStreetMap Foundation und sind gespendete
 Rechenzeit, keine Selbstbedienung. Ihre Regeln sind eingebaut, nicht nur
@@ -1397,6 +1400,14 @@ Observation und NOAA GOES. Bei Webcams sucht es zuerst nach offiziellen Angebote
 Stadt, Gemeinde, Tourismusstelle oder des Kamerabetreibers. Aufnahmezeit und Quelle werden
 genannt; sichtbare Auffälligkeiten bleiben Hinweise und gelten nicht allein als bestätigtes
 Ereignis.
+
+Ist der Schalter an, endet eine Antwort **nie mit einer bloßen Liste von
+Webcam-Adressen**. Hat das Modell keine einzige Quelle geöffnet, bekommt es die schon
+genannten Adressen zurück mit der Aufforderung, sie der Reihe nach wirklich zu öffnen.
+Bleibt es auch dann dabei, ruft Aquaticy die Bildprüfung selbst auf und hängt das
+Ergebnis an die Antwort. Gibt keine der versuchten Quellen ein Bild her, steht das als
+Satz dort — mit den Adressen, an denen es gescheitert ist. Platzhalter wie „[Bild: …]"
+sind ausdrücklich verboten: ein Bild kommt aus dem Werkzeug oder gar nicht.
 
 Gefundene öffentliche Webcam-, Satelliten-, Karten- und Straßenbilder erscheinen direkt
 unter der Antwort. Für einen Laden kann Aquaticy den Ort zuerst über OpenStreetMap finden

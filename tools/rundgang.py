@@ -224,9 +224,19 @@ def starte_server(agent: FakeAgent) -> int:
     os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-rundgang")
     from aquaticy import web
 
+    # Am Bauplan, nicht am einzelnen Objekt: seit der Mehrbenutzer-Version
+    # bekommt jedes Konto seine eigene Sitzung, und die baut sich ihren Agenten
+    # selbst. Wer nur die Standardsitzung umbiegt, sieht den gestellten Agenten
+    # nie wieder -- die Oberflaeche telefoniert dann wirklich nach draussen.
+    def _gestellter_agent(self: Any) -> FakeAgent:
+        # `_agent` mitsetzen wie das Original: der Abbruch greift bewusst
+        # ohne Sperre auf dieses Feld zu und wuerde sonst ins Leere laufen.
+        self._agent = agent
+        return agent
+
+    web.ChatSession.agent = _gestellter_agent            # type: ignore[method-assign]
+    web.ChatSession.chat_id = lambda self: agent.session_id  # type: ignore[method-assign]
     web.SESSION._agent = agent
-    web.SESSION.agent = lambda: agent          # type: ignore[method-assign]
-    web.SESSION.chat_id = lambda: agent.session_id  # type: ignore[method-assign]
 
     port = freier_port()
     threading.Thread(
@@ -243,12 +253,65 @@ def starte_server(agent: FakeAgent) -> int:
     raise RuntimeError("Der Server ist nicht hochgekommen.")
 
 
+def anmelden(pg: Any, port: int) -> None:
+    """Legt ein Konto an und geht durch die Tuer.
+
+    Seit der Mehrbenutzer-Version steht vor der Oberflaeche eine Einwilligung
+    und eine Anmeldung. Der Rundgang legt sich dafuer ein Pro-Konto an: nur
+    damit ist wirklich jeder Teil der Oberflaeche zu sehen, den er abgeht.
+    """
+    from aquaticy.auth import pro_code_for
+    from aquaticy.config import get_settings
+
+    pg.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
+    pg.wait_for_selector("#consent-card:not([hidden])", timeout=10_000)
+    pg.click("#consent-yes")
+    pg.wait_for_selector("#login-card:not([hidden])", timeout=10_000)
+    pg.check('input[name="plan"][value="pro"]')
+    pg.fill("#auth-username", "Rundgang")
+    pg.fill("#auth-email", "rundgang@example.org")
+    pg.fill("#auth-password", "rundgang-geheim")
+    pg.fill("#auth-pro-code", pro_code_for(get_settings().data_dir))
+    pg.check("#auth-terms")
+    pg.click("#auth-submit")
+    # Nach dem Anlegen laedt die Seite selbst neu; dann ist die Tuer zu.
+    pg.wait_for_selector("#auth-gate", state="hidden", timeout=15_000)
+
+
+def zweite_seite(browser: Any, quelle: Any, **optionen: Any) -> Any:
+    """Ein weiteres Fenster -- angemeldet wie das erste.
+
+    `new_page` legt jedes Mal einen frischen Kontext an, und der weiss nichts
+    von der Anmeldung: die Oberflaeche zeigte dort wieder die Einwilligung.
+    Also die Kekse des ersten Fensters mitnehmen.
+    """
+    kontext = browser.new_context(**optionen)
+    kontext.add_cookies(quelle.context.cookies())
+    return kontext.new_page()
+
+
+def konto_einstellungen() -> Any:
+    """Die Einstellungen des angemeldeten Kontos -- nicht die des Servers.
+
+    Jedes Konto hat seinen eigenen Ordner. Wer den Verlauf in den globalen
+    schreibt, legt ihn an einer Stelle ab, an der die Oberflaeche nie
+    nachsieht -- die Seitenleiste bliebe leer.
+    """
+    from aquaticy import web
+
+    konten = web.AUTH.accounts() if web.AUTH is not None else []
+    if not konten:
+        from aquaticy.config import get_settings
+
+        return get_settings()
+    return web.SESSIONS.get(konten[0]).settings()
+
+
 def lege_chats_an() -> None:
     """Zwei Chats in den Verlauf, damit die Seitenleiste etwas zu zeigen hat."""
     from aquaticy.cache import Cache
-    from aquaticy.config import get_settings
 
-    settings = get_settings()
+    settings = konto_einstellungen()
     cache = Cache(settings.db_path, settings.cache_ttl_hours)
     cache.add_history("alt-1", "Welcher Laptop bis 1200 Euro?", "Antwort", {})
     cache.add_history("rundgang", "Was kostet ein Lastenrad?", "Antwort", {})
@@ -650,9 +713,15 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.wait_for_timeout(400)
         log.pruefe(pg.is_visible("#chips-code"), "im Code-Modus stehen die anderen da")
         log.pruefe(not pg.is_visible("#chips"), "und die Suchvorschläge sind weg")
+        # Die Vorschlaege wechseln bei jedem Aufruf. Nach einem festen Wort zu
+        # suchen war deshalb ein Muenzwurf -- gepruefte wird stattdessen, dass
+        # jeder gezeigte Vorschlag wirklich aus der Coding-Liste stammt.
+        aus_liste = pg.evaluate(
+            """() => [...document.querySelectorAll("#chips-code .chip")]
+                     .every(c => SUGGESTIONS.code.includes(c.textContent.trim()))"""
+        )
         code_text = pg.inner_text("#chips-code")
-        log.pruefe("Python" in code_text or "API" in code_text,
-                   f"es geht ums Programmieren ({code_text[:40]!r})")
+        log.pruefe(aus_liste, f"es geht ums Programmieren ({code_text[:40]!r})")
         pg.click('#modes .mode[data-mode="pro"]')
         pg.wait_for_timeout(400)
         log.pruefe(pg.is_visible("#chips") and not pg.is_visible("#chips-code"),
@@ -1319,7 +1388,6 @@ def main() -> int:
 
     agent = FakeAgent()
     port = starte_server(agent)
-    lege_chats_an()
 
     from playwright.sync_api import sync_playwright
 
@@ -1337,6 +1405,10 @@ def main() -> int:
             "console",
             lambda m: fehler.append(f"Konsole: {m.text}") if m.type == "error" else None,
         )
+        # Erst durch die Tuer, dann den Verlauf anlegen: er gehoert in den
+        # Ordner des Kontos, und den gibt es erst nach der Anmeldung.
+        anmelden(seite, port)
+        lege_chats_an()
         seite.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
 
         rundgang(seite, log, agent, bilder, nur)
@@ -1351,7 +1423,8 @@ def main() -> int:
                 ("Grosser Schirm", "19d", 1512, 900),
             ):
                 gross = breit >= 900
-                seite2 = browser.new_page(
+                seite2 = zweite_seite(
+                    browser, seite,
                     viewport={"width": breit, "height": hoch},
                     is_mobile=not gross, has_touch=not gross,
                 )
@@ -1364,7 +1437,8 @@ def main() -> int:
                 seite2.close()
 
         if not nur or "handy" in nur:
-            klein = browser.new_page(
+            klein = zweite_seite(
+                browser, seite,
                 viewport={"width": 390, "height": 780}, is_mobile=True, has_touch=True
             )
             klein.on("pageerror", lambda e: fehler.append(f"Skriptfehler (Handy): {e}"))
@@ -1373,7 +1447,8 @@ def main() -> int:
             klein.close()
 
         if not nur or "ruhig" in nur:
-            ruhig = browser.new_page(
+            ruhig = zweite_seite(
+                browser, seite,
                 viewport={"width": 1200, "height": 800}, reduced_motion="reduce"
             )
             ruhig.on("pageerror", lambda e: fehler.append(f"Skriptfehler (ruhig): {e}"))
