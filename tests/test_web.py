@@ -1813,10 +1813,29 @@ def test_result_images_are_built_with_safe_dom_operations() -> None:
     assert "function renderResultMedia(" in html
     assert 'url.protocol === "https:" || url.protocol === "http:"' in html
     assert 'image.referrerPolicy = "no-referrer"' in html
+    assert 'image.src = "/api/media?url=" + encodeURIComponent(safe)' in html
     assert "title.textContent = product.name" in html
     assert "dd.textContent = String(value)" in html
     assert "renderResultMedia(bubble, ev.products, ev.visuals)" in html
     assert "renderResultMedia(bubble, turn.products, turn.visuals)" in html
+
+
+def test_media_endpoint_returns_a_server_checked_image(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from aquaticy.fetch import PublicVisual
+
+    monkeypatch.setattr(
+        "aquaticy.fetch.Fetcher.load_public_visual",
+        lambda self, url: (
+            PublicVisual("https://camera.example/live.jpg", b"real-image", "image/jpeg"),
+            "",
+        ),
+    )
+    status, body = client(
+        "GET", "/api/media?url=https%3A%2F%2Fcamera.example%2Flive.jpg"
+    )
+    assert status == 200 and body == b"real-image"
 
 
 def test_opening_a_chat_restores_the_context(session: web.ChatSession) -> None:

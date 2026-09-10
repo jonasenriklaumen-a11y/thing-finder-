@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 import pytest
 
 from aquaticy.browser import (
+    capture_visual,
     click_known_reject_button,
     click_reject_by_text,
     dismiss_consent,
@@ -193,6 +194,7 @@ def test_render_page_without_playwright(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     assert render_page("https://example.de/", "aquaticy/0.1") is None
+    assert capture_visual("https://example.de/", "aquaticy/0.1") is None
 
 
 def test_fetcher_uses_browser_only_for_consent_walls(fixture_html, monkeypatch) -> None:
@@ -276,3 +278,4 @@ def test_container_flag_disables_the_browser_sandbox(
 def test_unset_like_values_keep_the_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AQUATICY_BROWSER_NO_SANDBOX", "0")
     assert launch_args() == []
+

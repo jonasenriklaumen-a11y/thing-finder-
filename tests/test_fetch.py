@@ -171,6 +171,8 @@ def test_throttle_spaces_requests_per_domain() -> None:
     throttle.wait("a.de")
     throttle.wait("a.de")
     elapsed = time.monotonic() - start
+    # Windows kann den monotonic-Takt um einige Millisekunden vorziehen;
+    # der zweite Aufruf muss trotzdem praktisch die ganze Sperrzeit warten.
     assert elapsed >= 0.17
 
 
@@ -272,6 +274,59 @@ def test_fetch_handles_timeout() -> None:
 def test_fetch_rejects_invalid_url() -> None:
     with _fetcher(lambda r: httpx.Response(404)) as fetcher:
         assert fetcher.fetch("nicht-mal-eine-url").skipped_reason == "invalid_url"
+
+
+def test_public_webcam_image_is_upgraded_to_https(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/webcam":
+            return httpx.Response(
+                200,
+                text='<img class="webcam" src="http://camera.example/current.jpg">',
+                headers={"content-type": "text/html"},
+            )
+        assert request.url.scheme == "https"
+        return httpx.Response(200, content=b"jpeg", headers={"content-type": "image/jpeg"})
+
+    with _fetcher(handler, respect_robots=False) as fetcher:
+        visual, error = fetcher.load_public_visual("https://city.example/webcam")
+    assert error == "" and visual is not None
+    assert visual.url == "https://camera.example/current.jpg"
+    assert visual.content == b"jpeg"
+
+
+def test_eumetsat_page_resolves_to_latest_wms_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/":
+            return httpx.Response(200, text="<html></html>", headers={"content-type": "text/html"})
+        assert request.url.path == "/geoserver/wms"
+        assert request.url.params["request"] == "GetMap"
+        return httpx.Response(200, content=b"png", headers={"content-type": "image/png"})
+
+    with _fetcher(handler, respect_robots=False) as fetcher:
+        visual, error = fetcher.load_public_visual("https://view.eumetsat.int/")
+    assert error == "" and visual is not None
+    assert visual.content_type == "image/png" and visual.content == b"png"
+
+
+def test_dynamic_visual_page_uses_browser_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+    monkeypatch.setattr(
+        "aquaticy.browser.capture_visual", lambda *args, **kwargs: (b"screen", "image/jpeg")
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<canvas></canvas>", headers={"content-type": "text/html"})
+
+    with _fetcher(handler, respect_robots=False) as fetcher:
+        fetcher.enable_browser = True
+        visual, error = fetcher.load_public_visual("https://maps.example/live")
+    assert error == "" and visual is not None
+    assert visual.url == "https://maps.example/live"
+    assert visual.content == b"screen"
 
 
 def test_fetch_extracts_products(fixture_html) -> None:
@@ -424,3 +479,4 @@ def test_oversized_pdf_is_skipped() -> None:
 
     with _fetcher(handler) as fetcher:
         assert fetcher.fetch("https://x.de/riesig.pdf").skipped_reason == "pdf_error"
+

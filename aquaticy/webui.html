@@ -1694,7 +1694,7 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
-const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.6";
+const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.7";
 $("#version").textContent = "v" + aquaticyVersion;
 document.title = `Aquaticy AI ${aquaticyVersion}`;
 
@@ -2137,7 +2137,7 @@ function resultImage(url, alt){
   const safe = safeHttpUrl(url);
   if (!safe) return null;
   const image = document.createElement("img");
-  image.src = safe; image.alt = alt || "Recherchebild";
+  image.src = "/api/media?url=" + encodeURIComponent(safe); image.alt = alt || "Recherchebild";
   image.loading = "lazy"; image.decoding = "async"; image.referrerPolicy = "no-referrer";
   image.addEventListener("error", () => image.remove());
   return image;

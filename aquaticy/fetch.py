@@ -324,6 +324,25 @@ class DomainThrottle:
 HTML_CONTENT_TYPES = ("text/html", "application/xhtml", "text/plain", "application/xml")
 IMAGE_CONTENT_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif")
 
+# Frei zugängliches, jeweils neuestes Meteosat-Bild. EUMETSAT dokumentiert
+# genau diesen festen WMS-Aufruf für Anwendungen, die nicht die dynamische
+# Kartenoberfläche bedienen können.
+EUMETSAT_LATEST_IMAGE = (
+    "https://view.eumetsat.int/geoserver/wms?service=WMS&version=1.3.0&request=GetMap"
+    "&layers=msg_fes:ir108,backgrounds:ne_10m_coastline,backgrounds:ne_boundary_lines_land"
+    "&bbox=-6500000,-6500000,6500000,6500000&width=1200&height=1200"
+    "&srs=AUTO:97004,9001,0,0&styles=&format=image/png&bgcolor=0xCCCCCC"
+)
+
+
+@dataclass(slots=True)
+class PublicVisual:
+    """Geprüfte Bilddaten aus einer öffentlichen Quelle."""
+
+    url: str
+    content: bytes
+    content_type: str
+
 
 def public_web_url(url: str) -> bool:
     """Erlaubt nur öffentliche HTTP-Ziele; schützt die Bildsuche vor SSRF."""
@@ -438,38 +457,38 @@ class Fetcher:
         html = response.text[:MAX_HTML_BYTES]
         return self._finish(result, html, want_products=want_products)
 
-    def find_public_visual(self, url: str) -> tuple[str, str]:
-        """Findet auf einer öffentlichen Seite ein Bild für das Vision-Modell."""
+    def load_public_visual(self, url: str) -> tuple[PublicVisual | None, str]:
+        """Lädt ein Bild oder löst es aus einer öffentlichen Seite auf."""
         current = (url or "").strip()
         for _ in range(6):
             if not public_web_url(current):
-                return "", "Die Adresse ist nicht öffentlich erreichbar."
+                return None, "Die Adresse ist nicht öffentlich erreichbar."
             domain = domain_of(current)
             if self.respect_robots and not self.robots.allows(current):
-                return "", "robots.txt erlaubt diesen Abruf nicht."
+                return None, "robots.txt erlaubt diesen Abruf nicht."
             self.throttle.wait(domain)
             try:
                 response = self._client.get(current, follow_redirects=False)
             except httpx.HTTPError:
-                return "", "Die Bildquelle ist nicht erreichbar."
+                return None, "Die Bildquelle ist nicht erreichbar."
             if response.is_redirect:
                 target = response.headers.get("location", "")
                 if not target:
-                    return "", "Die Bildquelle enthält eine ungültige Weiterleitung."
+                    return None, "Die Bildquelle enthält eine ungültige Weiterleitung."
                 current = urljoin(current, target)
                 continue
             if response.status_code >= 400:
-                return "", f"Die Bildquelle antwortet mit HTTP {response.status_code}."
+                return None, f"Die Bildquelle antwortet mit HTTP {response.status_code}."
             final = str(response.url)
             if not public_web_url(final):
-                return "", "Die Weiterleitung führt nicht zu einer öffentlichen Adresse."
+                return None, "Die Weiterleitung führt nicht zu einer öffentlichen Adresse."
             content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
             if content_type in IMAGE_CONTENT_TYPES:
                 if len(response.content) > MAX_VISUAL_BYTES:
-                    return "", "Das Bild ist für eine sichere Prüfung zu groß."
-                return final, ""
+                    return None, "Das Bild ist für eine sichere Prüfung zu groß."
+                return PublicVisual(final, response.content, content_type), ""
             if not any(kind in content_type for kind in HTML_CONTENT_TYPES):
-                return "", "Die Quelle liefert kein unterstütztes Bild."
+                return None, "Die Quelle liefert kein unterstütztes Bild."
             tree = HTMLParser(response.text[:MAX_HTML_BYTES])
             candidates: list[tuple[int, str]] = []
             for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
@@ -488,12 +507,37 @@ class Fetcher:
             for _, candidate in sorted(candidates, key=lambda item: item[0]):
                 absolute = urljoin(final, candidate)
                 if public_web_url(absolute):
+                    # Viele ältere Webcam-Seiten betten noch eine http-Adresse ein,
+                    # obwohl dasselbe Bild verschlüsselt erreichbar ist. Browser
+                    # blockieren diese gemischten Inhalte.
+                    if final.startswith("https://") and absolute.startswith("http://"):
+                        absolute = "https://" + absolute[len("http://") :]
                     selected = absolute
                     break
+            if not selected and domain_of(final) == "view.eumetsat.int":
+                selected = EUMETSAT_LATEST_IMAGE
+            if not selected and self.enable_browser:
+                try:
+                    from aquaticy.browser import capture_visual
+
+                    captured = capture_visual(
+                        final, user_agent=self.user_agent, timeout=self.timeout, rules=self.rules
+                    )
+                except Exception:
+                    captured = None
+                if captured:
+                    data, mime = captured
+                    if len(data) <= MAX_VISUAL_BYTES:
+                        return PublicVisual(final, data, mime), ""
             if not selected:
-                return "", "Auf der Seite wurde kein öffentliches Bild gefunden."
+                return None, "Auf der Seite wurde kein öffentliches Bild gefunden."
             current = selected
-        return "", "Die Bildquelle leitet zu oft weiter."
+        return None, "Die Bildquelle leitet zu oft weiter."
+
+    def find_public_visual(self, url: str) -> tuple[str, str]:
+        """Kompatible Kurzform: gibt nur die aufgelöste Bildadresse zurück."""
+        visual, error = self.load_public_visual(url)
+        return (visual.url if visual else ""), error
 
     def _finish_pdf(self, result: PageResult, data: bytes) -> PageResult:
         """Text aus einem PDF ziehen -- Datenblaetter, Speisekarten, Preislisten."""
@@ -555,3 +599,4 @@ class Fetcher:
         except Exception:
             # Der Browser-Fallback darf den normalen Ablauf nie sprengen.
             return None
+

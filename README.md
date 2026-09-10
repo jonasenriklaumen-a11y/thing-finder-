@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.6                                      │
+│ Aquaticy AI 9.4.7                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -826,7 +826,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.6                                                   │
+│ Aquaticy AI 9.4.7                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1387,6 +1387,10 @@ genannt; sichtbare Auffälligkeiten bleiben Hinweise und gelten nicht allein als
 Ereignis.
 
 Gefundene öffentliche Webcam- und Satellitenbilder erscheinen direkt unter der Antwort.
+Aquaticy lädt das Bild dafür zuerst selbst über eine geprüfte öffentliche Adresse und
+reicht die tatsächlichen Bilddaten an das Vision-Modell sowie die geschützte Weboberfläche
+weiter. Dynamische Karten können über den Browser-Fallback aufgenommen werden; die
+EUMETSAT-Seite fällt zusätzlich auf deren dokumentierten aktuellen WMS-Bildabruf zurück.
 Bei Produktrecherchen zeigt die Weboberfläche gefundene Produktbilder zusammen mit Preis,
 technischen Daten und dem Link zur Quelle. Die Bilder bleiben auch beim erneuten Öffnen des
 Chats erhalten.

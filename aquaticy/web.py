@@ -1798,6 +1798,25 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 }
             )
+        elif route == "/api/media":
+            target = (parse_qs(urlsplit(self.path).query).get("url") or [""])[0].strip()
+            if not target or len(target) > 8_000:
+                self._json({"error": "Keine gültige Bildadresse."}, 400)
+                return
+            from aquaticy.fetch import Fetcher
+
+            settings = SESSION.settings()
+            with Fetcher(
+                user_agent=settings.user_agent,
+                timeout=settings.fetch_timeout,
+                delay_seconds=settings.request_delay_seconds,
+                enable_browser=settings.enable_playwright,
+            ) as fetcher:
+                visual, error = fetcher.load_public_visual(target)
+            if visual is None:
+                self._json({"error": error or "Das Bild ist nicht erreichbar."}, 404)
+                return
+            self._send(200, visual.content, visual.content_type)
         elif route == "/api/account":
             account = self._account()
             if account is None:

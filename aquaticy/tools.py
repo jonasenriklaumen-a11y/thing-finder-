@@ -1969,21 +1969,40 @@ class Toolbox:
         if name == "inspect_public_visual":
             if self.visual_inspector is None:
                 return {"error": "Es ist kein Vision-Modell ausgewählt."}
-            url, error = self._fetcher.find_public_visual(str(arguments.get("url", "")))
+            source_url = str(arguments.get("url", "")).strip()
+            loader = getattr(self._fetcher, "load_public_visual", None)
+            if loader is not None:
+                import base64
+
+                loaded, error = loader(source_url)
+                url = loaded.url if loaded else ""
+                vision_url = (
+                    f"data:{loaded.content_type};base64,"
+                    + base64.b64encode(loaded.content).decode("ascii")
+                    if loaded
+                    else ""
+                )
+                mime_type = loaded.content_type if loaded else ""
+            else:
+                url, error = self._fetcher.find_public_visual(source_url)
+                vision_url = url
+                mime_type = ""
             if error:
                 return {"error": error}
             question = str(arguments.get("question", "")).strip()
             try:
-                analysis = self.visual_inspector(url, question)
+                analysis = self.visual_inspector(vision_url, question)
             except Exception as exc:
                 return {"error": str(exc), "url": url}
             self.stats.fetched.append(url)
             visual = {
                 "url": url,
-                "source_url": str(arguments.get("url", "")).strip(),
+                "source_url": source_url,
                 "title": question or "Öffentliches aktuelles Bild",
                 "kind": "public_visual",
             }
+            if mime_type:
+                visual["mime_type"] = mime_type
             self.stats.visuals.append(visual)
             return {
                 **visual,

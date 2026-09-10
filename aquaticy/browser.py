@@ -228,3 +228,49 @@ def render_page(
                 browser.close()
     except Exception:
         return None
+
+
+def capture_visual(
+    url: str,
+    user_agent: str,
+    timeout: float = 15.0,
+    rules: SiteRules | None = None,
+) -> tuple[bytes, str] | None:
+    """Erstellt ein kompaktes Bild einer dynamischen öffentlichen Kartenseite."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+
+    rules = rules or load_rules()
+    timeout_ms = int(max(timeout, 5.0) * 1000)
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True, args=launch_args())
+            try:
+                context = browser.new_context(
+                    user_agent=user_agent,
+                    locale="de-DE",
+                    permissions=[],
+                    java_script_enabled=True,
+                    accept_downloads=False,
+                    viewport={"width": 1280, "height": 800},
+                )
+                context.grant_permissions([])
+                context.set_default_timeout(timeout_ms)
+                page = context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                with contextlib.suppress(Exception):
+                    page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
+                dismiss_consent(page, rules)
+                with contextlib.suppress(Exception):
+                    page.wait_for_load_state("networkidle", timeout=3_000)
+                remove_overlays(page, rules.overlay_remove_selectors)
+                data = page.screenshot(type="jpeg", quality=78, full_page=False)
+                context.close()
+                return bytes(data), "image/jpeg"
+            finally:
+                browser.close()
+    except Exception:
+        return None
+

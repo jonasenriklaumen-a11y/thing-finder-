@@ -11,7 +11,7 @@ import pytest
 
 from aquaticy.cache import Cache
 from aquaticy.config import Settings
-from aquaticy.fetch import Fetcher, RobotsPolicy
+from aquaticy.fetch import Fetcher, PublicVisual, RobotsPolicy
 from aquaticy.models import SearchResult
 from aquaticy.tools import TOOL_SCHEMAS, Toolbox
 
@@ -69,6 +69,26 @@ def test_public_visual_is_resolved_and_sent_to_the_vision_callback(settings: Set
         "title": "Ist Rauch sichtbar?",
         "kind": "public_visual",
     }]
+
+
+def test_public_visual_bytes_are_sent_to_the_model_as_data_url(settings: Settings) -> None:
+    class VisualFetcher:
+        def load_public_visual(self, url: str) -> tuple[PublicVisual, str]:
+            return PublicVisual("https://camera.example/live.jpg", b"bilddaten", "image/jpeg"), ""
+
+    seen: list[str] = []
+    box = Toolbox(
+        settings,
+        fetcher=VisualFetcher(),  # type: ignore[arg-type]
+        visual_inspector=lambda url, question: seen.append(url) or "sichtbar",
+    )
+    result = box.call(
+        "inspect_public_visual",
+        {"url": "https://camera.example/page", "question": "Was ist sichtbar?"},
+    )
+    assert seen[0].startswith("data:image/jpeg;base64,")
+    assert result["url"] == "https://camera.example/live.jpg"
+    assert box.stats.visuals[0]["mime_type"] == "image/jpeg"
 
 
 def test_web_search_uses_settings_defaults(
