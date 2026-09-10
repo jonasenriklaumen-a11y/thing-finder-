@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.10                                     │
+│ Aquaticy AI 9.4.11                                     │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -796,9 +796,12 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   bleibt es bei diesem Anbieter. Gemeldet wird erst, wenn eine Angebotsseite wirklich
   gelesen wurde und eine vollständige Adresse dazu vorliegt — „gibt es bestimmt
   irgendwo" zählt nicht.
+  Das hochgeladene Foto ist die Frage selbst und wird deshalb vom Aufräumen des
+  Bildspeichers ausgenommen — es verschwindet erst, wenn du den Auftrag löschst.
   Beobachtungen laufen durchgehend, jede Minute, alle 5, 15 oder 30 Minuten sowie
   stündlich, täglich oder wöchentlich. Häufig prüfen heißt häufig fragen: der
-  Tokenverbrauch steigt entsprechend. Erst wenn die gespeicherte Bedingung erfüllt ist,
+  Tokenverbrauch steigt entsprechend. Stolpert ein einzelner Auftrag, wird das an
+  ihm vermerkt und der nächste Termin normal gesetzt: die anderen laufen weiter. Erst wenn die gespeicherte Bedingung erfüllt ist,
   landet die Antwort
   als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
   **leuchtet dort, bis du sie geöffnet hast**: ein ruhig pulsierender Punkt und ein
@@ -838,7 +841,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.10                                                  │
+│ Aquaticy AI 9.4.11                                                  │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │

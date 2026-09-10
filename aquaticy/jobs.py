@@ -613,7 +613,14 @@ class Scheduler:
         for job in store.due():
             if self._stop.is_set():
                 break
-            state, chat = run_job(job, settings)
+            # Ein Auftrag, der stolpert, darf nicht die anderen mitreissen.
+            # Ohne das hier bliebe sein `next_run` in der Vergangenheit: er
+            # waere beim naechsten Takt wieder der erste, wuerde wieder
+            # stolpern -- und alles, was hinter ihm steht, kaeme nie dran.
+            try:
+                state, chat = run_job(job, settings)
+            except Exception as exc:
+                state, chat = (f"Fehler: {type(exc).__name__}", "")
             store.note_run(job.id, state, chat)
             if state == "erfüllt":
                 store.set_enabled(job.id, False)

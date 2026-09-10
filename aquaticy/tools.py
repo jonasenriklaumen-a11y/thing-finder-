@@ -1953,13 +1953,26 @@ class Toolbox:
         payload["script"] = pfad
         return payload
 
+    @staticmethod
+    def _anzahl(wert: Any) -> int:
+        """Eine Trefferzahl aus dem, was das Modell geschickt hat.
+
+        Manche Modelle schreiben "fuenf" oder schicken gleich eine Liste. Das
+        ist kein Grund, den Aufruf scheitern zu lassen -- die Zahl ist ein
+        Wunsch, und ohne sie gilt eben die Voreinstellung.
+        """
+        try:
+            return int(wert or 0)
+        except (TypeError, ValueError):
+            return 0
+
     def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Fuehrt den Tool-Call *name* mit *arguments* aus."""
         if name == "web_search":
             more = arguments.get("queries") or []
             return self.web_search(
                 query=str(arguments.get("query", "")),
-                count=int(arguments.get("count") or 0),
+                count=self._anzahl(arguments.get("count")),
                 country=str(arguments.get("country") or ""),
                 lang=str(arguments.get("lang") or ""),
                 # Manche Modelle schicken einen String statt einer Liste.
@@ -2028,7 +2041,8 @@ class Toolbox:
             }
         if name == "search_news":
             return self.search_news(
-                query=str(arguments.get("query", "")), count=int(arguments.get("count") or 0)
+                query=str(arguments.get("query", "")),
+                count=self._anzahl(arguments.get("count")),
             )
         if name == "find_profiles":
             roh = arguments.get("platforms") or []

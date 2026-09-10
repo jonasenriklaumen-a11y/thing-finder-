@@ -488,3 +488,36 @@ def test_the_offer_address_is_read_from_the_answer() -> None:
 
     assert offer_url("Bei https://laden.example/x für 9 €.") == "https://laden.example/x"
     assert offer_url("Kein Angebot gefunden.") == ""
+
+
+def test_a_broken_job_does_not_block_the_others(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sonst waere der kaputte Auftrag jeden Takt wieder der erste."""
+    store = JobStore(tmp_path / "j.db")
+    kaputt = store.add("Stolpert")
+    heil = store.add("Laeuft")
+    with store._connect() as conn:
+        conn.execute("UPDATE jobs SET next_run = ? WHERE id = ?", (1, kaputt.id))
+        conn.execute("UPDATE jobs SET next_run = ? WHERE id = ?", (2, heil.id))
+
+    gelaufen: list[str] = []
+
+    def statt_dessen(auftrag: Job, settings: Any) -> tuple[str, str]:
+        gelaufen.append(auftrag.question)
+        if auftrag.question == "Stolpert":
+            raise RuntimeError("kein Modell erreichbar")
+        return ("fertig", "c1")
+
+    monkeypatch.setattr(auftraege, "run_job", statt_dessen)
+    settings = type("S", (), {"db_path": tmp_path / "j.db", "cache_ttl_hours": 1})()
+    takt = Scheduler(lambda: settings)
+
+    assert takt.tick() == 2
+    assert gelaufen == ["Stolpert", "Laeuft"]
+    # Der Fehlschlag steht am Auftrag, und sein Termin liegt wieder vorn.
+    notiert = {job.question: job for job in store.all_jobs()}
+    assert notiert["Stolpert"].last_state.startswith("Fehler: RuntimeError")
+    assert notiert["Stolpert"].next_run > time.time()
+    # Und im naechsten Takt ist nichts mehr faellig.
+    assert takt.tick() == 0

@@ -1077,6 +1077,10 @@ class SessionRegistry:
 
 SESSIONS = SessionRegistry()
 USER_SCHEDULERS: dict[str, Any] = {}
+#: Zwei Anmeldungen desselben Kontos koennen zeitgleich hereinkommen. Ohne
+#: Schloss startet dann jede ihren eigenen Taktgeber -- und jeder Auftrag
+#: liefe doppelt.
+_SCHEDULER_LOCK = threading.Lock()
 
 
 class SessionProxy:
@@ -1100,13 +1104,14 @@ def current_runs() -> RunBook:
 
 def start_user_scheduler(account: Account) -> None:
     """Startet den Taktgeber genau einmal fuer das Konto."""
-    if account.id in USER_SCHEDULERS:
-        return
     from aquaticy.jobs import Scheduler
 
-    scheduler = Scheduler(SESSIONS.get(account).settings)
-    scheduler.start()
-    USER_SCHEDULERS[account.id] = scheduler
+    with _SCHEDULER_LOCK:
+        if account.id in USER_SCHEDULERS:
+            return
+        scheduler = Scheduler(SESSIONS.get(account).settings)
+        scheduler.start()
+        USER_SCHEDULERS[account.id] = scheduler
 
 
 def ui_state() -> Any:
@@ -1641,9 +1646,14 @@ class Handler(BaseHTTPRequestHandler):
                 f"{MAX_UPLOADS} Dateien à {MAX_UPLOAD_BYTES // 1_000_000} MB."
             )
         try:
-            return json.loads(self.rfile.read(length) or b"{}")
+            gelesen = json.loads(self.rfile.read(length) or b"{}")
         except (json.JSONDecodeError, ValueError):
             return {}  # kaputtes JSON ist eine leere Anfrage, kein Absturz
+        # Gueltiges JSON ist noch kein Formular: `[]`, `"text"` und `0` sind
+        # alle drei erlaubt und haben kein `.get`. Jede Route, die den Koerper
+        # als Feld-Sammlung liest, bekam damit einen Serverfehler statt einer
+        # Absage. Was kein Objekt ist, gilt hier als leere Anfrage.
+        return gelesen if isinstance(gelesen, dict) else {}
 
     # -- Routen -----------------------------------------------------------
     # Namen von BaseHTTPRequestHandler vorgegeben.
@@ -1718,8 +1728,10 @@ class Handler(BaseHTTPRequestHandler):
                 f"{MAX_UPLOAD_BYTES // 1_000_000} MB)."
             )
         try:
+            # `keep`: darauf beruft sich der Auftrag bei jedem Lauf. Ohne das
+            # waere das Foto nach zweihundert Schnappschuessen weg.
             return save_snapshot(
-                settings.data_dir, data, str(payload.get("image_type") or "")
+                settings.data_dir, data, str(payload.get("image_type") or ""), keep=True
             ), ""
         except (OSError, ValueError):
             return "", "Dieses Bildformat wird nicht unterstützt (JPEG, PNG, WebP, GIF)."
@@ -1770,6 +1782,14 @@ class Handler(BaseHTTPRequestHandler):
                 return {"ok": False, "error": "Diesen Auftrag gibt es nicht."}
             return {"ok": True}
         if action == "delete":
+            # Das hochgeladene Foto haengt an genau diesem Auftrag. Es ist vom
+            # Aufraeumen ausgenommen und bliebe sonst fuer immer liegen.
+            job = store.get(nummer)
+            if job is not None and job.image_id:
+                from aquaticy.media import delete_snapshot
+
+                with contextlib.suppress(OSError, ValueError):
+                    delete_snapshot(settings.data_dir, job.image_id)
             return {"ok": store.delete(nummer)}
         if action == "run":
             # Sofort ausfuehren laeuft im Hintergrund: eine Recherche dauert
@@ -1779,7 +1799,13 @@ class Handler(BaseHTTPRequestHandler):
                 return {"ok": False, "error": "Diesen Auftrag gibt es nicht."}
 
             def sofort() -> None:
-                state, chat = run_job(job, settings)
+                # Scheitert der Lauf, muss das trotzdem am Auftrag stehen:
+                # sonst bleibt er auf "laeuft gerade" haengen und sein
+                # naechster Termin in der Vergangenheit.
+                try:
+                    state, chat = run_job(job, settings)
+                except Exception as exc:
+                    state, chat = (f"Fehler: {type(exc).__name__}", "")
                 store.note_run(job.id, state, chat)
                 if state == "erfüllt":
                     store.set_enabled(job.id, False)

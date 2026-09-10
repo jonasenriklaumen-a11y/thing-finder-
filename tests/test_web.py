@@ -3821,3 +3821,15 @@ def test_the_ui_offers_the_new_rhythms_and_the_image_job() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     assert 'value="minutes1"' in html and 'value="always"' in html
     assert 'value="image"' in html and 'id="job-bild"' in html
+
+
+def test_a_body_that_is_not_an_object_is_an_empty_request(client) -> None:
+    """Gueltiges JSON ist noch kein Formular -- `[]` hat kein `.get`.
+
+    Frueher lief das bis in die Route durch und endete dort als Serverfehler.
+    """
+    for koerper in ([], "text", 0, -1, 12.5, True):
+        for pfad in ("/api/chat", "/api/consent", "/api/answer", "/api/command",
+                     "/api/job", "/api/uistate"):
+            status, _ = client("POST", pfad, koerper)
+            assert status < 500, f"{pfad} mit {koerper!r} gab {status}"

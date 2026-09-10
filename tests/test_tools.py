@@ -1516,3 +1516,19 @@ def test_vm_schemas_do_not_mutate_the_shared_template() -> None:
     original = next(s for s in VM_SCHEMAS if s["function"]["name"] == "vm_run")
     assert "1024 MB" in original["function"]["description"]
     assert "6144 MB" not in original["function"]["description"]
+
+
+def test_a_wordy_hit_count_does_not_break_the_call(settings: Settings) -> None:
+    """Manche Modelle schreiben "fuenf" oder schicken gleich eine Liste.
+
+    Die Trefferzahl ist ein Wunsch: ohne brauchbaren Wert gilt eben die
+    Voreinstellung -- der Aufruf darf daran nicht scheitern.
+    """
+    from aquaticy.tools import Toolbox
+
+    assert Toolbox._anzahl(None) == 0
+    assert Toolbox._anzahl("fuenf") == 0
+    assert Toolbox._anzahl([1, 2]) == 0
+    assert Toolbox._anzahl({}) == 0
+    assert Toolbox._anzahl("7") == 7
+    assert Toolbox._anzahl(3) == 3
