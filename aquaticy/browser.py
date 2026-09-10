@@ -100,30 +100,83 @@ PLAYBACK_STATE_JS = """
 }
 """
 
-#: Das groesste sichtbare Live-Element. Ein Ausschnitt davon ist das
+#: Das Live-Element finden, in drei Schritten. Ein Ausschnitt davon ist das
 #: eigentliche Bild -- ohne Kopfzeile, Werbeflaeche und Bedienleiste.
-LIVE_ELEMENT_JS = """
+#: Erster Schritt: alle Kandidaten markieren und ihren Stand festhalten.
+#: Bewusst OHNE Fensterausschnitt -- eine Webcam-Seite zeigt oft eine Reihe
+#: von Vorschaubildern und darunter das eigentliche Livebild. Wer nur nimmt,
+#: was gerade zu sehen ist, nimmt zuverlaessig die Vorschau.
+MARK_CANDIDATES_JS = """
 () => {
-  const seen = Array.from(document.querySelectorAll('video, canvas, img'));
-  let best = null;
-  let bestArea = 0;
-  for (const node of seen) {
+  const nodes = Array.from(document.querySelectorAll('video, canvas, img'));
+  const groesse = new Map();
+  const stand = [];
+  let index = 0;
+  for (const node of nodes) {
     const box = node.getBoundingClientRect();
-    const area = box.width * box.height;
-    if (box.width < 240 || box.height < 180 || area <= bestArea) continue;
-    if (box.bottom < 0 || box.top > window.innerHeight) continue;
+    if (box.width < 240 || box.height < 180) continue;
     const style = window.getComputedStyle(node);
     if (style.visibility === 'hidden' || style.display === 'none') continue;
+    if (style.opacity === '0') continue;
     if (node.tagName === 'IMG' && node.naturalWidth <= 1) continue;
-    best = node;
-    bestArea = area;
+    node.setAttribute('data-aquaticy-cand', String(index));
+    const schluessel = Math.round(box.width) + 'x' + Math.round(box.height);
+    groesse.set(schluessel, (groesse.get(schluessel) || 0) + 1);
+    stand.push({
+      index: index,
+      tag: node.tagName,
+      area: box.width * box.height,
+      key: schluessel,
+      src: node.currentSrc || node.src || '',
+      inLink: !!node.closest('a'),
+      playing: node.tagName === 'VIDEO'
+        && node.readyState >= 2 && !node.paused && node.currentTime > 0,
+    });
+    index += 1;
   }
-  if (!best) return null;
-  best.setAttribute('data-aquaticy-live', '1');
-  const viewport = window.innerWidth * window.innerHeight;
-  return bestArea / (viewport || 1);
+  return stand;
 }
 """
+
+#: Zweiter Schritt: nach der Wartezeit noch einmal hinsehen. Was sich in der
+#: Zwischenzeit geaendert hat, ist ein laufendes Bild -- ein Vorschaubild
+#: bleibt, wie es war.
+RESCAN_CANDIDATES_JS = """
+() => {
+  const nodes = Array.from(document.querySelectorAll('[data-aquaticy-cand]'));
+  return nodes.map(node => ({
+    index: Number(node.getAttribute('data-aquaticy-cand')),
+    src: node.currentSrc || node.src || '',
+    playing: node.tagName === 'VIDEO'
+      && node.readyState >= 2 && !node.paused && node.currentTime > 0,
+  }));
+}
+"""
+
+#: Dritter Schritt: den Gewaehlten markieren, sichtbar scrollen und melden,
+#: wie gross er im Fenster ist.
+PICK_CANDIDATE_JS = """
+(index) => {
+  const node = document.querySelector('[data-aquaticy-cand="' + index + '"]');
+  if (!node) return null;
+  node.setAttribute('data-aquaticy-live', '1');
+  node.scrollIntoView({block: 'center', inline: 'center'});
+  const box = node.getBoundingClientRect();
+  const viewport = window.innerWidth * window.innerHeight;
+  return (box.width * box.height) / (viewport || 1);
+}
+"""
+
+#: Wie lange zwischen den beiden Blicken liegt. Lang genug, dass eine Kamera
+#: mit Sekundentakt sich einmal erneuert; kurz genug, dass es niemandem
+#: auffaellt.
+RESCAN_WAIT_MS = 1_600
+
+#: Ein Bild in einem Link ist fast immer eine Vorschau, die woanders hinfuehrt.
+MALUS_IN_LINK = 0.35
+#: Und drei gleich grosse Bilder nebeneinander sind eine Vorschaureihe.
+MALUS_THUMBNAIL_ROW = 0.4
+THUMBNAIL_ROW_FROM = 3
 
 #: Womit ein Player startet, wenn `play()` an der Autoplay-Sperre scheitert.
 PLAY_BUTTON_SELECTORS = (
@@ -451,6 +504,48 @@ def capture_visual(
         return None
 
 
+def _bewerte(vorher: list[dict[str, Any]], nachher: dict[int, dict[str, Any]],
+             gleiche: dict[str, int]) -> int:
+    """Welcher Kandidat ist das Livebild? Returns: seine Nummer, sonst -1.
+
+    Die Groesse allein reicht nicht: eine Webcam-Seite zeigt gern eine Reihe
+    Vorschaubilder und darunter das eigentliche Bild, und die Vorschau ist
+    manchmal die groessere. Entscheidend ist, was sich bewegt -- ein Bild,
+    das sich in der Wartezeit erneuert hat, ist live; ein Vorschaubild
+    bleibt, wie es war.
+    """
+    bester, beste_punkte, beste_stufe = -1, 0.0, -1
+    for eintrag in vorher:
+        nummer = int(eintrag.get("index", -1))
+        if nummer < 0:
+            continue
+        punkte = float(eintrag.get("area") or 0.0)
+        if punkte <= 0:
+            continue
+        spaeter = nachher.get(nummer, {})
+        alt_src = str(eintrag.get("src") or "")
+        neu_src = str(spaeter.get("src") or alt_src)
+        bewegt = (
+            neu_src != alt_src
+            or bool(spaeter.get("playing") or eintrag.get("playing"))
+            # Ein Stream, der in ein Canvas gezeichnet wird, sieht von aussen
+            # unbewegt aus -- er ist trotzdem eher das Ziel als ein Foto.
+            or str(eintrag.get("tag")) == "CANVAS"
+        )
+        if eintrag.get("inLink"):
+            punkte *= MALUS_IN_LINK
+        if gleiche.get(str(eintrag.get("key")), 0) >= THUMBNAIL_ROW_FROM:
+            punkte *= MALUS_THUMBNAIL_ROW
+        # Bewegung schlaegt Groesse, immer und unabhaengig davon, wie gross.
+        # Dass ein Bild sich erneuert, ist ein Beweis; dass es gross ist, nur
+        # eine Vermutung -- und ein grosses Vorschaubild ueber einer kleinen
+        # Live-Ansicht ist genau der Fall, in dem die Vermutung danebenliegt.
+        stufe = 1 if bewegt else 0
+        if stufe > beste_stufe or (stufe == beste_stufe and punkte > beste_punkte):
+            bester, beste_punkte, beste_stufe = nummer, punkte, stufe
+    return bester
+
+
 def _shot(page: Any) -> bytes:
     """Fotografiert das Live-Element -- oder, wenn es keines gibt, die Seite.
 
@@ -458,16 +553,39 @@ def _shot(page: Any) -> bytes:
     zeigt zusaetzlich Kopfzeile, Werbung und Bedienleiste, und genau die
     verwirren ein Bildmodell.
     """
-    anteil = 0.0
+    vorher: Any = []
     with contextlib.suppress(Exception):
-        anteil = float(page.evaluate(LIVE_ELEMENT_JS) or 0.0)
-    # Unter einem Fuenftel des Fensters ist das Element eher ein Vorschaubild
-    # neben dem eigentlichen Inhalt -- dann lieber die ganze Ansicht.
-    if anteil >= 0.2:
+        vorher = page.evaluate(MARK_CANDIDATES_JS) or []
+    if isinstance(vorher, list) and vorher:
         with contextlib.suppress(Exception):
-            element = page.query_selector("[data-aquaticy-live='1']")
-            if element is not None:
-                return bytes(element.screenshot(type="jpeg", quality=80))
+            page.wait_for_timeout(RESCAN_WAIT_MS)
+        spaeter: Any = []
+        with contextlib.suppress(Exception):
+            spaeter = page.evaluate(RESCAN_CANDIDATES_JS) or []
+        nachher = {
+            int(item.get("index", -1)): item
+            for item in (spaeter if isinstance(spaeter, list) else [])
+            if isinstance(item, dict)
+        }
+        gleiche: dict[str, int] = {}
+        for eintrag in vorher:
+            if isinstance(eintrag, dict):
+                schluessel = str(eintrag.get("key"))
+                gleiche[schluessel] = gleiche.get(schluessel, 0) + 1
+        gewaehlt = _bewerte(
+            [item for item in vorher if isinstance(item, dict)], nachher, gleiche
+        )
+        if gewaehlt >= 0:
+            anteil = 0.0
+            with contextlib.suppress(Exception):
+                anteil = float(page.evaluate(PICK_CANDIDATE_JS, gewaehlt) or 0.0)
+            # Nach dem Scrollen steht das Element mittig im Fenster. Ist es
+            # trotzdem winzig, ist die ganze Ansicht die ehrlichere Auskunft.
+            if anteil >= 0.08:
+                with contextlib.suppress(Exception):
+                    element = page.query_selector("[data-aquaticy-live='1']")
+                    if element is not None:
+                        return bytes(element.screenshot(type="jpeg", quality=80))
     with contextlib.suppress(Exception):
         return bytes(page.screenshot(type="jpeg", quality=78, full_page=False))
     return b""

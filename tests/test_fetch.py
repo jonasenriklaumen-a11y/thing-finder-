@@ -90,11 +90,13 @@ def test_paywall_is_detected(fixture_html) -> None:
 def test_captcha_is_detected(fixture_html) -> None:
     html = fixture_html("captcha_block.html")
     text = extract_text(html, "https://example.de/")
-    assert classify_failure(html, text) == "blocked"
+    assert classify_failure(html, text) == "blocked_bot_wall"
 
 
 def test_status_403_is_blocked() -> None:
-    assert classify_failure("<html></html>", "irgendwas", status_code=403) == "blocked"
+    assert classify_failure("<html></html>", "irgendwas", status_code=403) == "blocked_http_403"
+    # Die Nummer bleibt erhalten: 429 ist "zu oft gefragt", nicht "abgewiesen".
+    assert classify_failure("<html></html>", "x", status_code=429) == "blocked_http_429"
 
 
 def test_good_pages_are_not_flagged(fixture_html) -> None:
@@ -226,7 +228,10 @@ def test_fetch_reports_403_as_blocked() -> None:
     with _fetcher(handler) as fetcher:
         page = fetcher.fetch("https://shop.example/artikel")
     assert not page.ok
-    assert page.skipped_reason == "blocked"
+    # Die Nummer steht im Grund: sie unterscheidet "melde dich an" von
+    # "du fragst zu oft" -- und davon haengt ab, ob ein zweiter Versuch lohnt.
+    assert page.skipped_reason == "blocked_http_403"
+    assert "403" in page.as_tool_dict()["note"]
 
 
 def test_fetch_respects_robots() -> None:
@@ -246,7 +251,7 @@ def test_known_blocking_domain_is_not_even_requested() -> None:
 
     with _fetcher(handler) as fetcher:
         page = fetcher.fetch("https://www.amazon.de/dp/B0TEST")
-    assert page.skipped_reason == "blocked"
+    assert page.skipped_reason == "blocked_by_list"
 
 
 def test_fetch_skips_non_html() -> None:
@@ -492,7 +497,7 @@ def test_subdomains_of_known_blockers_are_skipped_too() -> None:
             "https://smile.amazon.de/dp/B0TEST",
             "https://de-de.facebook.com/laden/",
         ):
-            assert fetcher.fetch(url).skipped_reason == "blocked", url
+            assert fetcher.fetch(url).skipped_reason == "blocked_by_list", url
 
 
 def test_lookalike_domains_are_not_blocked(fixture_html) -> None:

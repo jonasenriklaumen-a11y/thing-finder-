@@ -2525,10 +2525,12 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
             if used >= NORMAL_TOKEN_LIMIT:
                 self._json(
                     {
+                        # Die Zahl kommt aus der Konstante, nicht aus dem Satz:
+                        # sonst steht hier beim naechsten Mal wieder die alte.
                         "error": (
-                            "Dein Kontingent von 400.000 Token ist aufgebraucht. "
-                            "Mit einem Pro-Konto gibt es kein Tokenlimit."
-                        ),
+                            f"Dein Kontingent von {NORMAL_TOKEN_LIMIT:,} Token ist "
+                            "aufgebraucht. Mit einem Pro-Konto gibt es kein Tokenlimit."
+                        ).replace(",", "."),
                         "code": "token_limit",
                         "tokens_used": used,
                         "token_limit": NORMAL_TOKEN_LIMIT,

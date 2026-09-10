@@ -111,9 +111,12 @@ Harte Regeln:
 - Rate nie. Was du nicht gefunden hast, kennzeichnest du als "nicht gefunden".
 - Erfinde keine Adressen, Preise, Oeffnungszeiten, Bewertungen oder technischen Daten. \
 Jede konkrete Angabe muss aus einer gelesenen Seite oder einem Such-Snippet stammen.
-- Liefert `fetch_page` einen `skipped_reason` (blocked, consent_required, paywall, \
-robots_disallowed), dann versuche NICHT, das zu umgehen. Nimm eine andere Quelle -- es \
-gibt fast immer eine zweite Quelle fuer dieselbe Information.
+- Liefert `fetch_page` einen `skipped_reason` (blocked_http_403 und andere \
+blocked_*, consent_required, paywall, robots_disallowed), dann versuche NICHT, das zu \
+umgehen. Nimm eine andere Quelle -- es gibt fast immer eine zweite Quelle fuer \
+dieselbe Information. Der beiliegende `note` sagt, woran es lag; gib das weiter, \
+wenn der Nutzer nach einer bestimmten Seite gefragt hat: "abgewiesen (403)" ist \
+eine Entscheidung dieser Seite und keine kaputte Adresse.
 - Nennst du eine Zahl oder ein Detail aus einem Such-Snippet statt aus einer gelesenen \
 Seite, schreib das dazu.
 
@@ -180,6 +183,10 @@ VISUAL_SOURCES_PROMPT = """
 - Schreibe niemals einen Platzhalter wie "[Bild: …]" in den Text. Das Bild kommt aus
   dem Werkzeug und wird von der Oberfläche angezeigt; ein Platzhalter täuscht eins vor,
   das es nicht gibt.
+- Übersichtsseiten mit mehreren Kameras (etwa die Webcam-Seite eines Flughafens) zeigen
+  oben oft Vorschaubilder. Öffne wenn möglich die Seite der einzelnen Kamera, nicht die
+  Übersicht -- dort ist eindeutig, welches Bild gemeint ist. Kommt trotzdem erkennbar
+  ein Vorschau- oder Archivbild zurück, sag das und nimm die Einzelseite.
 """
 
 #: Die drei Arbeitsweisen. "normal" fuehrt ein Gespraech, "code" schreibt

@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.11                                     │
+│ Aquaticy AI 9.4.12                                     │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -146,7 +146,7 @@ $ aquaticy --location "Mönchengladbach" --lang de
 
   [Suche] laptop bildbearbeitung test 2026
   [Suche] notebook bis 1200 euro farbtreues display
-  [Lese]  5 Seiten... (amazon.de übersprungen: blockiert)
+  [Lese]  5 Seiten... (amazon.de übersprungen: auf der Blockerliste)
 
   Drei Kandidaten:
 
@@ -785,7 +785,7 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   Systemtext und das ganze Gespräch bei *jedem* Aufruf (die Schnittstelle ist
   zustandslos, genau so rechnen die Anbieter auch ab) plus die Antwort und die
   Argumente der Werkzeugaufrufe. Bei normalen Konten endet das Kontingent bei insgesamt
-  400.000 Token. Pro-Konten bleiben unbegrenzt. Der Zähler lässt sich nicht zurücksetzen.
+  150.000 Token. Pro-Konten bleiben unbegrenzt. Der Zähler lässt sich nicht zurücksetzen.
 * **Aufträge** unter *Einstellungen → Aufträge*: Aquaticy kann regelmäßig recherchieren
   oder eine öffentliche Kamera, Satelliten-/Straßenansicht beziehungsweise Produktseite
   beobachten. Vierte Art: **ein Bild hochladen und danach suchen lassen** — du gibst
@@ -841,7 +841,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.11                                                  │
+│ Aquaticy AI 9.4.12                                                  │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1294,10 +1294,14 @@ erst den Ort (Nominatim), dann die Umgebung (Overpass). Zurück kommen Name,
 Adresse, Telefon, Öffnungszeiten und, wenn es eine gibt, die **Website**:
 eingetragen von Leuten vor Ort, nicht von einer Marketingabteilung. Was dabei
 herauskommt, liest Aquaticy danach ganz normal mit `fetch_page`. Für alles
-Örtliche ist das der beste erste Griff, nicht der letzte. Antwortet der
+Örtliche ist das der beste erste Griff, nicht der letzte. Antwortet ein
 Overpass-Server nicht — er ist gespendete Rechenzeit und entsprechend oft
-ausgelastet —, fragt Aquaticy einmal beim öffentlichen Ausweichserver nach,
-bevor es aufgibt. Der Takt von einem Aufruf pro Sekunde gilt für beide zusammen.
+ausgelastet —, geht Aquaticy der Reihe nach zu **drei** Servern, jeder mit einem
+knappen eigenen Zeitlimit: drei kurze Versuche kommen zusammen schneller zu einer
+Antwort als ein langer, der hängt. Die Ortssuche selbst wird bei einem Zeitlimit
+einmal wiederholt — dass es einen Ort nicht gibt, erkennt man an einer leeren
+Antwort, nicht an einer ausbleibenden. Der Takt von einem Aufruf pro Sekunde gilt
+für alle zusammen.
 
 Beide Dienste gehören der OpenStreetMap Foundation und sind gespendete
 Rechenzeit, keine Selbstbedienung. Ihre Regeln sind eingebaut, nicht nur
@@ -1412,11 +1416,29 @@ Ergebnis an die Antwort. Gibt keine der versuchten Quellen ein Bild her, steht d
 Satz dort — mit den Adressen, an denen es gescheitert ist. Platzhalter wie „[Bild: …]"
 sind ausdrücklich verboten: ein Bild kommt aus dem Werkzeug oder gar nicht.
 
+**Warum eine Seite übersprungen wurde, steht jetzt genau da.** Früher hieß alles
+„blockiert": dass Aquaticy die Domain grundsätzlich nicht abruft, dass die Seite mit
+einem Fehlerstatus abgewiesen hat und dass dort eine Bot-Prüfung steht. Das sind drei
+verschiedene Dinge, und nur beim mittleren sagt die Nummer, ob ein zweiter Versuch
+lohnt. Es gibt deshalb `blocked_by_list`, `blocked_bot_wall` und `blocked_http_403`
+(beziehungsweise 401, 402, 407, 429), jeweils mit einem Satz im Klartext dazu —
+„Die Seite weist automatisierte Abrufe ab (403). Das liegt an ihr, nicht an der
+Adresse." Umgangen wird nach wie vor nichts davon.
+
 Gefundene öffentliche Webcam-, Satelliten-, Karten- und Straßenbilder erscheinen direkt
 unter der Antwort. Für einen Laden kann Aquaticy den Ort zuerst über OpenStreetMap finden
 und anschließend eine frei zugängliche Google-Maps-/Street-View-, Mapillary- oder
 KartaView-Seite aufnehmen. Google Maps wird über die öffentliche Maps-URL geöffnet; es
 wird keine private oder kostenpflichtige Maps-Schnittstelle vorausgesetzt.
+Auf einer Webcam-Übersicht (etwa der eines Flughafens) stehen oben oft große
+Vorschaubilder und darunter die eigentliche Live-Ansicht. Aquaticy entscheidet
+deshalb nicht nach Größe, sondern **nach Bewegung**: es merkt sich alle Bildflächen
+der Seite, wartet gut anderthalb Sekunden und sieht noch einmal nach. Was seine
+Adresse gewechselt hat oder als Video läuft, ist die Live-Ansicht und gewinnt — auch
+gegen ein viel größeres Standbild. Vorschaureihen (drei gleich große Bilder, jedes in
+einem Link) werden zusätzlich abgewertet. Und: gesucht wird auf der **ganzen Seite**,
+nicht nur im sichtbaren Fensterausschnitt — genau daran scheiterte es vorher, wenn das
+Livebild unter den Vorschauen lag.
 Bei Seiten mit Player — Webcams liegen fast immer hinter einem — nimmt Aquaticy das
 Bild im Browser auf, **startet die Wiedergabe und wartet auf einen echten Frame**,
 statt das eingebettete Vorschaubild zu nehmen: das ist genau das Standbild von vor dem
@@ -2040,7 +2062,7 @@ im Terminal. Später zeigt `aquaticy pro-code` denselben Code erneut. Alternativ
 ihn vor dem Start mit `AQUATICY_PRO_CODE`.
 
 Normale Konten können recherchieren, chatten und ihre eigenen Einstellungen und Daten
-nutzen. Nach insgesamt 400.000 Token nehmen sie keine weiteren Modellanfragen an. Der
+nutzen. Nach insgesamt 150.000 Token nehmen sie keine weiteren Modellanfragen an. Der
 Zähler lässt sich nicht zurücksetzen. Pro-Konten haben kein Tokenlimit und können
 zusätzlich die LAN-Suche, Home Assistant und die Lagerverwaltung verwenden.
 

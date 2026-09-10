@@ -14,7 +14,7 @@ Gezaehlt wird, was tatsaechlich ueber die Leitung geht:
 * **heraus** die Antwort und die Argumente der Werkzeugaufrufe.
 
 Abgelegt wird tageweise je Modell in derselben Datenbank wie der Cache. Bei
-normalen Konten setzt die Weboberflaeche nach insgesamt 400.000 Token eine
+normalen Konten setzt die Weboberflaeche nach insgesamt 150.000 Token eine
 Pause; Pro-Konten bleiben unbegrenzt.
 """
 

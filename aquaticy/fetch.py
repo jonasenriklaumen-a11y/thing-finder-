@@ -212,16 +212,19 @@ def classify_failure(
 
     Returns:
         Leerer String, wenn alles in Ordnung ist, sonst einer der Gruende
-        `blocked`, `paywall`, `consent_required`, `empty`.
+        `blocked_http_<code>`, `blocked_bot_wall`, `paywall`,
+        `consent_required`, `empty`.
     """
     rules = rules or load_rules()
     html_lower = html.lower()
     text_lower = text.lower()
 
     if status_code in (401, 402, 403, 407, 429):
-        return "blocked"
+        return f"blocked_http_{status_code}"
     if _contains_any(html_lower[:200_000], rules.blocked_markers):
-        return "blocked"
+        # Eine Bot-Pruefung im Seitentext. Sie wird nicht geloest -- aber sie
+        # ist etwas anderes als ein 403, und das soll man auch lesen koennen.
+        return "blocked_bot_wall"
 
     enough_text = len(text.strip()) >= MIN_CONTENT_CHARS
     if not enough_text:
@@ -484,7 +487,7 @@ class Fetcher:
         ):
             # Bekannte Blocker gar nicht erst behelligen -- auch ihre
             # Subdomains (m.amazon.de, smile.amazon.de) laufen ins Leere.
-            result.skipped_reason = "blocked"
+            result.skipped_reason = "blocked_by_list"
             return result
 
         if self.respect_robots and not self.robots.allows(url):
@@ -507,7 +510,12 @@ class Fetcher:
         result.source_domain = domain_of(result.final_url) or domain
 
         if response.status_code in (401, 402, 403, 407, 429):
-            result.skipped_reason = "blocked"
+            # Frueher hiess das alles "blocked" -- dasselbe Wort fuer "wir
+            # fragen dort grundsaetzlich nicht", "die Seite hat uns die Tuer
+            # gewiesen" und "da steht eine Bot-Pruefung". Wer den Unterschied
+            # nicht sieht, kann auch nicht entscheiden, ob sich ein anderer
+            # Weg lohnt oder ob es an der Seite selbst liegt.
+            result.skipped_reason = f"blocked_http_{response.status_code}"
             return result
         if response.status_code >= 400:
             result.skipped_reason = "http_error"

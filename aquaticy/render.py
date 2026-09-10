@@ -18,7 +18,8 @@ from rich.text import Text
 from aquaticy.models import Product
 
 SKIP_LABELS: dict[str, str] = {
-    "blocked": "blockiert",
+    "blocked_by_list": "auf der Blockerliste",
+    "blocked_bot_wall": "Bot-Pruefung",
     "consent_required": "Zustimmung erforderlich",
     "paywall": "Bezahlschranke",
     "robots_disallowed": "per robots.txt gesperrt",
@@ -29,6 +30,15 @@ SKIP_LABELS: dict[str, str] = {
     "network_error": "Netzwerkfehler",
     "invalid_url": "ungueltige URL",
 }
+
+
+def skip_label(reason: str) -> str:
+    """Das kurze Wort zu einem Abbruchgrund -- auch fuer die HTTP-Nummern."""
+    if reason in SKIP_LABELS:
+        return SKIP_LABELS[reason]
+    if reason.startswith("blocked_http_"):
+        return f"abgewiesen ({reason.rsplit('_', 1)[-1]})"
+    return reason
 
 
 def shorten(text: str, limit: int = 70) -> str:
@@ -81,7 +91,7 @@ class ChatRenderer:
         self._update_reading()
 
     def _on_skip(self, payload: dict[str, Any]) -> None:
-        reason = SKIP_LABELS.get(payload.get("reason", ""), payload.get("reason", ""))
+        reason = skip_label(str(payload.get("reason", "")))
         self._skips.append(f"{_domain(payload.get('url', ''))} uebersprungen: {reason}")
         self._update_reading()
 

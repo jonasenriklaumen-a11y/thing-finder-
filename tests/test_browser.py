@@ -357,36 +357,109 @@ def test_a_stuck_player_gets_clicked_and_then_gives_up() -> None:
     assert knopf.geklickt == 1, "genau einmal -- sonst klickt er sich durch die Seite"
 
 
+class ShotPage(LivePage):
+    """Eine Seite mit Bildkandidaten -- fuer die Auswahl des Livebilds.
+
+    `kandidaten` ist der erste Blick, `spaeter` der zweite. Was dazwischen
+    seine Adresse wechselt, gilt als laufendes Bild.
+    """
+
+    def __init__(self, kandidaten: list[dict[str, Any]],
+                 spaeter: list[dict[str, Any]] | None = None,
+                 anteil: float = 0.6) -> None:
+        super().__init__([])
+        self.kandidaten = kandidaten
+        self.spaeter = spaeter if spaeter is not None else [
+            {"index": k["index"], "src": k.get("src", ""), "playing": k.get("playing", False)}
+            for k in kandidaten
+        ]
+        self.anteil = anteil
+        self.gewaehlt: int | None = None
+
+    def evaluate(self, script: str, *args: Any) -> Any:
+        from aquaticy import browser
+
+        if script is browser.MARK_CANDIDATES_JS:
+            return self.kandidaten
+        if script is browser.RESCAN_CANDIDATES_JS:
+            return self.spaeter
+        if script is browser.PICK_CANDIDATE_JS:
+            self.gewaehlt = args[0]
+            return self.anteil
+        return None
+
+    def query_selector(self, selector: str) -> Any:
+        class Element:
+            def screenshot(self, **kwargs: Any) -> bytes:
+                return b"ausschnitt"
+
+        return Element()
+
+    def screenshot(self, **kwargs: Any) -> bytes:
+        return b"ganze-seite"
+
+
+def _kandidat(index: int, **rest: Any) -> dict[str, Any]:
+    grund = {"index": index, "tag": "IMG", "area": 100_000, "key": "400x250",
+             "src": f"https://cam.example/{index}.jpg", "inLink": False, "playing": False}
+    grund.update(rest)
+    return grund
+
+
 def test_the_capture_prefers_the_live_element() -> None:
     """Ein Ausschnitt des Videos statt der ganzen Seite mit Kopfzeile und Werbung."""
     from aquaticy.browser import _shot
 
-    class Element:
-        def screenshot(self, **kwargs: Any) -> bytes:
-            return b"video-frame"
-
-    class Page(LivePage):
-        def evaluate(self, script: str, *args: Any) -> Any:
-            return 0.6  # das Element fuellt den groessten Teil des Fensters
-
-        def query_selector(self, selector: str) -> Any:
-            return Element()
-
-        def screenshot(self, **kwargs: Any) -> bytes:
-            return b"ganze-seite"
-
-    assert _shot(Page([])) == b"video-frame"
+    seite = ShotPage([_kandidat(0, tag="VIDEO", playing=True)])
+    assert _shot(seite) == b"ausschnitt"
+    assert seite.gewaehlt == 0
 
 
 def test_a_small_element_leaves_it_at_the_whole_view() -> None:
     """Ein Vorschaubild neben dem Text ist nicht die Ansicht, die gemeint ist."""
     from aquaticy.browser import _shot
 
-    class Page(LivePage):
-        def evaluate(self, script: str, *args: Any) -> Any:
-            return 0.05
+    seite = ShotPage([_kandidat(0)], anteil=0.02)
+    assert _shot(seite) == b"ganze-seite"
 
-        def screenshot(self, **kwargs: Any) -> bytes:
-            return b"ganze-seite"
 
-    assert _shot(Page([])) == b"ganze-seite"
+def test_the_refreshing_picture_beats_the_bigger_preview() -> None:
+    """Der Fall vom Flughafen: oben grosse Vorschaubilder, darunter das Livebild.
+
+    Frueher gewann die Vorschau, weil sie groesser war und weil alles
+    ausserhalb des Fensters gar nicht erst betrachtet wurde.
+    """
+    from aquaticy.browser import _shot
+
+    vorschau = _kandidat(0, area=400_000, key="800x500")
+    live = _kandidat(1, area=90_000, key="300x300")
+    seite = ShotPage(
+        [vorschau, live],
+        spaeter=[
+            {"index": 0, "src": vorschau["src"], "playing": False},
+            # Dieselbe Kamera, neuer Zeitstempel -- sie erneuert sich.
+            {"index": 1, "src": "https://cam.example/1.jpg?t=99", "playing": False},
+        ],
+    )
+    assert _shot(seite) == b"ausschnitt"
+    assert seite.gewaehlt == 1, "das sich erneuernde Bild ist das Livebild"
+
+
+def test_a_row_of_equal_thumbnails_loses_against_a_single_picture() -> None:
+    """Drei gleich grosse Bilder nebeneinander sind eine Vorschaureihe."""
+    from aquaticy.browser import _shot
+
+    seite = ShotPage(
+        [_kandidat(0, area=200_000, key="500x400", inLink=True),
+         _kandidat(1, area=200_000, key="500x400", inLink=True),
+         _kandidat(2, area=200_000, key="500x400", inLink=True),
+         _kandidat(3, area=120_000, key="400x300")]
+    )
+    assert _shot(seite) == b"ausschnitt"
+    assert seite.gewaehlt == 3
+
+
+def test_without_any_candidate_the_whole_view_is_taken() -> None:
+    from aquaticy.browser import _shot
+
+    assert _shot(ShotPage([])) == b"ganze-seite"

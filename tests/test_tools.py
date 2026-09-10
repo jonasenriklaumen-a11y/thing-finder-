@@ -162,10 +162,10 @@ def test_fetch_page_keeps_search_hint_for_blocked_pages(settings: Settings) -> N
     )
     payload = box.fetch_page("https://www.amazon.de/dp/B0TEST")
     assert payload["ok"] is False
-    assert payload["skipped_reason"] == "blocked"
+    assert payload["skipped_reason"] == "blocked_by_list"
     assert payload["search_title"] == "Lenovo Yoga Pro 7"
     assert "1099" in payload["search_snippet"]
-    assert box.stats.skipped["https://www.amazon.de/dp/B0TEST"] == "blocked"
+    assert box.stats.skipped["https://www.amazon.de/dp/B0TEST"] == "blocked_by_list"
 
 
 def test_fetch_page_is_cached(fixture_html, settings: Settings, tmp_path: Path) -> None:

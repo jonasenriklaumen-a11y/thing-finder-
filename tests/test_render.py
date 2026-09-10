@@ -18,14 +18,14 @@ def test_search_and_read_steps_are_shown() -> None:
     renderer.handle("search", {"query": "cafés mönchengladbach"})
     renderer.handle("fetch", {"url": "https://a.de/"})
     renderer.handle("fetch", {"url": "https://b.de/"})
-    renderer.handle("skip", {"url": "https://www.amazon.de/dp/X", "reason": "blocked"})
+    renderer.handle("skip", {"url": "https://www.amazon.de/dp/X", "reason": "blocked_http_403"})
     renderer.handle("answer_chunk", {"text": "Ergebnis"})
     renderer.handle("done", {"tool_calls": 3, "hit_limit": False})
 
     output = console.export_text()
     assert "[Suche] cafés mönchengladbach" in output
     assert "[Lese]  2 Seiten..." in output
-    assert "amazon.de uebersprungen: blockiert" in output
+    assert "amazon.de uebersprungen: abgewiesen (403)" in output
 
 
 def test_limit_notice_is_shown() -> None:

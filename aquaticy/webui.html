@@ -586,6 +586,11 @@ body:not(.pro-mode) .only-pro{display:none}
 .tool.stop{color:var(--warn);border-color:var(--warn)}
 .tool.stop:hover{background:var(--warn);color:var(--bg)}
 .hint{max-width:46rem;margin:8px auto 0;color:var(--text-3);font-size:11.5px;text-align:center}
+/* Der Hinweis, dass hier eine Maschine schreibt. Er steht unter der
+   Bedienhilfe, gehoert aber nicht zu ihr: er gilt immer, auch wenn jemand
+   die Tastenkuerzel laengst kennt. Etwas kleiner, damit er die Zeile
+   darueber nicht verdraengt, aber lesbar. */
+.ki-hinweis{margin-top:4px;font-size:11px;opacity:.85}
 body.dragging::after{content:"Datei hier ablegen";position:fixed;inset:14px;z-index:40;
   border:2px dashed var(--accent);border-radius:20px;background:var(--bg);opacity:.94;
   color:var(--accent-text);display:grid;place-items:center;font:400 19px var(--serif);
@@ -1246,6 +1251,8 @@ input:focus,select:focus{border-color:var(--accent)}
       <button type="button" class="chip">Baue eine kleine REST-API mit FastAPI</button>
     </div>
     <div class="hint">Enter senden · Shift+Enter Zeilenumbruch · /help zeigt die Befehle</div>
+    <div class="hint ki-hinweis">Die Texte hier sind KI-generiert und können Fehler
+      enthalten. Prüfe Wichtiges an der genannten Quelle nach.</div>
   </footer>
 </div>
 
@@ -1437,7 +1444,7 @@ input:focus,select:focus{border-color:var(--accent)}
       <fieldset><legend>Nutzung</legend>
         <p class="lead">Wie viel durch die Leitung geht. Ein Token sind hier drei
           Zeichen — eine Vereinbarung, keine Messung: jeder Anbieter zerlegt Text
-          anders. Normale Konten haben insgesamt 400.000 Token, Pro-Konten kein Limit.</p>
+          anders. Normale Konten haben insgesamt 150.000 Token, Pro-Konten kein Limit.</p>
         <div class="zaehler" id="zaehler"></div>
         <div class="note" id="usage-detail"></div>
       </fieldset>

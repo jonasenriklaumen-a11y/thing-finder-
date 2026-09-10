@@ -43,7 +43,7 @@ def test_registration_keeps_the_chosen_username_and_accepts_seven_characters(
 
 
 def test_free_accounts_receive_four_hundred_thousand_tokens() -> None:
-    assert NORMAL_TOKEN_LIMIT == 400_000
+    assert NORMAL_TOKEN_LIMIT == 150_000
 
 
 def test_registration_requires_and_records_explicit_terms(store: AuthStore) -> None:

@@ -20,7 +20,10 @@ from pathlib import Path
 from aquaticy.memory import secure_file
 
 SESSION_DAYS = 30
-NORMAL_TOKEN_LIMIT = 400_000
+
+#: Das Kontingent eines normalen Kontos. Ein Pro-Konto hat keines -- dort
+#: steht ueberall `None` statt einer Zahl, nicht etwa eine sehr grosse.
+NORMAL_TOKEN_LIMIT = 150_000
 EMAIL_RE = re.compile(r"^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$")
 USERNAME_RE = re.compile(r"^[^\x00-\x1f\x7f]{2,40}$")
 PRO_CODE_RE = re.compile(r"^[A-Z0-9]{9}$")

@@ -49,7 +49,22 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_MIRRORS = (
     OVERPASS_URL,
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
 )
+
+#: Wie lange ein einzelner Overpass-Server hoechstens brauchen darf. Bewusst
+#: knapp: der Hauptserver haengt oft, und wer dort fuenfundzwanzig Sekunden
+#: wartet, hat den Ausweichserver praktisch nie erreicht. Drei kurze Versuche
+#: kommen zusammen schneller zu einer Antwort als ein langer.
+OVERPASS_TRY_SECONDS = 11.0
+
+#: Und wie lange die Ortssuche selbst hoechstens dauern darf. Nominatim ist
+#: schnell, wenn es antwortet; antwortet es nicht, hilft Warten nicht.
+GEOCODE_TRY_SECONDS = 8.0
+
+#: Zweiter Anlauf bei der Ortssuche. Ein Zeitlimit ist dort meistens eine
+#: Laune des Netzes und keine Aussage ueber den Ort.
+GEOCODE_TRIES = 2
 
 #: Hoechstens ein Aufruf je Sekunde -- so steht es in der Nutzungsregel von
 #: Nominatim, und Overpass bittet um dasselbe Mass. Das Schloss ist
@@ -171,17 +186,29 @@ def geocode(place: str, user_agent: str, timeout: float = 15.0) -> tuple[float, 
     place = " ".join((place or "").split())
     if not place:
         raise PlacesError("Ohne Ort gibt es nichts nachzuschlagen.")
-    _warte()
-    try:
-        with _client(user_agent, timeout) as client:
-            antwort = client.get(
-                NOMINATIM_URL,
-                params={"q": place, "format": "jsonv2", "limit": 1, "addressdetails": 0},
-            )
-            antwort.raise_for_status()
-            treffer = antwort.json()
-    except Exception as exc:  # httpx-Fehler, JSON-Fehler, alles dasselbe hier
-        raise PlacesError(f"Ortssuche fehlgeschlagen: {type(exc).__name__}") from exc
+    frist = min(timeout, GEOCODE_TRY_SECONDS)
+    treffer: Any = None
+    letzter: Exception | None = None
+    # Zweimal fragen: ein Zeitlimit ist hier fast immer eine Laune des Netzes.
+    # Dass es den Ort nicht gibt, erkennt man an einer leeren Antwort, nicht
+    # an einer ausbleibenden.
+    for _ in range(GEOCODE_TRIES):
+        _warte()
+        try:
+            with _client(user_agent, frist) as client:
+                antwort = client.get(
+                    NOMINATIM_URL,
+                    params={"q": place, "format": "jsonv2", "limit": 1, "addressdetails": 0},
+                )
+                antwort.raise_for_status()
+                treffer = antwort.json()
+            break
+        except Exception as exc:  # httpx-Fehler, JSON-Fehler, alles dasselbe hier
+            letzter = exc
+    if letzter is not None and treffer is None:
+        raise PlacesError(
+            f"Ortssuche fehlgeschlagen: {type(letzter).__name__}"
+        ) from letzter
     if not isinstance(treffer, list) or not treffer:
         raise PlacesError(f"Den Ort '{place}' kennt die Karte nicht.")
     erster = treffer[0]
@@ -229,8 +256,13 @@ def find_places(
     limit = max(1, min(int(limit or MAX_PLACES), MAX_PLACES))
     lat, lon, gefunden = geocode(where, user_agent, timeout=min(timeout, 15.0))
 
+    frist = min(timeout, OVERPASS_TRY_SECONDS)
+    # Das Zeitlimit IN der Abfrage sagt dem Server, wann er selbst aufgeben
+    # soll. Steht es hoeher als unser eigenes, rechnet er weiter, nachdem wir
+    # laengst aufgelegt haben -- verschenkte Rechenzeit auf einem Dienst, der
+    # gespendet ist.
     abfrage = (
-        f"[out:json][timeout:{int(min(timeout, 25))}];"
+        f"[out:json][timeout:{max(5, int(frist))}];"
         f"{_filter_for(what)}(around:{radius},{lat},{lon});"
         f"out center tags {limit};"
     )
@@ -239,7 +271,7 @@ def find_places(
     for server in OVERPASS_MIRRORS:
         _warte()
         try:
-            with _client(user_agent, timeout) as client:
+            with _client(user_agent, frist) as client:
                 antwort = client.post(server, data={"data": abfrage})
                 antwort.raise_for_status()
                 daten = antwort.json()
@@ -248,7 +280,8 @@ def find_places(
             letzter = exc
     if daten is None:
         raise PlacesError(
-            f"Die Karte antwortet gerade nicht: {type(letzter).__name__}"
+            "Die Karte antwortet gerade auf keinem ihrer Server "
+            f"({len(OVERPASS_MIRRORS)} versucht): {type(letzter).__name__}"
         ) from letzter
 
     if not isinstance(daten, dict):

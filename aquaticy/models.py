@@ -89,7 +89,7 @@ class PageResult(BaseModel):
                 "ok": False,
                 "skipped_reason": self.skipped_reason,
                 "status_code": self.status_code,
-                "note": SKIP_NOTES.get(self.skipped_reason, "Seite konnte nicht gelesen werden."),
+                "note": skip_note(self.skipped_reason),
             }
         text = self.text[:max_chars]
         payload: dict[str, object] = {
@@ -109,10 +109,25 @@ class PageResult(BaseModel):
         return payload
 
 
+#: Was der Server mit einem Abweisungsstatus eigentlich sagt. Die Nummer ist
+#: der Unterschied zwischen "melde dich an" und "du fragst zu oft" -- und
+#: davon haengt ab, ob es sich lohnt, es spaeter noch einmal zu versuchen.
+HTTP_REFUSALS: dict[int, str] = {
+    401: "verlangt eine Anmeldung (401)",
+    402: "verlangt eine Bezahlung (402)",
+    403: "weist automatisierte Abrufe ab (403)",
+    407: "verlangt eine Anmeldung am Netzuebergang (407)",
+    429: "hat zu viele Abrufe gesehen und bremst (429)",
+}
+
 SKIP_NOTES: dict[str, str] = {
-    "blocked": (
-        "Die Seite blockiert automatisierte Abrufe (403/Captcha). "
-        "Nutze den Suchtreffer nur als Link und hole die Fakten aus einer anderen Quelle."
+    "blocked_by_list": (
+        "Diese Domain steht auf der Liste bekannter Blocker -- sie wird gar nicht "
+        "erst abgerufen. Nutze den Suchtreffer nur als Link."
+    ),
+    "blocked_bot_wall": (
+        "Auf der Seite steht eine Bot-Pruefung (Captcha oder Browser-Check). "
+        "Die wird nicht geloest -- nimm eine andere Quelle."
     ),
     "consent_required": (
         "Die Seite liefert ohne Cookie-Zustimmung keinen Inhalt (Consent-Wall). "
@@ -132,3 +147,17 @@ SKIP_NOTES: dict[str, str] = {
     "network_error": "Netzwerkfehler beim Abruf.",
     "invalid_url": "Die URL ist ungueltig oder verwendet kein http(s).",
 }
+
+
+def skip_note(reason: str) -> str:
+    """Der Klartext zu einem Abbruchgrund -- auch fuer die HTTP-Nummern."""
+    if reason in SKIP_NOTES:
+        return SKIP_NOTES[reason]
+    if reason.startswith("blocked_http_"):
+        code = reason.rsplit("_", 1)[-1]
+        wie = HTTP_REFUSALS.get(int(code) if code.isdigit() else 0, f"lehnt ab ({code})")
+        return (
+            f"Die Seite {wie}. Das liegt an ihr, nicht an der Adresse: nutze den "
+            "Treffer als Link und hol die Fakten aus einer anderen Quelle."
+        )
+    return "Seite konnte nicht gelesen werden."
