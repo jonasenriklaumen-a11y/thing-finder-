@@ -1439,21 +1439,37 @@ input:focus,select:focus{border-color:var(--accent)}
       </fieldset>
 
       <fieldset><legend>Aufträge</legend>
-        <p class="lead">Fragen, die Aquaticy AI von selbst stellt — stündlich,
-          täglich oder wöchentlich. Die Antwort landet als Chat in der
-          Seitenleiste. Verpasste Termine werden nicht nachgeholt: war der
-          Rechner aus, geht es beim nächsten Mal weiter.</p>
+        <p class="lead">Aquaticy kann regelmäßig recherchieren oder eine öffentliche
+          Kamera, Satelliten-/Straßenansicht oder Produktseite beobachten. Bei einer
+          Beobachtung entsteht erst dann ein neuer Chat, wenn die Bedingung erfüllt ist —
+          mit dem geprüften Bild und Zeitpunkt.</p>
         <div class="auftraege" id="auftraege"></div>
         <div class="row">
-          <label style="flex:2"><span class="lbl">Frage</span>
+          <label><span class="lbl">Art</span>
+            <select id="job-kind">
+              <option value="research">regelmäßig recherchieren</option>
+              <option value="visual">Kamera, Satellit oder Straße beobachten</option>
+              <option value="price">Preis beobachten</option>
+            </select></label>
+          <label style="flex:2"><span class="lbl">Frage oder Bedingung</span>
             <input type="text" id="job-frage"
-                   placeholder="Was gibt es Neues zu …?"></label>
+                   placeholder="z. B. Ein oranges Flugzeug ist sichtbar"></label>
           <label><span class="lbl">Rhythmus</span>
             <select id="job-rhythm">
               <option value="daily">täglich</option>
               <option value="hourly">stündlich</option>
               <option value="weekly">wöchentlich</option>
+              <option value="minutes5">alle 5 Minuten</option>
+              <option value="minutes15">alle 15 Minuten</option>
+              <option value="minutes30">alle 30 Minuten</option>
             </select></label>
+        </div>
+        <div class="row" id="job-source-feld" hidden>
+          <label style="flex:1"><span class="lbl">Öffentliche Quelladresse</span>
+            <input type="url" id="job-source" placeholder="https://…"
+                   inputmode="url" autocomplete="off">
+            <span class="why">Die genaue Webcam-, Karten-, Satelliten- oder Produktseite.
+              Private Kameras und Anmeldungen werden nicht verwendet.</span></label>
         </div>
         <div class="row">
           <label id="job-tag-feld"><span class="lbl">Wochentag</span>
@@ -1466,11 +1482,11 @@ input:focus,select:focus{border-color:var(--accent)}
               <option value="5">Samstag</option>
               <option value="6">Sonntag</option>
             </select></label>
-          <label><span class="lbl">Uhrzeit <span class="why">Bei „stündlich"
+          <label id="job-zeit-feld"><span class="lbl">Uhrzeit <span class="why">Bei „stündlich"
             zählt nur die Minute</span></span>
             <input type="time" id="job-zeit" value="08:00"></label>
         </div>
-        <div class="check">
+        <div class="check" id="job-struktur-feld">
           <input type="checkbox" role="switch" class="schalter" id="job-struktur" checked>
           <label for="job-struktur" style="margin:0">Richtig recherchieren
             <span class="why">Teilfragen, Agenten, Quellen — wie der Schalter
@@ -1694,7 +1710,7 @@ input:focus,select:focus{border-color:var(--accent)}
 const $ = (s) => document.querySelector(s);
 const thread = $("#thread"), main = $("#main"), input = $("#input"), send = $("#send");
 let busy = false;
-const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.7";
+const aquaticyVersion = window.__AQUATICY_VERSION__ || "9.4.8";
 $("#version").textContent = "v" + aquaticyVersion;
 document.title = `Aquaticy AI ${aquaticyVersion}`;
 
@@ -2133,11 +2149,14 @@ function safeHttpUrl(raw){
     return url.protocol === "https:" || url.protocol === "http:" ? url.href : "";
   } catch { return ""; }
 }
-function resultImage(url, alt){
+function resultImage(url, alt, mediaId = ""){
   const safe = safeHttpUrl(url);
-  if (!safe) return null;
+  const stored = /^[0-9]{13}-[0-9a-f]{16}\.(jpg|png|webp|gif)$/.test(String(mediaId || ""));
+  if (!safe && !stored) return null;
   const image = document.createElement("img");
-  image.src = "/api/media?url=" + encodeURIComponent(safe); image.alt = alt || "Recherchebild";
+  image.src = "/api/media?url=" + encodeURIComponent(safe);
+  if (stored) image.src = "/api/media?id=" + encodeURIComponent(mediaId);
+  image.alt = alt || "Recherchebild";
   image.loading = "lazy"; image.decoding = "async"; image.referrerPolicy = "no-referrer";
   image.addEventListener("error", () => image.remove());
   return image;
@@ -2159,11 +2178,17 @@ function renderResultMedia(bubble, products = [], visuals = []){
     const url = safeHttpUrl(visual?.url);
     if (!url || seen.has(url)) return; seen.add(url);
     const card = document.createElement("article"); card.className = "result-card visual";
-    const image = resultImage(url, visual.title || "Öffentliches Webcam- oder Satellitenbild");
+    const image = resultImage(url, visual.title || "Öffentliches Bild", visual.media_id);
     if (image) card.appendChild(image);
     const body = document.createElement("div"); body.className = "body";
     const title = document.createElement("div"); title.className = "title";
     title.textContent = visual.title || "Aktuelles öffentliches Bild"; body.appendChild(title);
+    if (visual.captured_at){
+      const captured = document.createElement("div"); captured.className = "why";
+      const date = new Date(visual.captured_at);
+      captured.textContent = isNaN(date) ? "" : "Aufgenommen: " + date.toLocaleString("de-DE");
+      if (captured.textContent) body.appendChild(captured);
+    }
     const link = sourceLink(visual.source_url || url, "Bildquelle öffnen");
     if (link) body.appendChild(link); card.appendChild(body); grid.appendChild(card);
   });
@@ -3824,9 +3849,14 @@ function jobZeile(job){
     + '<button type="button" data-do="run">Jetzt</button>'
     + '<button type="button" data-do="toggle"></button>'
     + '<button type="button" class="weg" data-do="delete">Löschen</button></div>';
-  zeile.querySelector(".frage").textContent = job.question;
+  const art = job.kind === "visual" ? "Bildbeobachtung" :
+    job.kind === "price" ? "Preisbeobachtung" : "Recherche";
+  zeile.querySelector(".frage").textContent = `${art}: ${job.question}`;
 
-  const takt = job.rhythm === "hourly"
+  const minuten = {minutes5: 5, minutes15: 15, minutes30: 30}[job.rhythm];
+  const takt = minuten
+    ? `alle ${minuten} Minuten`
+    : job.rhythm === "hourly"
     ? `stündlich zur Minute ${String(job.minute).padStart(2, "0")}`
     : job.rhythm === "weekly"
       ? `wöchentlich, ${TAGE[job.weekday] || "Montag"} um `
@@ -3868,13 +3898,24 @@ function jobZeile(job){
 function jobFelder(){
   const takt = $("#job-rhythm").value;
   $("#job-tag-feld").hidden = takt !== "weekly";
+  $("#job-zeit-feld").hidden = takt.startsWith("minutes");
+  $("#job-source-feld").hidden = $("#job-kind").value === "research";
+  $("#job-struktur-feld").hidden = $("#job-kind").value !== "research";
 }
 $("#job-rhythm").addEventListener("change", jobFelder);
+$("#job-kind").addEventListener("change", jobFelder);
+jobFelder();
 
 $("#job-add").addEventListener("click", async () => {
   const frage = $("#job-frage").value.trim();
   const note = $("#job-note");
   if (!frage){ note.textContent = "Ohne Frage gibt es nichts zu tun."; return; }
+  const kind = $("#job-kind").value;
+  const source = $("#job-source").value.trim();
+  if (kind !== "research" && !safeHttpUrl(source)){
+    note.textContent = "Bitte gib eine vollständige öffentliche http(s)-Quelladresse an.";
+    return;
+  }
   const [stunde, minute] = ($("#job-zeit").value || "08:00").split(":");
   try {
     const res = await api("/api/jobs", {
@@ -3887,11 +3928,14 @@ $("#job-add").addEventListener("click", async () => {
         minute: Number(minute) || 0,
         weekday: Number($("#job-weekday").value) || 0,
         structured: $("#job-struktur").checked,
+        kind,
+        source_url: source,
       }),
     });
     const data = await res.json();
     if (!data.ok){ note.textContent = data.error || "Anlegen ging nicht."; return; }
     $("#job-frage").value = "";
+    $("#job-source").value = "";
     note.textContent = "Angelegt.";
     loadJobs();
   } catch { note.textContent = "Anlegen ging nicht."; }
@@ -4375,4 +4419,3 @@ input.focus();
 </script>
 </body>
 </html>
-

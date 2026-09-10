@@ -1707,6 +1707,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if action == "add":
             try:
+                kind = str(payload.get("kind", "research")).strip().lower()
+                if kind == "visual" and not selected_vision_model(settings):
+                    return {
+                        "ok": False,
+                        "error": "Die Bildbeobachtung braucht ein Vision-Modell unter Modell.",
+                    }
                 job = store.add(
                     str(payload.get("question", "")),
                     rhythm=str(payload.get("rhythm", "daily")),
@@ -1714,6 +1720,8 @@ class Handler(BaseHTTPRequestHandler):
                     minute=int(payload.get("minute", 0) or 0),
                     weekday=int(payload.get("weekday", 0) or 0),
                     structured=bool(payload.get("structured", True)),
+                    kind=kind,
+                    source_url=str(payload.get("source_url", "")),
                 )
             except (ValueError, TypeError) as exc:
                 return {"ok": False, "error": str(exc)}
@@ -1740,6 +1748,8 @@ class Handler(BaseHTTPRequestHandler):
             def sofort() -> None:
                 state, chat = run_job(job, settings)
                 store.note_run(job.id, state, chat)
+                if state == "erfüllt":
+                    store.set_enabled(job.id, False)
 
             threading.Thread(target=sofort, daemon=True).start()
             return {"ok": True, "started": True}
@@ -1799,7 +1809,19 @@ class Handler(BaseHTTPRequestHandler):
                 }
             )
         elif route == "/api/media":
-            target = (parse_qs(urlsplit(self.path).query).get("url") or [""])[0].strip()
+            query = parse_qs(urlsplit(self.path).query)
+            media_id = (query.get("id") or [""])[0].strip()
+            if media_id:
+                from aquaticy.media import load_snapshot
+
+                snapshot = load_snapshot(SESSION.settings().data_dir, media_id)
+                if snapshot is None:
+                    self._json({"error": "Dieses Bild ist nicht mehr vorhanden."}, 404)
+                    return
+                data, mime = snapshot
+                self._send(200, data, mime)
+                return
+            target = (query.get("url") or [""])[0].strip()
             if not target or len(target) > 8_000:
                 self._json({"error": "Keine gültige Bildadresse."}, 400)
                 return
@@ -2809,4 +2831,3 @@ def serve(
         server.server_close()
         TOKEN = ""
         AUTH = None
-

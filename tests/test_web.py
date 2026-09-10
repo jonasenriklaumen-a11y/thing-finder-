@@ -1838,6 +1838,16 @@ def test_media_endpoint_returns_a_server_checked_image(
     assert status == 200 and body == b"real-image"
 
 
+def test_media_endpoint_returns_the_saved_frame_without_refetching(client, session) -> None:
+    from aquaticy.media import save_snapshot
+
+    media_id = save_snapshot(session.settings().data_dir, b"saved-frame", "image/png")
+    status, body = client("GET", f"/api/media?id={media_id}")
+    assert status == 200 and body == b"saved-frame"
+    status, _ = client("GET", "/api/media?id=..%2Fsecret.png")
+    assert status == 404
+
+
 def test_opening_a_chat_restores_the_context(session: web.ChatSession) -> None:
     """Nachfragen wie "und davon nur die guenstigen" muessen weiter gehen."""
     cache = Cache(session.settings().db_path, 24)
@@ -3744,4 +3754,3 @@ def test_the_whole_picker_scrolls_not_just_the_list() -> None:
     assert "display:flex;flex-direction:column" in picker
     # Die Liste bekommt einen kleineren Anteil, sonst füllt sie alles.
     assert "min(38vh,320px)" in picker
-

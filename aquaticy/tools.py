@@ -155,8 +155,9 @@ PUBLIC_VISUAL_SCHEMA: dict[str, Any] = {
     "function": {
         "name": "inspect_public_visual",
         "description": (
-            "Öffnet ein frei zugängliches Webcam- oder Satellitenbild (oder eine Seite, "
-            "die ein solches Bild enthält) und lässt es vom Vision-Modell beschreiben. "
+            "Öffnet ein frei zugängliches Webcam-, Satelliten-, Karten- oder Straßenbild "
+            "(oder eine Seite, die es enthält), nimmt einen Schnappschuss und lässt ihn "
+            "vom Vision-Modell beschreiben. "
             "Nutze nur öffentliche Quellen und übergib den sichtbaren Sachverhalt, den "
             "du prüfen möchtest. Das Ergebnis ist eine Beobachtung, kein Ereignisnachweis."
         ),
@@ -1970,6 +1971,7 @@ class Toolbox:
             if self.visual_inspector is None:
                 return {"error": "Es ist kein Vision-Modell ausgewählt."}
             source_url = str(arguments.get("url", "")).strip()
+            loaded = None
             loader = getattr(self._fetcher, "load_public_visual", None)
             if loader is not None:
                 import base64
@@ -1994,6 +1996,17 @@ class Toolbox:
                 analysis = self.visual_inspector(vision_url, question)
             except Exception as exc:
                 return {"error": str(exc), "url": url}
+            checked_at = datetime.now(UTC).isoformat(timespec="seconds")
+            media_id = ""
+            if loaded:
+                try:
+                    from aquaticy.media import save_snapshot
+
+                    media_id = save_snapshot(
+                        self.settings.data_dir, loaded.content, loaded.content_type
+                    )
+                except (OSError, ValueError):
+                    media_id = ""
             self.stats.fetched.append(url)
             visual = {
                 "url": url,
@@ -2001,12 +2014,16 @@ class Toolbox:
                 "title": question or "Öffentliches aktuelles Bild",
                 "kind": "public_visual",
             }
+            if loaded:
+                visual["captured_at"] = checked_at
+            if media_id:
+                visual["media_id"] = media_id
             if mime_type:
                 visual["mime_type"] = mime_type
             self.stats.visuals.append(visual)
             return {
                 **visual,
-                "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "checked_at": checked_at,
                 "observation": analysis,
             }
         if name == "search_news":
@@ -2742,4 +2759,3 @@ def looks_like_product_page(html: str, url: str) -> bool:
     if extract_product(html, url) is not None:
         return True
     return has_spec_heading(HTMLParser(html))
-

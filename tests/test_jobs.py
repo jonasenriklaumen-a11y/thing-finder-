@@ -8,6 +8,7 @@ sich seinen eigenen Agenten baut statt das laufende Gespraech anzufassen.
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,7 +17,16 @@ from typing import Any
 import pytest
 
 from aquaticy import jobs as auftraege
-from aquaticy.jobs import MAX_JOBS, Job, JobStore, Scheduler, next_time
+from aquaticy.jobs import (
+    MAX_JOBS,
+    SCHEMA,
+    Job,
+    JobStore,
+    Scheduler,
+    next_time,
+    price_condition_met,
+)
+from aquaticy.models import Product
 
 
 def test_stuendlich_nimmt_die_naechste_volle_minute() -> None:
@@ -53,6 +63,19 @@ def test_unbekannter_rhythmus_wird_taeglich() -> None:
     assert a == b
 
 
+def test_beobachtung_kann_alle_fuenf_minuten_laufen() -> None:
+    jetzt = datetime(2026, 9, 6, 14, 3, 41).timestamp()
+    naechster = datetime.fromtimestamp(next_time("minutes5", 0, 0, 0, jetzt))
+    assert naechster == datetime(2026, 9, 6, 14, 8, 0)
+
+
+def test_preisbedingung_nutzt_strukturierte_produktdaten() -> None:
+    product = Product(name="Teil", url="https://shop.example/p", price="49,99")
+    assert price_condition_met("unter 50 €", [product]) is True
+    assert price_condition_met("unter 40 €", [product]) is False
+    assert price_condition_met("wenn es günstig ist", [product]) is None
+
+
 def test_anlegen_und_wieder_loeschen(tmp_path: Path) -> None:
     store = JobStore(tmp_path / "j.db")
     job = store.add("Was gibt es Neues?", rhythm="daily", hour=7, minute=30)
@@ -62,6 +85,21 @@ def test_anlegen_und_wieder_loeschen(tmp_path: Path) -> None:
     assert [eintrag.id for eintrag in store.all_jobs()] == [job.id]
     assert store.delete(job.id) is True
     assert store.all_jobs() == []
+
+
+def test_alte_auftragsdatenbank_wird_fuer_beobachtungen_erweitert(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(SCHEMA)
+    store = JobStore(path)
+    job = store.add(
+        "Ein oranges Flugzeug ist sichtbar",
+        kind="visual",
+        source_url="https://camera.example/live",
+        rhythm="minutes5",
+    )
+    assert job.kind == "visual"
+    assert job.source_url == "https://camera.example/live"
 
 
 def test_ohne_frage_kein_auftrag(tmp_path: Path) -> None:
@@ -163,6 +201,60 @@ def test_ein_fehler_im_lauf_bleibt_im_lauf(monkeypatch: pytest.MonkeyPatch) -> N
     zustand, chat = auftraege.run_job(job, settings)
     assert zustand.startswith("Fehler: RuntimeError")
     assert chat == ""
+
+
+def test_erfuellte_bildbeobachtung_speichert_genau_einen_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    saved: list[tuple[str, str, str, dict[str, Any]]] = []
+    unread: list[tuple[str, str]] = []
+
+    class Result:
+        def __init__(self) -> None:
+            self.answer = "BEDINGUNG ERFÜLLT\nDas orange Flugzeug ist sichtbar."
+            self.visuals = [{"media_id": "1234567890123-0123456789abcdef.jpg"}]
+
+        def meta(self) -> dict[str, Any]:
+            return {"visuals": self.visuals}
+
+    class FakeAgent:
+        def __init__(self, settings: Any, cache: Any = None) -> None:
+            assert cache is None
+            self.session_id = "monitor-1"
+
+        def ask(self, frage: str, **kwargs: Any) -> Any:
+            assert "inspect_public_visual" in frage
+            assert kwargs["visual_sources"] is True
+            assert kwargs["structured"] is False
+            return Result()
+
+        def close(self) -> None: ...
+
+    class FakeCache:
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def add_history(
+            self, session: str, question: str, answer: str, meta: dict[str, Any]
+        ) -> None:
+            saved.append((session, question, answer, meta))
+
+        def mark_unread(self, session: str, reason: str = "") -> None:
+            unread.append((session, reason))
+
+    monkeypatch.setattr("aquaticy.agent.Agent", FakeAgent)
+    monkeypatch.setattr("aquaticy.cache.Cache", FakeCache)
+    job = Job(
+        id=1, question="Ein oranges Flugzeug ist sichtbar", rhythm="minutes5",
+        hour=0, minute=0, weekday=0, enabled=True, structured=True, created_at=0,
+        next_run=0, last_run=0, last_state="", last_chat="", kind="visual",
+        source_url="https://camera.example/live",
+    )
+    settings = type("S", (), {"db_path": ":memory:", "cache_ttl_hours": 1})()
+    state, chat = auftraege.run_job(job, settings)
+    assert (state, chat) == ("erfüllt", "monitor-1")
+    assert saved[0][3]["visuals"][0]["media_id"].endswith(".jpg")
+    assert "monitor_checked_at" in saved[0][3]
+    assert unread == [("monitor-1", "beobachtung")]
 
 
 def test_der_taktgeber_fuehrt_faellige_auftraege_aus(

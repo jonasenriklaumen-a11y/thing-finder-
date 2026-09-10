@@ -329,6 +329,28 @@ def test_dynamic_visual_page_uses_browser_capture(monkeypatch: pytest.MonkeyPatc
     assert visual.content == b"screen"
 
 
+def test_public_google_street_view_is_captured_as_one_visible_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+    monkeypatch.setattr(
+        "aquaticy.browser.capture_visual", lambda *args, **kwargs: (b"street", "image/jpeg")
+    )
+
+    class DenyRobots:
+        def allows(self, url: str) -> bool:
+            return False
+
+    with _fetcher(lambda request: httpx.Response(500), respect_robots=True) as fetcher:
+        fetcher.enable_browser = True
+        fetcher.robots = DenyRobots()  # type: ignore[assignment]
+        visual, error = fetcher.load_public_visual(
+            "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=50,6"
+        )
+    assert error == "" and visual is not None
+    assert visual.content == b"street"
+
+
 def test_fetch_extracts_products(fixture_html) -> None:
     html = fixture_html("usercentrics_shop.html")
 
@@ -479,4 +501,3 @@ def test_oversized_pdf_is_skipped() -> None:
 
     with _fetcher(handler) as fetcher:
         assert fetcher.fetch("https://x.de/riesig.pdf").skipped_reason == "pdf_error"
-

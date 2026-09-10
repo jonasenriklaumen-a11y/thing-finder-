@@ -19,6 +19,7 @@ Zwei Entscheidungen, die den Rest erklaeren:
 from __future__ import annotations
 
 import contextlib
+import re
 import sqlite3
 import threading
 import time
@@ -28,13 +29,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-#: Wie oft ein Auftrag laufen kann. Feiner waere Spielerei: wer eine Frage
-#: alle fuenf Minuten stellt, will keinen Auftrag, sondern eine Anzeige.
-RHYTHMS = ("hourly", "daily", "weekly")
+#: Recherchen laufen eher taeglich; eine Bild- oder Preisbeobachtung darf in
+#: kurzen Abstaenden pruefen, damit ein voruebergehender Zustand nicht entgeht.
+RHYTHMS = ("minutes5", "minutes15", "minutes30", "hourly", "daily", "weekly")
 
 #: Deutsche Namen fuer die Anzeige -- und fuer den Chat-Titel.
 RHYTHM_NAMES = {
+    "minutes5": "alle 5 Minuten",
+    "minutes15": "alle 15 Minuten",
+    "minutes30": "alle 30 Minuten",
     "hourly": "stündlich",
     "daily": "täglich",
     "weekly": "wöchentlich",
@@ -66,6 +71,44 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 """
 
+MIGRATIONS = {
+    "kind": "TEXT NOT NULL DEFAULT 'research'",
+    "source_url": "TEXT NOT NULL DEFAULT ''",
+}
+
+
+def _number(value: str) -> float | None:
+    raw = re.sub(r"[^0-9,.]", "", str(value or ""))
+    if not raw:
+        return None
+    if "," in raw and "." in raw:
+        decimal = "," if raw.rfind(",") > raw.rfind(".") else "."
+        thousands = "." if decimal == "," else ","
+        raw = raw.replace(thousands, "").replace(decimal, ".")
+    elif "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def price_condition_met(question: str, products: list[Any]) -> bool | None:
+    """Evaluate common price limits from structured, page-derived product data."""
+    match = re.search(
+        r"(?:unter|weniger als|höchstens|maximal|bis)\s*(?:zu\s*)?([0-9][0-9.,]*)",
+        question.lower(),
+    )
+    if not match:
+        return None
+    limit = _number(match.group(1))
+    prices = [_number(str(getattr(product, "price", "") or "")) for product in products]
+    known = [price for price in prices if price is not None]
+    if limit is None or not known:
+        return None
+    strict = "unter" in match.group(0) or "weniger als" in match.group(0)
+    return any(price < limit if strict else price <= limit for price in known)
+
 
 @dataclass(slots=True)
 class Job:
@@ -84,6 +127,8 @@ class Job:
     last_run: float
     last_state: str
     last_chat: str
+    kind: str = "research"
+    source_url: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +146,8 @@ class Job:
             "last_run": self.last_run,
             "last_state": self.last_state,
             "last_chat": self.last_chat,
+            "kind": self.kind,
+            "source_url": self.source_url,
         }
 
 
@@ -119,6 +166,12 @@ def next_time(rhythm: str, hour: int, minute: int, weekday: int, now: float = 0.
     rhythm = clean_rhythm(rhythm)
     hour = max(0, min(23, int(hour)))
     minute = max(0, min(59, int(minute)))
+
+    intervals = {"minutes5": 5, "minutes15": 15, "minutes30": 30}
+    if rhythm in intervals:
+        return (jetzt + timedelta(minutes=intervals[rhythm])).replace(
+            second=0, microsecond=0
+        ).timestamp()
 
     if rhythm == "hourly":
         ziel = jetzt.replace(minute=minute, second=0, microsecond=0)
@@ -150,6 +203,10 @@ class JobStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(jobs)")}
+            for name, declaration in MIGRATIONS.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {declaration}")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -177,6 +234,8 @@ class JobStore:
             last_run=float(row["last_run"] or 0.0),
             last_state=str(row["last_state"] or ""),
             last_chat=str(row["last_chat"] or ""),
+            kind=str(row["kind"] or "research"),
+            source_url=str(row["source_url"] or ""),
         )
 
     def all_jobs(self) -> list[Job]:
@@ -198,6 +257,8 @@ class JobStore:
         minute: int = 0,
         weekday: int = 0,
         structured: bool = True,
+        kind: str = "research",
+        source_url: str = "",
     ) -> Job:
         """Legt einen Auftrag an.
 
@@ -211,6 +272,16 @@ class JobStore:
         hour = max(0, min(23, int(hour)))
         minute = max(0, min(59, int(minute)))
         weekday = max(0, min(6, int(weekday)))
+        kind = str(kind or "research").strip().lower()
+        if kind not in ("research", "visual", "price"):
+            kind = "research"
+        source_url = str(source_url or "").strip()[:2_000]
+        if kind != "research" and not source_url:
+            raise ValueError("Eine Beobachtung braucht die öffentliche Quelladresse.")
+        if kind != "research":
+            parsed = urlsplit(source_url)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                raise ValueError("Die Quelladresse muss eine vollständige http(s)-Adresse sein.")
         with self._lock, self._connect() as conn:
             (anzahl,) = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()
             if int(anzahl) >= MAX_JOBS:
@@ -221,7 +292,8 @@ class JobStore:
             jetzt = time.time()
             cur = conn.execute(
                 "INSERT INTO jobs (question, rhythm, hour, minute, weekday, enabled,"
-                " structured, created_at, next_run) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                " structured, created_at, next_run, kind, source_url) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
                 (
                     frage,
                     rhythm,
@@ -231,6 +303,8 @@ class JobStore:
                     1 if structured else 0,
                     jetzt,
                     next_time(rhythm, hour, minute, weekday, jetzt),
+                    kind,
+                    source_url,
                 ),
             )
             neu = conn.execute(
@@ -310,19 +384,63 @@ def run_job(job: Job, settings: Any) -> tuple[str, str]:
     from aquaticy.cache import Cache
 
     cache = Cache(settings.db_path, settings.cache_ttl_hours)
-    agent = Agent(settings, cache=cache)
+    monitoring = job.kind in ("visual", "price")
+    # Fehlversuche einer Beobachtung werden nicht als neue Chats gespeichert.
+    agent = Agent(settings, cache=None if monitoring else cache)
     try:
+        frage = job.question
+        if job.kind == "visual":
+            frage = (
+                "Dies ist eine automatische Beobachtung. Öffne zuerst mit "
+                "inspect_public_visual genau diese öffentliche Quelle: " + job.source_url
+                + "\nPrüfe nur diese Bedingung: " + job.question
+                + "\nDie erste Zeile muss exakt BEDINGUNG ERFÜLLT oder BEDINGUNG NICHT ERFÜLLT "
+                  "lauten. Danach beschreibe knapp das sichtbare Bild, die Quelle und das "
+                  "Aufnahmedatum. Rate nicht."
+            )
+        elif job.kind == "price":
+            frage = (
+                "Dies ist eine automatische Preisbeobachtung. Öffne mit fetch_page genau "
+                "diese öffentliche Produkt- oder Marktseite: " + job.source_url
+                + "\nPrüfe diese Bedingung: " + job.question
+                + "\nDie erste Zeile muss exakt BEDINGUNG ERFÜLLT oder BEDINGUNG NICHT ERFÜLLT "
+                  "lauten. Verwende nur einen aktuell sichtbaren Preis, nenne Produkt, Preis, "
+                  "Quelle und Prüfzeit. Rate nicht."
+            )
         result = agent.ask(
-            job.question,
+            frage,
             stream=False,
             mode="normal",
-            structured=job.structured,
+            structured=False if monitoring else job.structured,
             recheck=False,
+            online=True if monitoring else None,
+            visual_sources=True if job.kind == "visual" else None,
         )
         antwort = str(getattr(result, "answer", "") or "").strip()
         chat = str(getattr(agent, "session_id", ""))
         if not antwort:
             return ("ohne Antwort", chat)
+        if monitoring:
+            first = antwort.splitlines()[0].strip(" *#`:\t").upper()
+            matched = first.startswith("BEDINGUNG ERFÜLLT")
+            if job.kind == "visual" and not getattr(result, "visuals", []):
+                return ("kein Bild gefunden", "")
+            if job.kind == "price":
+                verified = price_condition_met(
+                    job.question, list(getattr(result, "products", []) or [])
+                )
+                if verified is None:
+                    return ("kein prüfbarer Preis gefunden", "")
+                matched = verified
+            if not matched:
+                return ("noch nicht erfüllt", "")
+            meta = result.meta() if hasattr(result, "meta") else {}
+            checked = datetime.now().astimezone().isoformat(timespec="seconds")
+            meta["monitor_checked_at"] = checked
+            cache.add_history(chat, job.question, antwort, meta)
+            with contextlib.suppress(Exception):
+                cache.mark_unread(chat, reason="beobachtung")
+            return ("erfüllt", chat)
         # Der Auftrag hat sich selbst gestellt -- oft nachts, jedenfalls ohne
         # dass jemand davorsitzt. Damit die Antwort nicht in der Liste
         # untergeht, leuchtet der Chat, bis ihn jemand geoeffnet hat.
@@ -374,6 +492,8 @@ class Scheduler:
                 break
             state, chat = run_job(job, settings)
             store.note_run(job.id, state, chat)
+            if state == "erfüllt":
+                store.set_enabled(job.id, False)
             gelaufen += 1
             if self._on_run:
                 with contextlib.suppress(Exception):

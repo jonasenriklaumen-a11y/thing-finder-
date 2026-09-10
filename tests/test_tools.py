@@ -89,6 +89,8 @@ def test_public_visual_bytes_are_sent_to_the_model_as_data_url(settings: Setting
     assert seen[0].startswith("data:image/jpeg;base64,")
     assert result["url"] == "https://camera.example/live.jpg"
     assert box.stats.visuals[0]["mime_type"] == "image/jpeg"
+    assert box.stats.visuals[0]["media_id"].endswith(".jpg")
+    assert box.stats.visuals[0]["captured_at"] == result["checked_at"]
 
 
 def test_web_search_uses_settings_defaults(
@@ -1514,4 +1516,3 @@ def test_vm_schemas_do_not_mutate_the_shared_template() -> None:
     original = next(s for s in VM_SCHEMAS if s["function"]["name"] == "vm_run")
     assert "1024 MB" in original["function"]["description"]
     assert "6144 MB" not in original["function"]["description"]
-

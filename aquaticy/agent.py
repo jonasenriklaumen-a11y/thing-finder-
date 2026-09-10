@@ -154,6 +154,12 @@ VISUAL_SOURCES_PROMPT = """
   * EUMETSAT View (`view.eumetsat.int`) für aktuelle Wetter-Satellitenbilder,
   * ESA Earth Observation (`esa.int/Applications/Observing_the_Earth`) für ESA-Daten,
   * NOAA GOES (`star.nesdis.noaa.gov/GOES`) für Stürme, Wolken und Wetterlagen.
+- Für Läden, Gebäude und Straßen darfst du zusätzlich eine frei zugängliche Karten-
+  oder Straßenansicht öffnen. Suche zuerst den eindeutigen Ort mit `local_places`.
+  Öffne dann eine öffentliche Google-Maps-/Street-View-URL, Mapillary- oder
+  KartaView-Seite mit `inspect_public_visual`. Google Maps URLs brauchen `api=1`;
+  nutze für ein Panorama `map_action=pano`. Eine Kartenaufnahme ist möglicherweise
+  älter: nenne ein sichtbares Aufnahmedatum und sage sonst klar, dass es fehlt.
 - Bei Webcams bevorzuge die offizielle Seite der Stadt, Gemeinde, Tourismusstelle oder
   des Kamerabetreibers. Suche zum Beispiel nach `Köln öffentliche Webcam Altstadt live`
   und öffne den aktuellen Originaltreffer statt eines bloßen Webcam-Verzeichnisses.
@@ -2550,8 +2556,8 @@ class Agent:
             raise RuntimeError("Es ist kein Vision-Modell ausgewählt.")
         litellm.suppress_debug_info = True
         prompt = (
-            "Analysiere ausschließlich, was in diesem öffentlichen Webcam- oder "
-            "Satellitenbild sichtbar ist. Prüffrage: " + (question or "Was ist sichtbar?")
+            "Analysiere ausschließlich, was in diesem öffentlichen Webcam-, Satelliten-, "
+            "Karten- oder Straßenbild sichtbar ist. Prüffrage: " + (question or "Was ist sichtbar?")
             + " Beschreibe Unsicherheit, mögliche Verwechslungen und ob ein sichtbarer "
               "Zeitstempel erkennbar ist. Behaupte kein Ereignis allein aufgrund des Bildes."
         )
@@ -2794,4 +2800,3 @@ def _parse_spec_json(raw: str) -> dict[str, str]:
 
 
 SpecExtractorType = Callable[[str, str], dict[str, str]]
-

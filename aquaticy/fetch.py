@@ -335,6 +335,27 @@ EUMETSAT_LATEST_IMAGE = (
 )
 
 
+def dynamic_visual_page(url: str) -> bool:
+    """Pages whose useful pixels are rendered by JavaScript, not an ``img`` tag."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.lower()
+    return (
+        (host.endswith("google.com") or host.startswith("google.") or ".google." in host)
+        and "/maps" in path
+    ) or host in {
+        "worldview.earthdata.nasa.gov",
+        "browser.dataspace.copernicus.eu",
+        "dataspace.copernicus.eu",
+        "www.mapillary.com",
+        "mapillary.com",
+        "kartaview.org",
+        "www.kartaview.org",
+        "openstreetmap.org",
+        "www.openstreetmap.org",
+    }
+
+
 @dataclass(slots=True)
 class PublicVisual:
     """Geprüfte Bilddaten aus einer öffentlichen Quelle."""
@@ -465,6 +486,26 @@ class Fetcher:
                 return None, "Die Adresse ist nicht öffentlich erreichbar."
             domain = domain_of(current)
             if self.respect_robots and not self.robots.allows(current):
+                # Interaktive öffentliche Kartenansichten werden wie von einem
+                # Menschen im Browser geöffnet. Es werden dabei keine Endpunkte
+                # gecrawlt und keine Datenlisten ausgelesen, sondern genau ein
+                # sichtbarer Schnappschuss aufgenommen.
+                if self.enable_browser and dynamic_visual_page(current):
+                    try:
+                        from aquaticy.browser import capture_visual
+
+                        captured = capture_visual(
+                            current,
+                            user_agent=self.user_agent,
+                            timeout=self.timeout,
+                            rules=self.rules,
+                        )
+                    except Exception:
+                        captured = None
+                    if captured:
+                        data, mime = captured
+                        if len(data) <= MAX_VISUAL_BYTES:
+                            return PublicVisual(current, data, mime), ""
                 return None, "robots.txt erlaubt diesen Abruf nicht."
             self.throttle.wait(domain)
             try:
@@ -489,6 +530,27 @@ class Fetcher:
                 return PublicVisual(final, response.content, content_type), ""
             if not any(kind in content_type for kind in HTML_CONTENT_TYPES):
                 return None, "Die Quelle liefert kein unterstütztes Bild."
+            # EUMETSAT bietet für genau diesen Zweck einen festen öffentlichen
+            # WMS-Endpunkt. Er liefert die Bildpixel direkt und ist verlässlicher
+            # als ein Screenshot der interaktiven Karte.
+            if domain_of(final) == "view.eumetsat.int":
+                current = EUMETSAT_LATEST_IMAGE
+                continue
+            # Karten, Street View und NASA Worldview zeichnen ihre eigentliche
+            # Ansicht erst im Browser. Ein og:image wäre dort nur ein Vorschaubild.
+            if self.enable_browser and dynamic_visual_page(final):
+                try:
+                    from aquaticy.browser import capture_visual
+
+                    captured = capture_visual(
+                        final, user_agent=self.user_agent, timeout=self.timeout, rules=self.rules
+                    )
+                except Exception:
+                    captured = None
+                if captured:
+                    data, mime = captured
+                    if len(data) <= MAX_VISUAL_BYTES:
+                        return PublicVisual(final, data, mime), ""
             tree = HTMLParser(response.text[:MAX_HTML_BYTES])
             candidates: list[tuple[int, str]] = []
             for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
@@ -514,8 +576,6 @@ class Fetcher:
                         absolute = "https://" + absolute[len("http://") :]
                     selected = absolute
                     break
-            if not selected and domain_of(final) == "view.eumetsat.int":
-                selected = EUMETSAT_LATEST_IMAGE
             if not selected and self.enable_browser:
                 try:
                     from aquaticy.browser import capture_visual
@@ -599,4 +659,3 @@ class Fetcher:
         except Exception:
             # Der Browser-Fallback darf den normalen Ablauf nie sprengen.
             return None
-

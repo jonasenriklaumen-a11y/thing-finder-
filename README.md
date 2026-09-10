@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.7                                      │
+│ Aquaticy AI 9.4.8                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -786,9 +786,11 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   zustandslos, genau so rechnen die Anbieter auch ab) plus die Antwort und die
   Argumente der Werkzeugaufrufe. Bei normalen Konten endet das Kontingent bei insgesamt
   400.000 Token. Pro-Konten bleiben unbegrenzt. Der Zähler lässt sich nicht zurücksetzen.
-* **Aufträge** unter *Einstellungen → Aufträge*: Fragen, die Aquaticy AI von selbst
-  stellt — stündlich, täglich oder wöchentlich zu einer festen Uhrzeit. Die Antwort
-  landet als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
+* **Aufträge** unter *Einstellungen → Aufträge*: Aquaticy kann regelmäßig recherchieren
+  oder eine öffentliche Kamera, Satelliten-/Straßenansicht beziehungsweise Produktseite
+  beobachten. Beobachtungen sind alle 5, 15 oder 30 Minuten sowie stündlich, täglich oder
+  wöchentlich möglich. Erst wenn die gespeicherte Bedingung erfüllt ist, landet die Antwort
+  als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
   **leuchtet dort, bis du sie geöffnet hast**: ein ruhig pulsierender Punkt und ein
   kräftigerer Name. Danach sieht der Chat aus wie jeder andere. Beim Antworten
   sitzt ja niemand davor; ohne das Leuchten ginge die Antwort in der Liste unter.
@@ -826,7 +828,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.7                                                   │
+│ Aquaticy AI 9.4.8                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1386,10 +1388,16 @@ Stadt, Gemeinde, Tourismusstelle oder des Kamerabetreibers. Aufnahmezeit und Que
 genannt; sichtbare Auffälligkeiten bleiben Hinweise und gelten nicht allein als bestätigtes
 Ereignis.
 
-Gefundene öffentliche Webcam- und Satellitenbilder erscheinen direkt unter der Antwort.
+Gefundene öffentliche Webcam-, Satelliten-, Karten- und Straßenbilder erscheinen direkt
+unter der Antwort. Für einen Laden kann Aquaticy den Ort zuerst über OpenStreetMap finden
+und anschließend eine frei zugängliche Google-Maps-/Street-View-, Mapillary- oder
+KartaView-Seite aufnehmen. Google Maps wird über die öffentliche Maps-URL geöffnet; es
+wird keine private oder kostenpflichtige Maps-Schnittstelle vorausgesetzt.
 Aquaticy lädt das Bild dafür zuerst selbst über eine geprüfte öffentliche Adresse und
-reicht die tatsächlichen Bilddaten an das Vision-Modell sowie die geschützte Weboberfläche
-weiter. Dynamische Karten können über den Browser-Fallback aufgenommen werden; die
+reicht die tatsächlichen Bilddaten an das Vision-Modell weiter. Genau dieser Schnappschuss
+wird im privaten Datenordner des Nutzers gespeichert und mit Aufnahmezeit in der
+geschützten Weboberfläche gezeigt. Dynamische Karten können über den Browser-Fallback
+aufgenommen werden; die
 EUMETSAT-Seite fällt zusätzlich auf deren dokumentierten aktuellen WMS-Bildabruf zurück.
 Bei Produktrecherchen zeigt die Weboberfläche gefundene Produktbilder zusammen mit Preis,
 technischen Daten und dem Link zur Quelle. Die Bilder bleiben auch beim erneuten Öffnen des
@@ -2097,4 +2105,3 @@ Captcha).
 ## Lizenz
 
 MIT
-
