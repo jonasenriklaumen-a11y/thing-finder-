@@ -137,7 +137,7 @@ aquaticy "welche Bahnstrecken in NRW sind gerade gesperrt?"
 $ aquaticy --location "Mönchengladbach" --lang de
 
 ╭──────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.8                                      │
+│ Aquaticy AI 9.4.9                                      │
 │ Modell mistral/mistral-large-latest · Suche duckduckgo │
 │ Frag einfach los. /help zeigt die Befehle.           │
 ╰──────────────────────────────────────────────────────╯
@@ -788,8 +788,18 @@ laufen live mit, die Antwort wird Wort für Wort gestreamt.
   400.000 Token. Pro-Konten bleiben unbegrenzt. Der Zähler lässt sich nicht zurücksetzen.
 * **Aufträge** unter *Einstellungen → Aufträge*: Aquaticy kann regelmäßig recherchieren
   oder eine öffentliche Kamera, Satelliten-/Straßenansicht beziehungsweise Produktseite
-  beobachten. Beobachtungen sind alle 5, 15 oder 30 Minuten sowie stündlich, täglich oder
-  wöchentlich möglich. Erst wenn die gespeicherte Bedingung erfüllt ist, landet die Antwort
+  beobachten. Vierte Art: **ein Bild hochladen und danach suchen lassen** — du gibst
+  das Foto eines Gegenstands (etwa eines bestimmten Handys), Aquaticy sieht es sich
+  einmal mit dem Vision-Modell an und sucht dann so lange nach einem Angebot dafür,
+  bis es eines gefunden hat; im Chat steht dann die Adresse der Verkaufsseite. Eine
+  Quelladresse ist dabei freiwillig: ohne sie sucht Aquaticy im ganzen Web, mit ihr
+  bleibt es bei diesem Anbieter. Gemeldet wird erst, wenn eine Angebotsseite wirklich
+  gelesen wurde und eine vollständige Adresse dazu vorliegt — „gibt es bestimmt
+  irgendwo" zählt nicht.
+  Beobachtungen laufen durchgehend, jede Minute, alle 5, 15 oder 30 Minuten sowie
+  stündlich, täglich oder wöchentlich. Häufig prüfen heißt häufig fragen: der
+  Tokenverbrauch steigt entsprechend. Erst wenn die gespeicherte Bedingung erfüllt ist,
+  landet die Antwort
   als Chat in der Seitenleiste, als hättest du sie selbst gestellt — und
   **leuchtet dort, bis du sie geöffnet hast**: ein ruhig pulsierender Punkt und ein
   kräftigerer Name. Danach sieht der Chat aus wie jeder andere. Beim Antworten
@@ -828,7 +838,7 @@ er erreichbar ist — im heimischen Netz und über Tailscale:
 
 ```
 ╭───────────────────────────────────────────────────────────────────╮
-│ Aquaticy AI 9.4.8                                                   │
+│ Aquaticy AI 9.4.9                                                   │
 │ Diese Adresse im Browser oeffnen:                                 │
 │   http://192.168.1.44:8765/    im heimischen Netz                 │
 │   http://100.81.120.100:8765/  ueber Tailscale                    │
@@ -1393,6 +1403,12 @@ unter der Antwort. Für einen Laden kann Aquaticy den Ort zuerst über OpenStree
 und anschließend eine frei zugängliche Google-Maps-/Street-View-, Mapillary- oder
 KartaView-Seite aufnehmen. Google Maps wird über die öffentliche Maps-URL geöffnet; es
 wird keine private oder kostenpflichtige Maps-Schnittstelle vorausgesetzt.
+Bei Seiten mit Player — Webcams liegen fast immer hinter einem — nimmt Aquaticy das
+Bild im Browser auf, **startet die Wiedergabe und wartet auf einen echten Frame**,
+statt das eingebettete Vorschaubild zu nehmen: das ist genau das Standbild von vor dem
+Klick auf Play und oft Stunden alt. Ladeanzeigen, Platzhalter und Logos werden als
+Bildquelle übersprungen, und jede Bildanfrage bittet ausdrücklich um ein frisches
+statt eines zwischengespeicherten Bildes.
 Aquaticy lädt das Bild dafür zuerst selbst über eine geprüfte öffentliche Adresse und
 reicht die tatsächlichen Bilddaten an das Vision-Modell weiter. Genau dieser Schnappschuss
 wird im privaten Datenordner des Nutzers gespeichert und mit Aufnahmezeit in der

@@ -356,6 +356,45 @@ def dynamic_visual_page(url: str) -> bool:
     }
 
 
+#: Woran man einen laufenden Player erkennt. Eine Seite mit Player hat fast
+#: immer auch ein `og:image` -- und das ist das Vorschaubild vor dem Klick auf
+#: Play, bei einer Webcam also ein altes Standbild. Fuer solche Seiten ist die
+#: Aufnahme aus dem Browser die einzige Quelle, die das aktuelle Bild zeigt.
+LIVE_PLAYER_MARKERS = (
+    "<video",
+    ".m3u8",
+    "application/x-mpegurl",
+    "hls.js",
+    "jwplayer",
+    "video.js",
+    "videojs",
+    "youtube.com/embed",
+    "youtube-nocookie.com/embed",
+    "player.vimeo.com",
+    "player.twitch.tv",
+)
+
+#: Bilder, die keine sind: Ladeanzeigen, Platzhalter, Logos. Frueher konnte
+#: genau so ein Bild als "das Webcam-Bild" zurueckkommen -- ein Spinner, ein
+#: graues Rechteck oder das Logo des Betreibers.
+PLACEHOLDER_MARKERS = (
+    "loading", "placeholder", "spinner", "preloader", "blank", "dummy",
+    "logo", "noimage", "no-image", "offline", "default", "spacer", "pixel",
+)
+
+
+def live_player_page(html: str) -> bool:
+    """Steckt in dieser Seite ein Video- oder Streaming-Player?"""
+    text = (html or "")[:MAX_HTML_BYTES].lower()
+    return any(marker in text for marker in LIVE_PLAYER_MARKERS)
+
+
+def placeholder_image(url: str) -> bool:
+    """Sieht diese Bildadresse nach Ladeanzeige oder Platzhalter aus?"""
+    name = (url or "").rsplit("/", 1)[-1].lower()
+    return any(marker in name for marker in PLACEHOLDER_MARKERS)
+
+
 @dataclass(slots=True)
 class PublicVisual:
     """Geprüfte Bilddaten aus einer öffentlichen Quelle."""
@@ -478,6 +517,28 @@ class Fetcher:
         html = response.text[:MAX_HTML_BYTES]
         return self._finish(result, html, want_products=want_products)
 
+    def _capture(self, url: str) -> PublicVisual | None:
+        """Nimmt die Seite im Browser auf -- mit laufender Wiedergabe.
+
+        Der Browser startet Videos und wartet auf einen echten Frame, bevor er
+        abdrueckt (siehe `aquaticy/browser.py`). Fehlt Playwright oder scheitert
+        die Aufnahme, gibt es hier `None` und der Aufrufer sucht weiter.
+        """
+        if not self.enable_browser:
+            return None
+        try:
+            from aquaticy.browser import capture_visual
+
+            captured = capture_visual(
+                url, user_agent=self.user_agent, timeout=self.timeout, rules=self.rules
+            )
+        except Exception:
+            return None
+        if not captured:
+            return None
+        data, mime = captured
+        return PublicVisual(url, data, mime) if len(data) <= MAX_VISUAL_BYTES else None
+
     def load_public_visual(self, url: str) -> tuple[PublicVisual | None, str]:
         """Lädt ein Bild oder löst es aus einer öffentlichen Seite auf."""
         current = (url or "").strip()
@@ -490,26 +551,21 @@ class Fetcher:
                 # Menschen im Browser geöffnet. Es werden dabei keine Endpunkte
                 # gecrawlt und keine Datenlisten ausgelesen, sondern genau ein
                 # sichtbarer Schnappschuss aufgenommen.
-                if self.enable_browser and dynamic_visual_page(current):
-                    try:
-                        from aquaticy.browser import capture_visual
-
-                        captured = capture_visual(
-                            current,
-                            user_agent=self.user_agent,
-                            timeout=self.timeout,
-                            rules=self.rules,
-                        )
-                    except Exception:
-                        captured = None
-                    if captured:
-                        data, mime = captured
-                        if len(data) <= MAX_VISUAL_BYTES:
-                            return PublicVisual(current, data, mime), ""
+                if dynamic_visual_page(current):
+                    captured = self._capture(current)
+                    if captured is not None:
+                        return captured, ""
                 return None, "robots.txt erlaubt diesen Abruf nicht."
             self.throttle.wait(domain)
             try:
-                response = self._client.get(current, follow_redirects=False)
+                # Ohne diese Bitte liefert manch ein Zwischenspeicher das Bild
+                # von vorhin -- bei einer Webcam ist genau das der Unterschied
+                # zwischen "jetzt" und "irgendwann heute".
+                response = self._client.get(
+                    current,
+                    follow_redirects=False,
+                    headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+                )
             except httpx.HTTPError:
                 return None, "Die Bildquelle ist nicht erreichbar."
             if response.is_redirect:
@@ -538,19 +594,15 @@ class Fetcher:
                 continue
             # Karten, Street View und NASA Worldview zeichnen ihre eigentliche
             # Ansicht erst im Browser. Ein og:image wäre dort nur ein Vorschaubild.
-            if self.enable_browser and dynamic_visual_page(final):
-                try:
-                    from aquaticy.browser import capture_visual
-
-                    captured = capture_visual(
-                        final, user_agent=self.user_agent, timeout=self.timeout, rules=self.rules
-                    )
-                except Exception:
-                    captured = None
-                if captured:
-                    data, mime = captured
-                    if len(data) <= MAX_VISUAL_BYTES:
-                        return PublicVisual(final, data, mime), ""
+            #
+            # Dasselbe gilt für jede Seite mit einem Player: deren `og:image`
+            # ist das Bild VOR dem Klick auf Play. Bei einer Webcam ist das
+            # ein altes Standbild oder eine graue Fläche mit Abspielknopf --
+            # genau das, was hier nicht zurückkommen soll.
+            if dynamic_visual_page(final) or live_player_page(response.text):
+                captured = self._capture(final)
+                if captured is not None:
+                    return captured, ""
             tree = HTMLParser(response.text[:MAX_HTML_BYTES])
             candidates: list[tuple[int, str]] = []
             for selector in ('meta[property="og:image"]', 'meta[name="twitter:image"]'):
@@ -568,28 +620,21 @@ class Fetcher:
             selected = ""
             for _, candidate in sorted(candidates, key=lambda item: item[0]):
                 absolute = urljoin(final, candidate)
-                if public_web_url(absolute):
-                    # Viele ältere Webcam-Seiten betten noch eine http-Adresse ein,
-                    # obwohl dasselbe Bild verschlüsselt erreichbar ist. Browser
-                    # blockieren diese gemischten Inhalte.
-                    if final.startswith("https://") and absolute.startswith("http://"):
-                        absolute = "https://" + absolute[len("http://") :]
-                    selected = absolute
-                    break
-            if not selected and self.enable_browser:
-                try:
-                    from aquaticy.browser import capture_visual
-
-                    captured = capture_visual(
-                        final, user_agent=self.user_agent, timeout=self.timeout, rules=self.rules
-                    )
-                except Exception:
-                    captured = None
-                if captured:
-                    data, mime = captured
-                    if len(data) <= MAX_VISUAL_BYTES:
-                        return PublicVisual(final, data, mime), ""
+                # Eine Ladeanzeige ist kein Bild der Lage. Lieber weitersuchen
+                # und notfalls im Browser aufnehmen.
+                if placeholder_image(absolute) or not public_web_url(absolute):
+                    continue
+                # Viele ältere Webcam-Seiten betten noch eine http-Adresse ein,
+                # obwohl dasselbe Bild verschlüsselt erreichbar ist. Browser
+                # blockieren diese gemischten Inhalte.
+                if final.startswith("https://") and absolute.startswith("http://"):
+                    absolute = "https://" + absolute[len("http://") :]
+                selected = absolute
+                break
             if not selected:
+                captured = self._capture(final)
+                if captured is not None:
+                    return captured, ""
                 return None, "Auf der Seite wurde kein öffentliches Bild gefunden."
             current = selected
         return None, "Die Bildquelle leitet zu oft weiter."

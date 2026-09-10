@@ -351,3 +351,140 @@ def test_ohne_antwort_leuchtet_nichts(monkeypatch: pytest.MonkeyPatch) -> None:
     zustand, _ = auftraege.run_job(job, settings)
     assert zustand == "ohne Antwort"
     assert gemerkt == []
+
+
+# ---------------------------------------------------------------------------
+# Sehr kurze Takte
+# ---------------------------------------------------------------------------
+def test_every_minute_lands_on_the_next_minute() -> None:
+    jetzt = time.time()
+    wann = next_time("minutes1", 8, 0, 0, jetzt)
+    assert 0 < wann - jetzt <= 60
+
+
+def test_continuously_is_due_again_right_away() -> None:
+    """„Die ganze Zeit" heisst: beim naechsten Takt wieder -- nicht irgendwann."""
+    jetzt = time.time()
+    assert next_time("always", 8, 0, 0, jetzt) <= jetzt
+
+
+def test_the_tick_is_short_enough_for_the_shortest_rhythm() -> None:
+    """Ein Takt von einer Minute koennte „jede Minute" um bis zu 59 s verfehlen."""
+    assert auftraege.TICK_SECONDS <= 30
+
+
+# ---------------------------------------------------------------------------
+# Bildauftrag: nach einem fotografierten Gegenstand suchen
+# ---------------------------------------------------------------------------
+def _bild_settings(tmp_path: Path) -> Any:
+    return type(
+        "S",
+        (),
+        {"db_path": tmp_path / "a.sqlite3", "cache_ttl_hours": 1, "data_dir": tmp_path},
+    )()
+
+
+def test_an_image_job_needs_its_image(tmp_path: Path) -> None:
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    with pytest.raises(ValueError, match="fehlt das hochgeladene Bild"):
+        store.add("Handy gesucht", kind="image")
+
+
+def test_an_image_job_may_search_the_whole_web(tmp_path: Path) -> None:
+    """Anders als eine Kamera braucht die Bildsuche keine feste Adresse."""
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    job = store.add("Handy gesucht", kind="image", image_id="abc.jpg")
+    assert job.kind == "image" and job.source_url == "" and job.image_id == "abc.jpg"
+
+
+def test_a_camera_job_still_needs_its_page(tmp_path: Path) -> None:
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    with pytest.raises(ValueError, match="öffentliche Quelladresse"):
+        store.add("Ist es hell?", kind="visual")
+
+
+def test_the_image_description_is_kept_after_the_first_look(tmp_path: Path) -> None:
+    """Das Foto aendert sich nicht -- es jede Minute neu anzusehen waere teuer."""
+    store = JobStore(tmp_path / "jobs.sqlite3")
+    job = store.add("Handy gesucht", kind="image", image_id="abc.jpg")
+    store.set_image_note(job.id, "Ein schwarzes Smartphone mit drei Kameras")
+    wieder = store.get(job.id)
+    assert wieder is not None
+    assert wieder.image_note.startswith("Ein schwarzes Smartphone")
+
+
+def test_a_found_offer_needs_a_read_page_and_an_address(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """„Ja, gibt es" ist kein Fund. Der Nutzer will den Laden, nicht die Zuversicht."""
+    class Agent:
+        def __init__(self, settings: Any, cache: Any = None) -> None:
+            self.session_id = "bild-1"
+
+        def ask(self, frage: str, **kwargs: Any) -> Any:
+            return type("R", (), {
+                "answer": "BEDINGUNG ERFÜLLT\nGibt es sicher irgendwo zu kaufen.",
+                "sources": [], "visuals": [], "products": [],
+            })()
+
+        def close(self) -> None: ...
+
+    monkeypatch.setattr("aquaticy.agent.Agent", Agent)
+    job = Job(
+        id=1, question="Handy gesucht", rhythm="hourly", hour=8, minute=0, weekday=0,
+        enabled=True, structured=False, created_at=0.0, next_run=0.0, last_run=0.0,
+        last_state="", last_chat="", kind="image", image_id="abc.jpg",
+        image_note="Ein schwarzes Smartphone",
+    )
+    zustand, chat = auftraege.run_job(job, _bild_settings(tmp_path))
+    assert zustand == "kein Angebot gefunden" and chat == ""
+
+
+def test_a_real_offer_creates_the_chat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    gemerkt: list[tuple[str, str]] = []
+
+    class Agent:
+        def __init__(self, settings: Any, cache: Any = None) -> None:
+            self.session_id = "bild-2"
+
+        def ask(self, frage: str, **kwargs: Any) -> Any:
+            assert "Ein schwarzes Smartphone" in frage, "das Gesehene gehört in die Frage"
+            return type("R", (), {
+                "answer": (
+                    "BEDINGUNG ERFÜLLT\nPixel 9 bei laden.example für 599 €: "
+                    "https://laden.example/pixel-9"
+                ),
+                "sources": [{"url": "https://laden.example/pixel-9"}],
+                "visuals": [], "products": [],
+            })()
+
+        def close(self) -> None: ...
+
+    class FakeCache:
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def add_history(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def mark_unread(self, session_id: str, reason: str = "") -> None:
+            gemerkt.append((session_id, reason))
+
+    monkeypatch.setattr("aquaticy.agent.Agent", Agent)
+    monkeypatch.setattr("aquaticy.cache.Cache", FakeCache)
+    job = Job(
+        id=1, question="Handy gesucht", rhythm="hourly", hour=8, minute=0, weekday=0,
+        enabled=True, structured=False, created_at=0.0, next_run=0.0, last_run=0.0,
+        last_state="", last_chat="", kind="image", image_id="abc.jpg",
+        image_note="Ein schwarzes Smartphone",
+    )
+    zustand, chat = auftraege.run_job(job, _bild_settings(tmp_path))
+    assert zustand == "erfüllt" and chat == "bild-2"
+    assert gemerkt == [("bild-2", "beobachtung")]
+
+
+def test_the_offer_address_is_read_from_the_answer() -> None:
+    from aquaticy.jobs import offer_url
+
+    assert offer_url("Bei https://laden.example/x für 9 €.") == "https://laden.example/x"
+    assert offer_url("Kein Angebot gefunden.") == ""

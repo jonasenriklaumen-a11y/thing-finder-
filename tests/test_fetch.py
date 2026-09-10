@@ -351,6 +351,107 @@ def test_public_google_street_view_is_captured_as_one_visible_frame(
     assert visual.content == b"street"
 
 
+def test_a_player_page_is_captured_live_instead_of_its_poster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Das `og:image` einer Webcam-Seite ist das Bild VOR dem Klick auf Play."""
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+    monkeypatch.setattr(
+        "aquaticy.browser.capture_visual", lambda *args, **kwargs: (b"live", "image/jpeg")
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=(
+                '<meta property="og:image" content="https://cam.example/poster.jpg">'
+                '<video src="https://cam.example/stream.m3u8"></video>'
+            ),
+            headers={"content-type": "text/html"},
+        )
+
+    with _fetcher(handler, respect_robots=False) as fetcher:
+        fetcher.enable_browser = True
+        visual, error = fetcher.load_public_visual("https://cam.example/webcam")
+    assert error == "" and visual is not None
+    assert visual.content == b"live", "das Standbild des Players ist nicht das Live-Bild"
+
+
+def test_without_a_browser_the_poster_is_still_better_than_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ohne Playwright bleibt nur das eingebettete Bild -- ehrlich, aber alt."""
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/webcam":
+            return httpx.Response(
+                200,
+                text=(
+                    '<meta property="og:image" content="https://cam.example/poster.jpg">'
+                    "<video></video>"
+                ),
+                headers={"content-type": "text/html"},
+            )
+        return httpx.Response(200, content=b"jpeg", headers={"content-type": "image/jpeg"})
+
+    with _fetcher(handler, respect_robots=False) as fetcher:
+        fetcher.enable_browser = False
+        visual, error = fetcher.load_public_visual("https://cam.example/webcam")
+    assert error == "" and visual is not None
+    assert visual.url == "https://cam.example/poster.jpg"
+
+
+def test_a_loading_graphic_is_not_mistaken_for_the_camera(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ein Spinner ist kein Bild der Lage -- das echte Bild steht daneben."""
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/webcam":
+            return httpx.Response(
+                200,
+                text=(
+                    '<img src="https://cam.example/loading.gif">'
+                    '<img src="https://cam.example/aktuell.jpg">'
+                ),
+                headers={"content-type": "text/html"},
+            )
+        return httpx.Response(200, content=b"jpeg", headers={"content-type": "image/jpeg"})
+
+    with _fetcher(handler, respect_robots=False) as fetcher:
+        fetcher.enable_browser = False
+        visual, error = fetcher.load_public_visual("https://cam.example/webcam")
+    assert error == "" and visual is not None
+    assert visual.url == "https://cam.example/aktuell.jpg"
+
+
+def test_the_visual_request_asks_for_a_fresh_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Aus dem Zwischenspeicher käme das Bild von vorhin."""
+    monkeypatch.setattr("aquaticy.fetch.public_web_url", lambda url: True)
+    gesehen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        gesehen.append(request.headers.get("cache-control", ""))
+        return httpx.Response(200, content=b"jpeg", headers={"content-type": "image/jpeg"})
+
+    with _fetcher(handler, respect_robots=False) as fetcher:
+        fetcher.load_public_visual("https://cam.example/current.jpg")
+    assert gesehen and gesehen[0] == "no-cache"
+
+
+def test_player_and_placeholder_are_recognised() -> None:
+    from aquaticy.fetch import live_player_page, placeholder_image
+
+    assert live_player_page("<div><video controls></video></div>")
+    assert live_player_page('<iframe src="https://www.youtube.com/embed/abc"></iframe>')
+    assert not live_player_page("<p>Nur Text und ein Bild</p>")
+    assert placeholder_image("https://cam.example/loading.gif")
+    assert placeholder_image("https://cam.example/logo.png")
+    assert not placeholder_image("https://cam.example/webcam-nord.jpg")
+
+
 def test_fetch_extracts_products(fixture_html) -> None:
     html = fixture_html("usercentrics_shop.html")
 

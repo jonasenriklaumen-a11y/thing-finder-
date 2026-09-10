@@ -33,10 +33,18 @@ from urllib.parse import urlsplit
 
 #: Recherchen laufen eher taeglich; eine Bild- oder Preisbeobachtung darf in
 #: kurzen Abstaenden pruefen, damit ein voruebergehender Zustand nicht entgeht.
-RHYTHMS = ("minutes5", "minutes15", "minutes30", "hourly", "daily", "weekly")
+#: "always" heisst: beim naechsten Takt wieder, also durchgehend. Ein Lauf
+#: dauert ohnehin laenger als ein Takt -- die Beobachtung faengt damit von
+#: selbst wieder an, sobald sie fertig ist.
+RHYTHMS = (
+    "always", "minutes1", "minutes5", "minutes15", "minutes30",
+    "hourly", "daily", "weekly",
+)
 
 #: Deutsche Namen fuer die Anzeige -- und fuer den Chat-Titel.
 RHYTHM_NAMES = {
+    "always": "die ganze Zeit",
+    "minutes1": "jede Minute",
     "minutes5": "alle 5 Minuten",
     "minutes15": "alle 15 Minuten",
     "minutes30": "alle 30 Minuten",
@@ -45,9 +53,11 @@ RHYTHM_NAMES = {
     "weekly": "wöchentlich",
 }
 
-#: Wie oft nachgesehen wird, ob etwas ansteht. Eine Minute ist genau genug
-#: fuer einen Rhythmus, der in Stunden rechnet.
-TICK_SECONDS = 60
+#: Wie oft nachgesehen wird, ob etwas ansteht. Zwanzig Sekunden, damit "die
+#: ganze Zeit" auch wirklich durchgehend heisst und "jede Minute" seine Minute
+#: trifft. Der Blick in die Datenbank kostet nichts; was Zeit kostet, ist der
+#: Auftrag selbst -- und der laeuft nacheinander, nicht nebeneinander.
+TICK_SECONDS = 20
 
 #: Mehr Auftraege waeren keine Erleichterung mehr, sondern eine zweite
 #: To-do-Liste, die man auch noch pflegen muss.
@@ -74,7 +84,20 @@ CREATE TABLE IF NOT EXISTS jobs (
 MIGRATIONS = {
     "kind": "TEXT NOT NULL DEFAULT 'research'",
     "source_url": "TEXT NOT NULL DEFAULT ''",
+    "image_id": "TEXT NOT NULL DEFAULT ''",
+    # Was auf dem Bild zu sehen ist -- einmal vom Bildmodell beschrieben und
+    # dann behalten. Das Foto aendert sich nicht; es bei jedem Lauf neu
+    # anzusehen waere bei "jede Minute" eine Bildanfrage je Minute.
+    "image_note": "TEXT NOT NULL DEFAULT ''",
 }
+
+#: Was ein Auftrag sein kann. "image" sucht nach dem Gegenstand auf einem
+#: hochgeladenen Bild und meldet sich, sobald es dafuer ein Angebot gibt.
+KINDS = ("research", "visual", "price", "image")
+
+#: Auftragsarten, die erst dann einen Chat anlegen, wenn ihre Bedingung
+#: eingetreten ist. Bis dahin laufen sie still.
+MONITORING = ("visual", "price", "image")
 
 
 def _number(value: str) -> float | None:
@@ -129,6 +152,8 @@ class Job:
     last_chat: str
     kind: str = "research"
     source_url: str = ""
+    image_id: str = ""
+    image_note: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -148,6 +173,8 @@ class Job:
             "last_chat": self.last_chat,
             "kind": self.kind,
             "source_url": self.source_url,
+            "image_id": self.image_id,
+            "image_note": self.image_note,
         }
 
 
@@ -167,7 +194,13 @@ def next_time(rhythm: str, hour: int, minute: int, weekday: int, now: float = 0.
     hour = max(0, min(23, int(hour)))
     minute = max(0, min(59, int(minute)))
 
-    intervals = {"minutes5": 5, "minutes15": 15, "minutes30": 30}
+    # Durchgehend: schon der naechste Takt ist wieder faellig. Weil ein Lauf
+    # laenger dauert als ein Takt, folgt der naechste erst, wenn der vorige
+    # fertig ist -- die Beobachtung laeuft also am Stueck, ohne sich zu stapeln.
+    if rhythm == "always":
+        return jetzt.timestamp()
+
+    intervals = {"minutes1": 1, "minutes5": 5, "minutes15": 15, "minutes30": 30}
     if rhythm in intervals:
         return (jetzt + timedelta(minutes=intervals[rhythm])).replace(
             second=0, microsecond=0
@@ -236,6 +269,8 @@ class JobStore:
             last_chat=str(row["last_chat"] or ""),
             kind=str(row["kind"] or "research"),
             source_url=str(row["source_url"] or ""),
+            image_id=str(row["image_id"] or ""),
+            image_note=str(row["image_note"] or ""),
         )
 
     def all_jobs(self) -> list[Job]:
@@ -259,6 +294,7 @@ class JobStore:
         structured: bool = True,
         kind: str = "research",
         source_url: str = "",
+        image_id: str = "",
     ) -> Job:
         """Legt einen Auftrag an.
 
@@ -273,12 +309,18 @@ class JobStore:
         minute = max(0, min(59, int(minute)))
         weekday = max(0, min(6, int(weekday)))
         kind = str(kind or "research").strip().lower()
-        if kind not in ("research", "visual", "price"):
+        if kind not in KINDS:
             kind = "research"
         source_url = str(source_url or "").strip()[:2_000]
-        if kind != "research" and not source_url:
+        image_id = str(image_id or "").strip()[:80]
+        if kind == "image" and not image_id:
+            raise ValueError("Für die Bildsuche fehlt das hochgeladene Bild.")
+        # Kamera, Satellit und Preis brauchen die eine Seite, die geprueft
+        # wird. Die Bildsuche nicht: sie sucht im ganzen Web -- eine Adresse
+        # darf sie trotzdem bekommen, dann bleibt sie bei diesem Anbieter.
+        if kind in ("visual", "price") and not source_url:
             raise ValueError("Eine Beobachtung braucht die öffentliche Quelladresse.")
-        if kind != "research":
+        if source_url:
             parsed = urlsplit(source_url)
             if parsed.scheme not in ("http", "https") or not parsed.hostname:
                 raise ValueError("Die Quelladresse muss eine vollständige http(s)-Adresse sein.")
@@ -292,8 +334,8 @@ class JobStore:
             jetzt = time.time()
             cur = conn.execute(
                 "INSERT INTO jobs (question, rhythm, hour, minute, weekday, enabled,"
-                " structured, created_at, next_run, kind, source_url) "
-                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+                " structured, created_at, next_run, kind, source_url, image_id) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
                 (
                     frage,
                     rhythm,
@@ -305,6 +347,7 @@ class JobStore:
                     next_time(rhythm, hour, minute, weekday, jetzt),
                     kind,
                     source_url,
+                    image_id,
                 ),
             )
             neu = conn.execute(
@@ -326,6 +369,14 @@ class JobStore:
                 (1 if enabled else 0, weiter, int(job_id)),
             )
         return True
+
+    def set_image_note(self, job_id: int, note: str) -> None:
+        """Haelt fest, was auf dem Auftragsbild zu sehen ist."""
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET image_note = ? WHERE id = ?",
+                (str(note or "")[:4_000], int(job_id)),
+            )
 
     def delete(self, job_id: int) -> bool:
         with self._lock, self._connect() as conn:
@@ -370,6 +421,38 @@ class JobStore:
             )
 
 
+#: Woran ein gefundenes Angebot erkennbar ist: eine vollstaendige Adresse.
+#: Ohne sie waere die Meldung "gefunden" ohne Nutzen -- und ohne Beleg.
+OFFER_URL_RE = re.compile(r"https?://[^\s<>\]\)\"']{6,}")
+
+
+def offer_url(text: str) -> str:
+    """Die erste vollstaendige Adresse aus einer Antwort."""
+    match = OFFER_URL_RE.search(text or "")
+    return match.group(0).rstrip(".,;:") if match else ""
+
+
+def describe_job_image(agent: Any, job: Job, settings: Any) -> str:
+    """Laesst das Vision-Modell beschreiben, was auf dem Auftragsbild liegt.
+
+    Das Bild gehoert dem Konto und liegt in dessen Datenordner. Ohne
+    ausdruecklich bildfaehiges Modell wird gar nicht erst gefragt: ein
+    Textmodell wuerde die Datei nicht sehen, sondern raten.
+    """
+    from aquaticy.config import selected_vision_model
+    from aquaticy.media import snapshot_path
+
+    if not selected_vision_model(settings):
+        return ""
+    pfad = snapshot_path(settings.data_dir, job.image_id)
+    if pfad is None:
+        return ""
+    try:
+        return str(agent.describe_image(pfad) or "").strip()
+    except Exception:
+        return ""
+
+
 def run_job(job: Job, settings: Any) -> tuple[str, str]:
     """Fuehrt einen Auftrag aus. Returns: (Zustand, Chat-Kennung).
 
@@ -384,11 +467,40 @@ def run_job(job: Job, settings: Any) -> tuple[str, str]:
     from aquaticy.cache import Cache
 
     cache = Cache(settings.db_path, settings.cache_ttl_hours)
-    monitoring = job.kind in ("visual", "price")
+    monitoring = job.kind in MONITORING
     # Fehlversuche einer Beobachtung werden nicht als neue Chats gespeichert.
     agent = Agent(settings, cache=None if monitoring else cache)
     try:
         frage = job.question
+        if job.kind == "image":
+            # Einmal ansehen reicht: das Foto aendert sich nicht, und bei
+            # "jede Minute" waere jede Minute eine Bildanfrage faellig.
+            gesehen = job.image_note.strip()
+            if not gesehen:
+                gesehen = describe_job_image(agent, job, settings)
+                if gesehen:
+                    with contextlib.suppress(Exception):
+                        JobStore(settings.db_path).set_image_note(job.id, gesehen)
+            if not gesehen:
+                return ("Bild nicht lesbar", "")
+            wo = (
+                f"\nSuche zuerst auf dieser Seite: {job.source_url}"
+                if job.source_url
+                else "\nSuche im offenen Web, bevorzugt bei bekannten Haendlern und "
+                     "Marktplaetzen."
+            )
+            frage = (
+                "Dies ist eine automatische Suche nach einem Gegenstand, den der Nutzer "
+                "fotografiert hat. Auf dem Bild ist zu sehen:\n" + gesehen
+                + "\n\nFinde heraus, um welches Modell es sich handelt, und suche ein "
+                  "aktuelles Angebot dafuer." + wo
+                + "\nZusaetzliche Bedingung des Nutzers: " + job.question
+                + "\nDie erste Zeile muss exakt BEDINGUNG ERFÜLLT oder BEDINGUNG NICHT "
+                  "ERFÜLLT lauten. Erfüllt ist sie nur, wenn du eine konkrete Angebots- "
+                  "oder Produktseite wirklich geöffnet und gelesen hast. Nenne danach "
+                  "Produktname, Händler, Preis und die vollständige Adresse der Seite. "
+                  "Rate nicht und erfinde keine Adresse."
+            )
         if job.kind == "visual":
             frage = (
                 "Dies ist eine automatische Beobachtung. Öffne zuerst mit "
@@ -432,6 +544,13 @@ def run_job(job: Job, settings: Any) -> tuple[str, str]:
                 if verified is None:
                     return ("kein prüfbarer Preis gefunden", "")
                 matched = verified
+            # Gefunden heisst beim Bildauftrag: eine Seite gelesen UND eine
+            # Adresse genannt. Ein Modell, das "ja, gibt es" schreibt, hat noch
+            # nichts gefunden -- der Nutzer will den Laden, nicht die Zuversicht.
+            if job.kind == "image" and (
+                not getattr(result, "sources", []) or not offer_url(antwort)
+            ):
+                return ("kein Angebot gefunden", "")
             if not matched:
                 return ("noch nicht erfüllt", "")
             meta = result.meta() if hasattr(result, "meta") else {}

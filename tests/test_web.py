@@ -3754,3 +3754,70 @@ def test_the_whole_picker_scrolls_not_just_the_list() -> None:
     assert "display:flex;flex-direction:column" in picker
     # Die Liste bekommt einen kleineren Anteil, sonst füllt sie alles.
     assert "min(38vh,320px)" in picker
+
+
+# ---------------------------------------------------------------------------
+# Bildauftrag: Bild hochladen und danach suchen lassen
+# ---------------------------------------------------------------------------
+def test_an_image_job_stores_the_picture_privately(client, session: web.ChatSession) -> None:
+    """Das Vergleichsbild landet im Datenordner des Kontos, nicht im Auftrag."""
+    import base64
+
+    from aquaticy.media import load_snapshot
+
+    session.settings().vision_model = "ollama_chat/gemma4:12b"
+    png = base64.b64encode(b"das-bild").decode()
+    status, body = client("POST", "/api/jobs", {
+        "action": "add", "kind": "image", "question": "Handy gesucht",
+        "rhythm": "hourly", "image_data": png, "image_type": "image/png",
+    })
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is True, payload.get("error")
+    media_id = payload["job"]["image_id"]
+    assert media_id
+    assert load_snapshot(session.settings().data_dir, media_id) == (b"das-bild", "image/png")
+
+
+def test_an_image_job_without_a_picture_is_refused(
+    client, session: web.ChatSession
+) -> None:
+    session.settings().vision_model = "ollama_chat/gemma4:12b"
+    status, body = client("POST", "/api/jobs", {
+        "action": "add", "kind": "image", "question": "Handy gesucht", "rhythm": "hourly",
+    })
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is False
+    assert "fehlt das Bild" in payload["error"]
+
+
+def test_an_image_job_needs_a_vision_model(client) -> None:
+    """Ein Textmodell wuerde das Foto nicht sehen, sondern raten."""
+    _, body = client("POST", "/api/jobs", {
+        "action": "add", "kind": "image", "question": "Handy gesucht", "rhythm": "hourly",
+    })
+    payload = json.loads(body)
+    assert payload["ok"] is False and "Vision-Modell" in payload["error"]
+
+
+def test_an_unsupported_picture_format_is_refused(
+    client, session: web.ChatSession
+) -> None:
+    import base64
+
+    session.settings().vision_model = "ollama_chat/gemma4:12b"
+    _, body = client("POST", "/api/jobs", {
+        "action": "add", "kind": "image", "question": "Handy gesucht", "rhythm": "hourly",
+        "image_data": base64.b64encode(b"nicht-wirklich").decode(),
+        "image_type": "application/zip",
+    })
+    payload = json.loads(body)
+    assert payload["ok"] is False
+    assert "Bildformat" in payload["error"]
+
+
+def test_the_ui_offers_the_new_rhythms_and_the_image_job() -> None:
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    assert 'value="minutes1"' in html and 'value="always"' in html
+    assert 'value="image"' in html and 'id="job-bild"' in html

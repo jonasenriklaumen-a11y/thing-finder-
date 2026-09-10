@@ -202,6 +202,10 @@ body.collapsed aside{margin-left:-260px}
 .auftrag .knoepfe button.weg:hover{border-color:var(--err);color:var(--err)}
 .auftrag{animation:rise var(--t-mid) var(--ease-out) both}
 .auftraege-leer{color:var(--text-3);font-size:13px;padding:6px 2px}
+/* Das Vergleichsbild eines Bildauftrags -- klein genug, dass das Formular
+   seine Form behaelt, gross genug, um zu erkennen, was man gewaehlt hat. */
+#job-bild-vorschau{max-width:120px;max-height:90px;border-radius:8px;
+  border:1px solid var(--line-2);object-fit:cover;align-self:flex-end}
 
 /* Unter jeder fertigen Antwort: mitnehmen, was dasteht. Erst beim
    Darauffahren sichtbar -- eine Knopfreihe unter jeder Antwort waere
@@ -1450,6 +1454,7 @@ input:focus,select:focus{border-color:var(--accent)}
               <option value="research">regelmäßig recherchieren</option>
               <option value="visual">Kamera, Satellit oder Straße beobachten</option>
               <option value="price">Preis beobachten</option>
+              <option value="image">Bild hochladen und danach suchen</option>
             </select></label>
           <label style="flex:2"><span class="lbl">Frage oder Bedingung</span>
             <input type="text" id="job-frage"
@@ -1459,17 +1464,31 @@ input:focus,select:focus{border-color:var(--accent)}
               <option value="daily">täglich</option>
               <option value="hourly">stündlich</option>
               <option value="weekly">wöchentlich</option>
-              <option value="minutes5">alle 5 Minuten</option>
-              <option value="minutes15">alle 15 Minuten</option>
               <option value="minutes30">alle 30 Minuten</option>
-            </select></label>
+              <option value="minutes15">alle 15 Minuten</option>
+              <option value="minutes5">alle 5 Minuten</option>
+              <option value="minutes1">jede Minute</option>
+              <option value="always">die ganze Zeit</option>
+            </select>
+            <span class="why" id="job-takt-hinweis" hidden>Häufig prüfen heißt häufig
+              fragen — das kostet entsprechend Token.</span></label>
         </div>
         <div class="row" id="job-source-feld" hidden>
-          <label style="flex:1"><span class="lbl">Öffentliche Quelladresse</span>
+          <label style="flex:1"><span class="lbl">Öffentliche Quelladresse
+            <span class="why" id="job-source-warum">Die genaue Webcam-, Karten-,
+              Satelliten- oder Produktseite. Private Kameras und Anmeldungen werden
+              nicht verwendet.</span></span>
             <input type="url" id="job-source" placeholder="https://…"
-                   inputmode="url" autocomplete="off">
-            <span class="why">Die genaue Webcam-, Karten-, Satelliten- oder Produktseite.
-              Private Kameras und Anmeldungen werden nicht verwendet.</span></label>
+                   inputmode="url" autocomplete="off"></label>
+        </div>
+        <div class="row" id="job-bild-feld" hidden>
+          <label style="flex:1"><span class="lbl">Bild des gesuchten Gegenstands
+            <span class="why">Ein Foto oder Produktbild. Aquaticy sieht es sich einmal
+              an und sucht dann so lange nach einem Angebot dafür, bis es eines
+              findet — dann kommt die Adresse als Chat.</span></span>
+            <input type="file" id="job-bild" accept="image/jpeg,image/png,image/webp,image/gif">
+          </label>
+          <img id="job-bild-vorschau" alt="Gewähltes Bild" hidden>
         </div>
         <div class="row">
           <label id="job-tag-feld"><span class="lbl">Wochentag</span>
@@ -3897,11 +3916,44 @@ function jobZeile(job){
 // Bei "stündlich" gibt es keinen Wochentag und keine Stunde -- also weg damit.
 function jobFelder(){
   const takt = $("#job-rhythm").value;
+  const art = $("#job-kind").value;
   $("#job-tag-feld").hidden = takt !== "weekly";
-  $("#job-zeit-feld").hidden = takt.startsWith("minutes");
-  $("#job-source-feld").hidden = $("#job-kind").value === "research";
-  $("#job-struktur-feld").hidden = $("#job-kind").value !== "research";
+  $("#job-zeit-feld").hidden = takt.startsWith("minutes") || takt === "always";
+  // Bei der Bildsuche ist die Adresse freiwillig: ohne sie sucht Aquaticy im
+  // ganzen Web, mit ihr bleibt es bei diesem einen Anbieter.
+  $("#job-source-feld").hidden = art === "research";
+  $("#job-bild-feld").hidden = art !== "image";
+  $("#job-struktur-feld").hidden = art !== "research";
+  $("#job-takt-hinweis").hidden = !(takt === "always" || takt === "minutes1");
+  $("#job-source-warum").textContent = art === "image"
+    ? "Freiwillig: eine Seite, auf der zuerst gesucht wird. Leer = überall suchen."
+    : "Die genaue Webcam-, Karten-, Satelliten- oder Produktseite. "
+      + "Private Kameras und Anmeldungen werden nicht verwendet.";
+  $("#job-frage").placeholder = art === "image"
+    ? "z. B. neu oder gebraucht, Versand nach Deutschland"
+    : "z. B. Ein oranges Flugzeug ist sichtbar";
 }
+
+// Das gewaehlte Bild einmal lesen: als Base64 geht es mit dem Auftrag an den
+// Server, der es im privaten Ordner des Kontos ablegt.
+let jobBild = null;
+$("#job-bild").addEventListener("change", () => {
+  const datei = $("#job-bild").files?.[0] || null;
+  const vorschau = $("#job-bild-vorschau");
+  jobBild = null;
+  vorschau.hidden = true;
+  if (!datei) return;
+  const leser = new FileReader();
+  leser.onload = () => {
+    const roh = String(leser.result || "");
+    const komma = roh.indexOf(",");
+    if (komma < 0) return;
+    jobBild = { data: roh.slice(komma + 1), type: datei.type || "image/jpeg" };
+    vorschau.src = roh;
+    vorschau.hidden = false;
+  };
+  leser.readAsDataURL(datei);
+});
 $("#job-rhythm").addEventListener("change", jobFelder);
 $("#job-kind").addEventListener("change", jobFelder);
 jobFelder();
@@ -3912,8 +3964,19 @@ $("#job-add").addEventListener("click", async () => {
   if (!frage){ note.textContent = "Ohne Frage gibt es nichts zu tun."; return; }
   const kind = $("#job-kind").value;
   const source = $("#job-source").value.trim();
-  if (kind !== "research" && !safeHttpUrl(source)){
-    note.textContent = "Bitte gib eine vollständige öffentliche http(s)-Quelladresse an.";
+  // Kamera und Preis brauchen die eine Seite. Die Bildsuche darf ohne
+  // Adresse loslaufen -- dann sucht sie überall.
+  if (kind === "visual" || kind === "price"){
+    if (!safeHttpUrl(source)){
+      note.textContent = "Bitte gib eine vollständige öffentliche http(s)-Quelladresse an.";
+      return;
+    }
+  } else if (kind === "image" && source && !safeHttpUrl(source)){
+    note.textContent = "Die Adresse muss vollständig sein — oder leer bleiben.";
+    return;
+  }
+  if (kind === "image" && !jobBild){
+    note.textContent = "Bitte wähle das Bild aus, nach dem gesucht werden soll.";
     return;
   }
   const [stunde, minute] = ($("#job-zeit").value || "08:00").split(":");
@@ -3930,12 +3993,17 @@ $("#job-add").addEventListener("click", async () => {
         structured: $("#job-struktur").checked,
         kind,
         source_url: source,
+        image_data: kind === "image" ? jobBild.data : "",
+        image_type: kind === "image" ? jobBild.type : "",
       }),
     });
     const data = await res.json();
     if (!data.ok){ note.textContent = data.error || "Anlegen ging nicht."; return; }
     $("#job-frage").value = "";
     $("#job-source").value = "";
+    $("#job-bild").value = "";
+    $("#job-bild-vorschau").hidden = true;
+    jobBild = null;
     note.textContent = "Angelegt.";
     loadJobs();
   } catch { note.textContent = "Anlegen ging nicht."; }

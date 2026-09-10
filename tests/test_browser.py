@@ -279,3 +279,114 @@ def test_unset_like_values_keep_the_sandbox(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("AQUATICY_BROWSER_NO_SANDBOX", "0")
     assert launch_args() == []
 
+
+
+# ---------------------------------------------------------------------------
+# Live statt Ladebildschirm
+# ---------------------------------------------------------------------------
+class LivePage:
+    """Eine Seite, die auf Wunsch erst nach ein paar Blicken abspielt."""
+
+    def __init__(self, stände: list[dict[str, int]]) -> None:
+        self.stände = stände
+        self.gewartet: list[int] = []
+        self.gestartet = 0
+        self.frames: list[Any] = []
+        self.knoepfe: list[Any] = []
+
+    def evaluate(self, script: str, *args: Any) -> Any:
+        from aquaticy.browser import PLAYBACK_STATE_JS, START_PLAYBACK_JS
+
+        if script is START_PLAYBACK_JS:
+            self.gestartet += 1
+            return 1
+        if script is PLAYBACK_STATE_JS:
+            return self.stände.pop(0) if len(self.stände) > 1 else self.stände[0]
+        return 0
+
+    def wait_for_timeout(self, ms: int) -> None:
+        self.gewartet.append(int(ms))
+
+    def query_selector_all(self, selector: str) -> list[Any]:
+        return list(self.knoepfe)
+
+
+class PlayButton:
+    def __init__(self) -> None:
+        self.geklickt = 0
+
+    def is_visible(self) -> bool:
+        return True
+
+    def inner_text(self) -> str:
+        return "Play"
+
+    def click(self, **kwargs: Any) -> None:
+        self.geklickt += 1
+
+
+def test_a_running_video_is_awaited_before_the_shot() -> None:
+    """Der erste Blick zeigt den Ladebildschirm, der zweite das laufende Bild."""
+    from aquaticy.browser import PLAYBACK_SETTLE_MS, wait_for_live_frame
+
+    page = LivePage([
+        {"videos": 1, "playing": 0, "images": 0, "loaded": 0},
+        {"videos": 1, "playing": 1, "images": 0, "loaded": 0},
+    ])
+    assert wait_for_live_frame(page, timeout_ms=3_000) == "video"
+    assert page.gestartet >= 1, "die Wiedergabe wird angestossen"
+    assert PLAYBACK_SETTLE_MS in page.gewartet, "nach dem ersten Frame wird nachgewartet"
+
+
+def test_a_page_without_video_does_not_wait_for_playback() -> None:
+    """Die meisten Webcams liefern ein Bild, kein Video -- das ist sofort fertig."""
+    from aquaticy.browser import wait_for_live_frame
+
+    page = LivePage([{"videos": 0, "playing": 0, "images": 3, "loaded": 3}])
+    assert wait_for_live_frame(page, timeout_ms=3_000) == "bild"
+
+
+def test_a_stuck_player_gets_clicked_and_then_gives_up() -> None:
+    """Sperrt sich der Player, wird der Abspielknopf geklickt -- einmal."""
+    from aquaticy.browser import wait_for_live_frame
+
+    page = LivePage([{"videos": 1, "playing": 0, "images": 0, "loaded": 0}])
+    knopf = PlayButton()
+    page.knoepfe = [knopf]
+    assert wait_for_live_frame(page, timeout_ms=1_000) == "zeitlimit"
+    assert knopf.geklickt == 1, "genau einmal -- sonst klickt er sich durch die Seite"
+
+
+def test_the_capture_prefers_the_live_element() -> None:
+    """Ein Ausschnitt des Videos statt der ganzen Seite mit Kopfzeile und Werbung."""
+    from aquaticy.browser import _shot
+
+    class Element:
+        def screenshot(self, **kwargs: Any) -> bytes:
+            return b"video-frame"
+
+    class Page(LivePage):
+        def evaluate(self, script: str, *args: Any) -> Any:
+            return 0.6  # das Element fuellt den groessten Teil des Fensters
+
+        def query_selector(self, selector: str) -> Any:
+            return Element()
+
+        def screenshot(self, **kwargs: Any) -> bytes:
+            return b"ganze-seite"
+
+    assert _shot(Page([])) == b"video-frame"
+
+
+def test_a_small_element_leaves_it_at_the_whole_view() -> None:
+    """Ein Vorschaubild neben dem Text ist nicht die Ansicht, die gemeint ist."""
+    from aquaticy.browser import _shot
+
+    class Page(LivePage):
+        def evaluate(self, script: str, *args: Any) -> Any:
+            return 0.05
+
+        def screenshot(self, **kwargs: Any) -> bytes:
+            return b"ganze-seite"
+
+    assert _shot(Page([])) == b"ganze-seite"

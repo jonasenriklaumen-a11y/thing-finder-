@@ -47,6 +47,21 @@ def save_snapshot(data_dir: Path | str, content: bytes, content_type: str) -> st
     return media_id
 
 
+def snapshot_path(data_dir: Path | str, media_id: str) -> Path | None:
+    """Der Dateipfad eines Schnappschusses -- oder `None`.
+
+    Gebraucht dort, wo nicht die Bytes, sondern eine Datei erwartet wird:
+    ein Bildauftrag reicht sein Vergleichsbild an das Vision-Modell weiter.
+    Dieselbe strenge Pruefung wie beim Lesen -- ein Name mit Schraegstrichen
+    oder Punkten kommt hier gar nicht erst durch.
+    """
+    wanted = str(media_id or "").strip()
+    if not MEDIA_ID.fullmatch(wanted):
+        return None
+    path = Path(data_dir) / "media" / wanted
+    return path if path.is_file() else None
+
+
 def load_snapshot(data_dir: Path | str, media_id: str) -> tuple[bytes, str] | None:
     """Read one snapshot without accepting paths or cross-user locations."""
     wanted = str(media_id or "").strip()

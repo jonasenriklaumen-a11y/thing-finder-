@@ -1697,6 +1697,33 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json({"error": "unbekannt"}, 404)
 
+    def _job_image(self, payload: dict[str, Any], settings: Settings) -> tuple[str, str]:
+        """Nimmt das Vergleichsbild eines Bildauftrags entgegen.
+
+        Es landet im privaten Datenordner des Kontos -- derselbe Ort, an dem
+        auch geprueftes Bildmaterial liegt. Zurueck kommt (Kennung, Fehler);
+        genau eines von beiden ist gefuellt.
+        """
+        from aquaticy.media import save_snapshot
+
+        try:
+            data = base64.b64decode(str(payload.get("image_data") or ""), validate=True)
+        except (ValueError, binascii.Error):
+            return "", "Das Bild konnte nicht gelesen werden."
+        if not data:
+            return "", "Für die Bildsuche fehlt das Bild."
+        if len(data) > MAX_UPLOAD_BYTES:
+            return "", (
+                f"Das Bild ist zu groß (erlaubt sind "
+                f"{MAX_UPLOAD_BYTES // 1_000_000} MB)."
+            )
+        try:
+            return save_snapshot(
+                settings.data_dir, data, str(payload.get("image_type") or "")
+            ), ""
+        except (OSError, ValueError):
+            return "", "Dieses Bildformat wird nicht unterstützt (JPEG, PNG, WebP, GIF)."
+
     def _job_edit(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Auftrag anlegen, anhalten, weiterlaufen lassen oder sofort ausfuehren."""
         from aquaticy.jobs import JobStore, run_job
@@ -1708,11 +1735,16 @@ class Handler(BaseHTTPRequestHandler):
         if action == "add":
             try:
                 kind = str(payload.get("kind", "research")).strip().lower()
-                if kind == "visual" and not selected_vision_model(settings):
+                if kind in ("visual", "image") and not selected_vision_model(settings):
                     return {
                         "ok": False,
                         "error": "Die Bildbeobachtung braucht ein Vision-Modell unter Modell.",
                     }
+                image_id = ""
+                if kind == "image":
+                    image_id, fehler = self._job_image(payload, settings)
+                    if fehler:
+                        return {"ok": False, "error": fehler}
                 job = store.add(
                     str(payload.get("question", "")),
                     rhythm=str(payload.get("rhythm", "daily")),
@@ -1722,6 +1754,7 @@ class Handler(BaseHTTPRequestHandler):
                     structured=bool(payload.get("structured", True)),
                     kind=kind,
                     source_url=str(payload.get("source_url", "")),
+                    image_id=image_id,
                 )
             except (ValueError, TypeError) as exc:
                 return {"ok": False, "error": str(exc)}

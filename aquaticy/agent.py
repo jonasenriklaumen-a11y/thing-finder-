@@ -166,6 +166,10 @@ VISUAL_SOURCES_PROMPT = """
 - Prüfe ein brauchbares aktuelles Bild mit `inspect_public_visual`. Nenne immer Quelle
   und sichtbaren Zeitstand; fehlt er, sage das klar. Nutze keine privaten Kameras,
   Logins oder personenbezogene Identifizierung.
+- Das Werkzeug startet laufende Bilder selbst und wartet auf einen echten Frame.
+  Kommt trotzdem erkennbar nur ein Ladebildschirm, ein Abspielknopf oder eine leere
+  Fläche zurück, sag das und nimm eine andere Kamera -- deute kein Standbild als
+  aktuelle Lage.
 - Trenne das im Bild Sichtbare von deiner Deutung. Rauch, Licht, Wolken oder ein
   FIRMS-Hotspot sind Hinweise und allein kein bestätigter Brand oder anderes Ereignis.
 - Ist für die Frage keine sinnvolle Bildquelle vorhanden, sage knapp, was du gesucht

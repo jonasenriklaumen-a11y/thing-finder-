@@ -1092,6 +1092,22 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         pg.select_option("#job-rhythm", "hourly")
         pg.wait_for_timeout(200)
         log.pruefe(not pg.is_visible("#job-tag-feld"), "stündlich braucht keinen Wochentag")
+        # Durchgehend beobachten: keine Uhrzeit, aber ein Wort zu den Kosten.
+        pg.select_option("#job-rhythm", "always")
+        pg.wait_for_timeout(200)
+        log.pruefe(not pg.is_visible("#job-zeit-feld"), "durchgehend hat keine Uhrzeit")
+        log.pruefe(pg.is_visible("#job-takt-hinweis"), "und sagt, dass es Token kostet")
+        # Die Bildsuche: Bildfeld statt Pflichtadresse.
+        pg.select_option("#job-kind", "image")
+        pg.wait_for_timeout(200)
+        log.pruefe(pg.is_visible("#job-bild-feld"), "die Bildsuche fragt nach einem Bild")
+        log.pruefe(
+            "Leer = überall suchen" in pg.inner_text("#job-source-warum"),
+            "und die Adresse ist dort freiwillig",
+        )
+        pg.select_option("#job-kind", "research")
+        pg.select_option("#job-rhythm", "hourly")
+        pg.wait_for_timeout(200)
         foto("15-auftraege")
 
         log.abschnitt("16. Google")
