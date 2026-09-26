@@ -77,7 +77,7 @@ def test_every_addon_has_install_even_without_download(konto: Settings) -> None:
 
 def test_normal_accounts_get_no_workshop_addons(konto: Settings) -> None:
     for addon_id in ("whatsapp", "signal", "telegram", "blender"):
-        with pytest.raises(addons.AddOnError, match="Pro"):
+        with pytest.raises(addons.AddOnError, match="Ultra"):
             addons.install(konto, addon_id, pro=False)
     assert addons.load_state(konto) == {}
 
@@ -581,7 +581,7 @@ def _sitzung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: str,
     profil = tmp_path / f"konto-{plan}"
     profil.mkdir(exist_ok=True)
     sitzung = web.ChatSession(account=konto, profile=profil)
-    if user_mode and plan == "pro":
+    if user_mode and plan in ("pro", "ultra"):
         (profil / ".env").write_text("AQUATICY_VM_USER_MODE=true\n", encoding="utf-8")
     monkeypatch.setattr(web, "SESSION", sitzung)
     return sitzung
@@ -596,7 +596,7 @@ def test_normal_accounts_can_use_the_addons_without_workshop(
     antwort, status = web.addon_action({"action": "install", "id": "wetter"})
     assert status == 200 and "wetter" in antwort["active"]
     antwort, status = web.addon_action({"action": "install", "id": "whatsapp"})
-    assert status == 400 and "Pro" in antwort["error"]
+    assert status == 400 and "Ultra" in antwort["error"]
     antwort, status = web.addon_action({"action": "disable", "id": "wetter"})
     assert status == 200 and antwort["active"] == []
     antwort, status = web.addon_action({"action": "uninstall", "id": "wetter"})
@@ -640,7 +640,7 @@ def test_login_opens_the_app_for_the_human(
     from aquaticy import sandbox as werkstatt
     from aquaticy import web
 
-    sitzung = _sitzung(tmp_path, monkeypatch, "pro")
+    sitzung = _sitzung(tmp_path, monkeypatch, "ultra")
     addons._update(sitzung.settings(), "signal", installed=True, enabled=True)
     geoeffnet: list[tuple] = []
 
@@ -696,7 +696,7 @@ def test_the_human_types_directly_into_the_workshop(
     from aquaticy import sandbox as werkstatt
     from aquaticy import web
 
-    _sitzung(tmp_path, monkeypatch, "pro")
+    _sitzung(tmp_path, monkeypatch, "ultra")
     box = Werkstatt()
     monkeypatch.setattr(werkstatt, "shared", lambda settings: box)
     assert web.workshop_input({"art": "click", "x": 640, "y": 400, "double": True})[1] == 200
@@ -730,14 +730,14 @@ def test_wrong_input_never_reaches_the_workshop(
     from aquaticy import sandbox as werkstatt
     from aquaticy import web
 
-    _sitzung(tmp_path, monkeypatch, "pro")
+    _sitzung(tmp_path, monkeypatch, "ultra")
     box = Werkstatt()
     monkeypatch.setattr(werkstatt, "shared", lambda settings: box)
     assert web.workshop_input(eingabe)[1] == 400
     assert box.aufrufe == []
 
 
-def test_direct_input_is_pro_and_user_mode_only(
+def test_direct_input_is_ultra_and_user_mode_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from aquaticy import sandbox as werkstatt
@@ -747,7 +747,10 @@ def test_direct_input_is_pro_and_user_mode_only(
     monkeypatch.setattr(werkstatt, "shared", lambda settings: box)
     _sitzung(tmp_path, monkeypatch, "normal")
     assert web.workshop_input({"art": "key", "key": "Return"})[1] == 403
-    _sitzung(tmp_path, monkeypatch, "pro", user_mode=False)
+    # Seit 9.5.17 gehoert der User mode zu Ultra -- auch Pro bekommt 403.
+    _sitzung(tmp_path, monkeypatch, "pro")
+    assert web.workshop_input({"art": "key", "key": "Return"})[1] == 403
+    _sitzung(tmp_path, monkeypatch, "ultra", user_mode=False)
     assert web.workshop_input({"art": "key", "key": "Return"})[1] == 400
     assert box.aufrufe == []
 
@@ -758,7 +761,7 @@ def test_opening_a_page_is_the_one_input_that_may_start_the_workshop(
     from aquaticy import sandbox as werkstatt
     from aquaticy import web
 
-    _sitzung(tmp_path, monkeypatch, "pro")
+    _sitzung(tmp_path, monkeypatch, "ultra")
     box = Werkstatt()
     box.alive = False
     monkeypatch.setattr(werkstatt, "shared", lambda settings: box)
@@ -773,7 +776,7 @@ def test_the_ui_has_the_addon_window_and_login_apps() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
     for teil in ('id="btn-addons"', 'id="addonbox"', 'id="btn-loginapps"', 'id="screenbox"',
                  "Installieren", "Deinstallieren", "/api/addons", "/api/werkstatt/eingabe",
-                 "Diese Funktion ist leider nicht für das normale Konto verfügbar"):
+                 "Das gibt es leider nur mit einem Ultra-Konto"):
         assert teil in html, teil
     # Der Add-ons-Knopf sitzt direkt beim User-mode-Schalter, die Login-Apps darunter.
     zeile = html.index('id="usermode"')

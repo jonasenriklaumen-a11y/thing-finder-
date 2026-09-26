@@ -29,6 +29,11 @@ USERNAME_RE = re.compile(r"^[^\x00-\x1f\x7f]{2,40}$")
 PRO_CODE_RE = re.compile(r"^[A-Z0-9]{9}$")
 PRO_CODE_IN_TEXT_RE = re.compile(r"(?<![A-Z0-9])[A-Z0-9]{9}(?![A-Z0-9])", re.IGNORECASE)
 
+#: Der Ultra-Code (seit 9.5.17): 14 Zeichen, mit Buchstabe, Ziffer UND
+#: Sonderzeichen -- ein eigenes, sicheres Passwort, unabhängig vom Pro-Code.
+ULTRA_SPECIALS = "!@#$%&*+-=?"
+ULTRA_CODE_LEN = 14
+
 
 @dataclass(frozen=True, slots=True)
 class Account:
@@ -45,6 +50,19 @@ class Account:
     @property
     def pro(self) -> bool:
         return self.plan == "pro"
+
+    @property
+    def ultra(self) -> bool:
+        return self.plan == "ultra"
+
+    @property
+    def elevated(self) -> bool:
+        """Pro oder Ultra -- alles, was über ein normales Konto hinausgeht."""
+        return self.plan in ("pro", "ultra")
+
+    @property
+    def plan_label(self) -> str:
+        return {"ultra": "Ultra", "pro": "Pro"}.get(self.plan, "Normal")
 
 
 def _password_hash(password: str, salt: bytes) -> bytes:
@@ -147,6 +165,54 @@ def pro_code_for(data_dir: Path) -> str:
     return code
 
 
+def valid_ultra_code(code: str) -> bool:
+    """14 Zeichen, dabei mindestens ein Buchstabe, eine Ziffer und ein Sonderzeichen."""
+    code = str(code or "")
+    if len(code) != ULTRA_CODE_LEN or any(c.isspace() for c in code):
+        return False
+    hat_buchstabe = any(c.isalpha() for c in code)
+    hat_ziffer = any(c.isdigit() for c in code)
+    hat_zeichen = any(c in ULTRA_SPECIALS for c in code)
+    erlaubt = all(c.isalnum() or c in ULTRA_SPECIALS for c in code)
+    return hat_buchstabe and hat_ziffer and hat_zeichen and erlaubt
+
+
+def new_ultra_code() -> str:
+    """Ein neuer Ultra-Code -- 14 Zeichen mit garantierter Vielfalt."""
+    buchstaben = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz"
+    ziffern = "23456789"
+    pool = buchstaben + ziffern + ULTRA_SPECIALS
+    while True:
+        rest = [secrets.choice(pool) for _ in range(ULTRA_CODE_LEN - 3)]
+        code = [secrets.choice(buchstaben), secrets.choice(ziffern),
+                secrets.choice(ULTRA_SPECIALS), *rest]
+        secrets.SystemRandom().shuffle(code)
+        gebaut = "".join(code)
+        if valid_ultra_code(gebaut):
+            return gebaut
+
+
+def ultra_code_for(data_dir: Path) -> str:
+    """Liest den lokalen Ultra-Code oder erzeugt ihn einmalig und geschützt."""
+    configured = os.environ.get("AQUATICY_ULTRA_CODE", "").strip()
+    if configured:
+        if not valid_ultra_code(configured):
+            raise ValueError(
+                "AQUATICY_ULTRA_CODE muss 14 Zeichen lang sein und mindestens einen "
+                "Buchstaben, eine Ziffer und ein Sonderzeichen enthalten.")
+        return configured
+    path = Path(data_dir) / "ultra-code.txt"
+    if path.is_file():
+        code = path.read_text(encoding="utf-8").strip()
+        if valid_ultra_code(code):
+            return code
+    code = new_ultra_code()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(code + "\n", encoding="utf-8")
+    secure_file(path)
+    return code
+
+
 def secure_directory(path: Path) -> None:
     """Beschraenkt ein Datenverzeichnis samt neu angelegter Dateien.
 
@@ -218,11 +284,13 @@ class RateLimiter:
 class AuthStore:
     """SQLite-Ablage für Konten und undurchsichtige Browser-Sitzungen."""
 
-    def __init__(self, data_dir: Path, pro_code: str) -> None:
+    def __init__(self, data_dir: Path, pro_code: str, ultra_code: str = "") -> None:
         self.data_dir = Path(data_dir)
         self.db_path = self.data_dir / "accounts.sqlite3"
         self.users_dir = self.data_dir / "users"
         self.pro_code = pro_code
+        # Der Ultra-Code (seit 9.5.17) -- eigenes Passwort, unabhängig vom Pro-Code.
+        self.ultra_code = ultra_code or ultra_code_for(Path(data_dir))
         self._lock = threading.RLock()
         secure_directory(self.data_dir)
         secure_directory(self.users_dir)
@@ -264,7 +332,7 @@ class AuthStore:
                     username TEXT NOT NULL,
                     password_hash BLOB NOT NULL,
                     password_salt BLOB NOT NULL,
-                    plan TEXT NOT NULL CHECK(plan IN ('normal','pro')),
+                    plan TEXT NOT NULL CHECK(plan IN ('normal','pro','ultra')),
                     created_at REAL NOT NULL,
                     terms_version TEXT NOT NULL,
                     terms_accepted_at REAL NOT NULL
@@ -283,6 +351,36 @@ class AuthStore:
             )
             # Konten aus 9.4.2 bleiben gültig. Für neue Konten wird die
             # ausdrücklich bestätigte Fassung unten beim INSERT festgehalten.
+            # Alte Tabellen (vor 9.5.17) erlauben per CHECK nur normal/pro.
+            # Dann die Tabelle einmal ohne die enge Bedingung neu aufbauen,
+            # damit Ultra-Konten angelegt werden können.
+            sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+            ).fetchone()
+            if sql and "ultra" not in str(sql[0] or ""):
+                conn.executescript(
+                    """
+                    ALTER TABLE users RENAME TO users_alt;
+                    CREATE TABLE users (
+                        id TEXT PRIMARY KEY,
+                        email TEXT NOT NULL UNIQUE,
+                        username TEXT NOT NULL,
+                        password_hash BLOB NOT NULL,
+                        password_salt BLOB NOT NULL,
+                        plan TEXT NOT NULL CHECK(plan IN ('normal','pro','ultra')),
+                        created_at REAL NOT NULL,
+                        terms_version TEXT NOT NULL DEFAULT '',
+                        terms_accepted_at REAL NOT NULL DEFAULT 0,
+                        last_ip TEXT NOT NULL DEFAULT '',
+                        last_seen REAL NOT NULL DEFAULT 0
+                    );
+                    INSERT INTO users (id, email, username, password_hash, password_salt,
+                        plan, created_at, terms_version, terms_accepted_at)
+                        SELECT id, email, username, password_hash, password_salt,
+                        plan, created_at, terms_version, terms_accepted_at FROM users_alt;
+                    DROP TABLE users_alt;
+                    """
+                )
             columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(users)")}
             if "terms_version" not in columns:
                 conn.execute(
@@ -304,6 +402,9 @@ class AuthStore:
                 conn.execute("ALTER TABLE users ADD COLUMN last_ip TEXT NOT NULL DEFAULT ''")
             if "last_seen" not in columns:
                 conn.execute("ALTER TABLE users ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
+            # Adresse bei der Registrierung -- ein Konto pro Adresse (seit 9.5.17).
+            if "created_ip" not in columns:
+                conn.execute("ALTER TABLE users ADD COLUMN created_ip TEXT NOT NULL DEFAULT ''")
         secure_file(self.db_path)
 
     def profile_dir(self, user_id: str) -> Path:
@@ -330,6 +431,7 @@ class AuthStore:
         username: str = "",
         terms_accepted: bool = False,
         terms_version: str = "",
+        ip: str = "",
     ) -> Account:
         email = normalize_email(email)
         fallback_username = email.split("@", 1)[0]
@@ -342,10 +444,15 @@ class AuthStore:
                 "Bitte stimme den Datenschutz- und Nutzungsbedingungen ausdrücklich zu."
             )
         plan = (plan or "normal").strip().lower()
-        if plan not in ("normal", "pro"):
-            raise ValueError("Wähle ein normales oder ein Pro-Konto.")
+        if plan not in ("normal", "pro", "ultra"):
+            raise ValueError("Wähle ein normales, ein Pro- oder ein Ultra-Konto.")
         if plan == "pro" and not hmac.compare_digest(code_from_input(pro_code), self.pro_code):
             raise ValueError("Der Pro-Code stimmt nicht.")
+        # Ultra hat ein eigenes, langes Passwort (14 Zeichen mit Sonderzeichen).
+        # Es wird als Ganzes verglichen, nicht als 9-stelliger Block.
+        if plan == "ultra" and not hmac.compare_digest(
+                (pro_code or "").strip(), self.ultra_code):
+            raise ValueError("Der Ultra-Code stimmt nicht.")
         salt = secrets.token_bytes(16)
         user_id = secrets.token_hex(16)
         now = time.time()
@@ -353,6 +460,19 @@ class AuthStore:
             "Mit diesen Angaben lässt sich kein neues Konto anlegen. Hast du schon eins? "
             "Dann melde dich an — sonst wähle einen anderen Nutzernamen."
         )
+        from aquaticy.aiguard import _norm_ip
+
+        adresse = _norm_ip(ip)
+        # Loopback (der eigene Rechner, Tests) fällt aus der Ein-Konto-pro-
+        # Adresse-Regel heraus -- sie richtet sich gegen fremde Anschlüsse.
+        pruefe_adresse = adresse
+        try:
+            import ipaddress as _ip
+
+            if adresse and _ip.ip_address(adresse).is_loopback:
+                pruefe_adresse = ""
+        except ValueError:
+            pruefe_adresse = ""
         try:
             with self._lock, self._connect() as conn:
                 # Nutzernamen sind eindeutig (seit 9.5.16) -- sonst traefe
@@ -360,10 +480,19 @@ class AuthStore:
                 if conn.execute("SELECT 1 FROM users WHERE lower(username) = lower(?)",
                                 (username,)).fetchone():
                     raise vergeben
+                # Ein Konto pro Adresse (seit 9.5.17): gibt es von dieser
+                # Adresse schon eins, geht kein zweites.
+                if pruefe_adresse and conn.execute(
+                        "SELECT 1 FROM users WHERE created_ip = ?", (pruefe_adresse,)).fetchone():
+                    raise ValueError(
+                        "Von dieser Adresse gibt es schon ein Konto. Pro Anschluss ist ein "
+                        "Konto möglich — melde dich mit dem vorhandenen an."
+                    )
                 conn.execute(
                     "INSERT INTO users "
                     "(id, email, username, password_hash, password_salt, plan, created_at, "
-                    "terms_version, terms_accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "terms_version, terms_accepted_at, created_ip, last_ip, last_seen) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user_id,
                         email,
@@ -374,6 +503,9 @@ class AuthStore:
                         now,
                         terms_version.strip(),
                         now,
+                        adresse,
+                        adresse,
+                        now if adresse else 0.0,
                     ),
                 )
         except sqlite3.IntegrityError as exc:
@@ -471,7 +603,10 @@ class AuthStore:
         """
         from aquaticy.quota import Quota
 
-        return Quota(self.db_path, account.id, float(account.created_at or 0.0))
+        # Pro bekommt das doppelte Kontingent (seit 9.5.17); Ultra hat gar
+        # keins (dort ruft niemand diese Methode).
+        faktor = 2.0 if account.plan == "pro" else 1.0
+        return Quota(self.db_path, account.id, float(account.created_at or 0.0), factor=faktor)
 
     def vault(self, account: Account) -> Any:
         """Der Schluesselbund eines Kontos (aquaticy/keyvault.py) -- in dieser Datenbank.

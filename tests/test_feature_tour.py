@@ -1,4 +1,4 @@
-"""Jede Funktion einmal wirklich -- fuer ein normales und ein Pro-Konto (seit 9.5.13).
+"""Jede Funktion einmal wirklich -- fuer ein Normal-, ein Pro- und ein Ultra-Konto.
 
 Wie tests/test_end_to_end.py: echter Webserver, echte Konten, echtes litellm,
 nur das Modell ist gestellt (tests/fake_llm.py). Hier aber in der Breite:
@@ -71,15 +71,17 @@ def tour(server: tuple[int, Path], request: pytest.FixtureRequest,  # noqa: F811
     monkeypatch.setattr("aquaticy.quota.WEEK_TOKENS", 10**10)
     monkeypatch.chdir(tmp_path)
     plan = request.param
-    return Tour(port, _konto(port, plan, "PROE2E234" if plan == "pro" else ""))
+    code = {"pro": "PROE2E234", "ultra": "Abcdef1234567!"}.get(plan, "")
+    return Tour(port, _konto(port, plan, code))
 
 
-@pytest.mark.parametrize("tour", ["normal", "pro"], indirect=True)
+@pytest.mark.parametrize("tour", ["normal", "pro", "ultra"], indirect=True)
 def test_every_page_and_endpoint(tour: Tour, tmp_path: Path) -> None:
     status, konto = tour("GET", "/api/account")
-    pro = konto["pro"]
-    assert konto["usage"]["limited"] is not pro
-    assert status == 200 and konto["plan"] == ("pro" if pro else "normal")
+    # pro = Pro oder Ultra (Auslastung); ultra = alles, ohne Limit (seit 9.5.17).
+    pro, ultra = konto["pro"], konto["ultra"]
+    assert konto["usage"]["limited"] is not ultra
+    assert status == 200 and konto["plan"] == ("ultra" if ultra else "pro" if pro else "normal")
 
     # -- Seiten und Lesewege ------------------------------------------------
     assert tour("GET", "/")[0] == 200
@@ -110,8 +112,8 @@ def test_every_page_and_endpoint(tour: Tour, tmp_path: Path) -> None:
     assert tour("POST", "/api/config", {"AQUATICY_SEARCH_VARIANTS": "999"})[0] == 400
     for key, wert in (("AQUATICY_VM_SIZE", "plus"), ("AQUATICY_VM_USER_MODE", "true"),
                       ("AQUATICY_LEGAL_GUARD", "false")):
-        assert (tour("POST", "/api/config", {key: wert})[0] == 200) is pro, key
-    if pro:
+        assert (tour("POST", "/api/config", {key: wert})[0] == 200) is ultra, key
+    if ultra:
         tour("POST", "/api/config", {"AQUATICY_VM_USER_MODE": "false",
                                      "AQUATICY_LEGAL_GUARD": "true"})
     status, probe = tour("POST", "/api/probe", {"AQUATICY_MODEL": "openai/fake-modell"})
@@ -194,9 +196,9 @@ def test_every_page_and_endpoint(tour: Tour, tmp_path: Path) -> None:
     for aktion in ("disable", "enable"):
         assert tour("POST", "/api/addons", {"action": aktion, "id": "wetter"})[0] == 200
     assert tour("POST", "/api/addons", {"action": "login_done", "id": "signal"})[0] == 400
-    if not pro:
+    if not ultra:
         status, antwort = tour("POST", "/api/addons", {"action": "install", "id": "signal"})
-        assert status == 400 and "Pro" in antwort["error"]
+        assert status == 400 and "Ultra" in antwort["error"]
     assert tour("POST", "/api/addons", {"action": "quatsch", "id": "wetter"})[0] == 400
     assert tour("POST", "/api/addons", {"action": "install", "id": "gibtsnicht"})[0] == 400
     for kennung in ("wetter", "feeds", "github"):
@@ -205,11 +207,11 @@ def test_every_page_and_endpoint(tour: Tour, tmp_path: Path) -> None:
 
     # -- Werkstatt-Eingabe, Home Assistant, Lager, Google ---------------------
     status, _ = tour("POST", "/api/werkstatt/eingabe", {"art": "type", "text": "x"})
-    assert status == (400 if pro else 403)
+    assert status == (400 if ultra else 403)
     status, antwort = tour("POST", "/api/ha", {"url": "http://127.0.0.1:1", "token": "t"})
-    assert (status == 200 and antwort["ok"] is False) if pro else status == 403
+    assert (status == 200 and antwort["ok"] is False) if ultra else status == 403
     status, antwort = tour("POST", "/api/storage", {"url": "http://127.0.0.1:1"})
-    assert (status == 200 and antwort["ok"] is False) if pro else status == 403
+    assert (status == 200 and antwort["ok"] is False) if ultra else status == 403
     assert tour("POST", "/api/google", {"action": "state"})[1]["ok"]
     assert tour("POST", "/api/google", {"action": "start", "client_id": ""})[1]["ok"] is False
     assert tour("POST", "/api/google", {"action": "finish", "code": "x"})[1]["ok"] is False
@@ -248,7 +250,7 @@ def _antworte(tour: Tour, text: str) -> None:
             return
 
 
-@pytest.mark.parametrize("tour", ["normal", "pro"], indirect=True)
+@pytest.mark.parametrize("tour", ["normal", "pro", "ultra"], indirect=True)
 def test_every_offline_tool_runs_through(tour: Tour) -> None:
     for name, argumente, erwartet in WERKZEUGE:
         fake_llm.ANFRAGEN.clear()
@@ -266,14 +268,14 @@ def test_every_offline_tool_runs_through(tour: Tour) -> None:
     tour.kein_serverfehler()
 
 
-@pytest.mark.parametrize("tour", ["normal", "pro"], indirect=True)
+@pytest.mark.parametrize("tour", ["normal", "pro", "ultra"], indirect=True)
 def test_what_each_account_is_offered(tour: Tour) -> None:
     """Was angeboten wird, folgt aus Konto und Einrichtung -- nicht aus dem Zufall."""
     fake_llm.ANFRAGEN.clear()
     tour.chat("WERKZEUG:calculate {}")
     angeboten = {n for zeile in fake_llm.ANFRAGEN for n in json.loads(zeile)["tool_names"]}
-    pro = tour("GET", "/api/account")[1]["pro"]
-    assert ("lan_check" in angeboten) is pro, "das Heimnetz gehoert zu Pro"
+    ultra = tour("GET", "/api/account")[1]["ultra"]
+    assert ("lan_check" in angeboten) is ultra, "das Heimnetz gehoert zu Ultra"
     # Nicht eingerichtet -> nicht angeboten: kein Werkzeug, das nur scheitern kann.
     for name in ("github", "read_feeds", "create_image", "ha_states", "ha_call",
                  "storage_find", "mail_search", "calendar_events", "desktop_open"):

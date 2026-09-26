@@ -48,7 +48,8 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from aquaticy.aiguard import AiGuard, forget_judgements
 
     forget_judgements()
-    monkeypatch.setattr(web, "AUTH", AuthStore(tmp_path / "konten", "PROE2E234"))
+    monkeypatch.setattr(web, "AUTH",
+                        AuthStore(tmp_path / "konten", "PROE2E234", "Abcdef1234567!"))
     monkeypatch.setattr(web, "AIGUARD", AiGuard(tmp_path / "konten" / "accounts.sqlite3"))
     monkeypatch.setattr(web, "SESSIONS", web.SessionRegistry())
     monkeypatch.setattr(web, "SESSION", web.SessionProxy())
@@ -158,12 +159,17 @@ def test_the_quota_stops_a_normal_account(server: tuple[int, Path]) -> None:
     assert antwort["which"] == "week" and "Woche" in antwort["error"]
 
 
-def test_a_pro_account_has_no_limit(server: tuple[int, Path]) -> None:
+def test_a_pro_account_is_limited_ultra_is_not(server: tuple[int, Path]) -> None:
     port, _ = server
-    cookie = _konto(port, "pro", "PROE2E234")
-    konto = json.loads(_req(port, "GET", "/api/account", cookie=cookie)[2])
-    assert konto["pro"] is True and konto["usage"]["limited"] is False
-    assert konto["usage"]["summary"] == "Kein Limit"
+    # Pro hat seit 9.5.17 ein (doppeltes) Limit -- kein "kein Limit" mehr.
+    pro = json.loads(_req(port, "GET", "/api/account",
+                          cookie=_konto(port, "pro", "PROE2E234"))[2])
+    assert pro["plan"] == "pro" and pro["usage"]["limited"] is True
+    # Nur Ultra ist unbegrenzt.
+    ultra = json.loads(_req(port, "GET", "/api/account",
+                            cookie=_konto(port, "ultra", "Abcdef1234567!"))[2])
+    assert ultra["plan"] == "ultra" and ultra["usage"]["limited"] is False
+    assert ultra["usage"]["summary"] == "Kein Limit"
 
 
 def test_a_chat_setting_stays_in_the_account(server: tuple[int, Path]) -> None:

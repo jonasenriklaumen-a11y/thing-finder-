@@ -42,13 +42,7 @@ PALETTE = "farbschema"
 #: traegt dort keinen eigenen Namen: es sind die Werte in ``:root``.
 PALETTE_IDS: dict[str, str] = {
     "standard": "",
-    "nord": "nord",
-    "catppuccin": "catppuccin",
-    "gruvbox": "gruvbox",
-    "tokyo_night": "tokyonight",
-    "solarized": "solarized",
-    "dracula": "dracula",
-    "rose_pine": "rosepine",
+    "schlicht": "mono",
 }
 
 
@@ -274,7 +268,7 @@ def coerce(preference: Preference, value: str) -> str:
         raise BadValue("Fuer das Erscheinungsbild geht 'hell' oder 'dunkel'.")
 
     if preference.name == PALETTE:
-        # "Tokyo Night", "rose-pine", "Rosé Pine" -- alles derselbe Wunsch.
+        # "Schwarz-Weiss", "mono", "schlicht" -- alles derselbe Wunsch.
         raw = (
             raw.lower()
             .replace("é", "e")
@@ -283,6 +277,8 @@ def coerce(preference: Preference, value: str) -> str:
         )
         if raw in ("gruen", "grün", "jetzig", "normal"):
             raw = "standard"
+        if raw in ("mono", "schwarz_weiss", "schwarzweiss", "sw", "einfach", "minimal"):
+            raw = "schlicht"
 
     if preference.kind == "schalter":
         low = raw.lower()

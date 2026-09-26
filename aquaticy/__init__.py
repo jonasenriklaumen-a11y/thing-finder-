@@ -1,6 +1,6 @@
 """aquaticy -- ein KI-Rechercheagent fuer die Kommandozeile."""
 
-__version__ = "9.5.16"
+__version__ = "9.5.17"
 
 #: Der Name dieser Fassung. Er steht ueberall hinter der Versionsnummer, wo
 #: Menschen sie lesen -- nicht in Paketangaben und Kennungen fuer Server.

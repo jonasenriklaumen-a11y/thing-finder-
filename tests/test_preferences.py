@@ -178,13 +178,14 @@ def test_every_catalogue_entry_has_a_key_except_the_appearance() -> None:
 
 
 def test_the_palette_is_recognised_however_it_is_written() -> None:
-    """"Tokyo Night", "rose-pine", "Rose Pine" -- derselbe Wunsch."""
+    """"Schwarz-Weiss", "mono", "schlicht" -- derselbe Wunsch."""
     palette = preferences.find("farbschema")
     assert palette is not None
-    assert preferences.coerce(palette, "Tokyo Night") == "tokyo_night"
-    assert preferences.coerce(palette, "rose-pine") == "rose_pine"
-    assert preferences.coerce(palette, "Ros\u00e9 Pine") == "rose_pine"
+    assert preferences.coerce(palette, "Schwarz-Weiss") == "schlicht"
+    assert preferences.coerce(palette, "mono") == "schlicht"
+    assert preferences.coerce(palette, "schlicht") == "schlicht"
     assert preferences.coerce(palette, "gr\u00fcn") == "standard"
+    assert preferences.coerce(palette, "normal") == "standard"
     with pytest.raises(preferences.BadValue):
         preferences.coerce(palette, "neonpink")
 

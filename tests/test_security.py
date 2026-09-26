@@ -176,8 +176,12 @@ def test_normal_accounts_get_the_quota_and_the_operators_addresses(tmp_path: Pat
     assert normal.quota is not None, "ein normales Konto hat immer ein Kontingent"
     assert normal.api_base == web.get_settings().api_base
     assert normal.searxng_url == web.get_settings().searxng_url
+    # Pro ist beim Netz wie Normal (seit 9.5.17): Kontingent (doppelt), keine
+    # eigene Adresse. Nur Ultra bekommt die eigene Adresse und kein Limit.
     pro = web._profile_settings(profil, "pro")
-    assert pro.quota is None and pro.api_base == "http://192.168.1.10:8080"
+    assert pro.quota is not None and pro.api_base == web.get_settings().api_base
+    ultra = web._profile_settings(profil, "ultra")
+    assert ultra.quota is None and ultra.api_base == "http://192.168.1.10:8080"
 
 
 def _sitzung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: str) -> web.ChatSession:
@@ -195,8 +199,8 @@ def _sitzung(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: str) -> web.
 def test_normal_accounts_cannot_redirect_the_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, feld: dict[str, str]
 ) -> None:
-    _sitzung(tmp_path, monkeypatch, "normal")
-    with pytest.raises(ValueError, match="Pro"):
+    _sitzung(tmp_path, monkeypatch, "pro")
+    with pytest.raises(ValueError, match="Ultra"):
         web.save_values(feld)
 
 
@@ -232,8 +236,11 @@ def test_the_probe_never_hands_the_servers_key_to_a_typed_address(
                for _, key, base in gesehen), gesehen
     assert gesehen[0][2] != "https://fremd.example/v1", (
         "normal: die eingetippte Adresse zaehlt nicht")
-    # Wer eine fremde Adresse testen will, tippt den Schluessel dafuer selbst.
-    _sitzung(tmp_path, monkeypatch, "pro")
+    # Eigene Adressen gibt es seit 9.5.17 nur mit Ultra -- auch Pro testet
+    # gegen die des Betreibers.
+    assert gesehen[1][2] != "https://fremd.example/v1", "pro: die eingetippte Adresse zaehlt nicht"
+    # Wer (mit Ultra) eine fremde Adresse testen will, tippt den Schluessel dafuer selbst.
+    _sitzung(tmp_path, monkeypatch, "ultra")
     handler._probe({"AQUATICY_MODEL": "mistral/mistral-large-latest",
                     "AQUATICY_API_BASE": "https://fremd.example/v1", "__API_KEY__": "eigener"})
     assert gesehen[-1][1:] == ("eigener", "https://fremd.example/v1")
@@ -396,4 +403,7 @@ def test_normal_accounts_cannot_blow_up_the_local_model(tmp_path: Path) -> None:
     profil = _profil(tmp_path, "AQUATICY_CONTEXT_TOKENS=2000000\n")
     assert web._profile_settings(profil, "normal").context_tokens <= max(
         web.get_settings().context_tokens, web.NORMAL_CONTEXT_CAP)
-    assert web._profile_settings(profil, "pro").context_tokens == 2_000_000
+    # Pro ist jetzt gedeckelt wie Normal (seit 9.5.17); nur Ultra darf hoch.
+    assert web._profile_settings(profil, "pro").context_tokens <= max(
+        web.get_settings().context_tokens, web.NORMAL_CONTEXT_CAP)
+    assert web._profile_settings(profil, "ultra").context_tokens == 2_000_000

@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -56,6 +57,8 @@ if TYPE_CHECKING:
 #: So viele Anhaltspunkte sperren ein Konto. Einer ist ein Verdacht -- der
 #: darf ein Fachwort oder eine missverstandene Frage sein; zwei ist ein Muster.
 NEEDED = 2
+
+LOG = logging.getLogger("aquaticy.aiguard")
 
 #: So lange gilt ein einmal gefaelltes Urteil ueber einen Text (Stunden), damit
 #: dasselbe nicht zweimal ein Modell kostet.
@@ -284,12 +287,19 @@ class AiGuard:
             )
 
     # -- Anhaltspunkte ----------------------------------------------------
-    def note(self, user_id: str, kind: str, detail: str = "", chat: str = "") -> bool:
+    def note(self, user_id: str, kind: str, detail: str = "", chat: str = "",
+             *, enforce: bool = True) -> bool:
         """Vermerkt einen Anhaltspunkt. Returns: ob das Konto jetzt gesperrt ist.
 
         Innerhalb eines Chats zählt derselbe Anlass nur einmal -- sonst wäre
         eine einzige Nachricht, mehrfach geschickt, schon ein Bann. Zwei
-        getrennte Anlässe (:data:`NEEDED`) sperren.
+        getrennte Anlässe (:data:`NEEDED`) lösen aus.
+
+        Args:
+            enforce: Ob bei Erreichen der Schwelle wirklich gesperrt wird.
+                Für Ultra-Konten ``False`` (seit 9.5.17): dann nur eine Warnung
+                im Terminal, kein Bann. Für Pro/Normal ``True`` -- gesperrt, und
+                der Grund steht im Terminal.
         """
         user_id = str(user_id or "")
         if not user_id:
@@ -299,7 +309,8 @@ class AiGuard:
                 "SELECT 1 FROM aiguard_flags WHERE user_id=? AND kind=? AND chat=? AND chat!=''",
                 (user_id, str(kind), str(chat)),
             ).fetchone()
-            if schon is None:
+            neu = schon is None
+            if neu:
                 cur.execute(
                     "INSERT INTO aiguard_flags (user_id, at, kind, detail, chat) "
                     "VALUES (?, ?, ?, ?, ?)",
@@ -308,14 +319,25 @@ class AiGuard:
             (anzahl,) = cur.execute(
                 "SELECT COUNT(*) FROM aiguard_flags WHERE user_id=?", (user_id,)
             ).fetchone()
-            gesperrt = int(anzahl) >= NEEDED
+            erreicht = int(anzahl) >= NEEDED
+            gesperrt = erreicht and enforce
             if gesperrt:
+                grund = f"{int(anzahl)} Anhaltspunkte für Missbrauch (zuletzt: {kind})"
                 cur.execute(
                     "INSERT INTO aiguard_bans (subject, at, reason, by) VALUES (?, ?, ?, ?) "
                     "ON CONFLICT(subject) DO NOTHING",
-                    (f"user:{user_id}", time.time(),
-                     f"Ai-guard: {NEEDED} Anhaltspunkte für Missbrauch", "ai-guard"),
+                    (f"user:{user_id}", time.time(), "Ai-guard: " + grund, "ai-guard"),
                 )
+        # Ins Terminal (seit 9.5.17): bei Pro/Normal der Grund der Sperre, bei
+        # Ultra nur eine Warnung.
+        if gesperrt:
+            LOG.warning("Ai-guard: Konto %s gesperrt — %s", user_id, kind)
+            print(f"[Ai-guard] Konto {user_id} gesperrt — Grund: {kind}", flush=True)
+        elif erreicht and not enforce and neu:
+            LOG.warning("Ai-guard: Ultra-Konto %s auffällig (%d) — nur Warnung, kein Bann",
+                        user_id, int(anzahl))
+            print(f"[Ai-guard] Ultra-Konto {user_id} auffällig ({int(anzahl)} Anhaltspunkte, "
+                  f"zuletzt: {kind}) — nur Warnung, kein Bann.", flush=True)
         return gesperrt
 
     def flags(self, user_id: str) -> list[Flag]:
@@ -439,5 +461,6 @@ def check_message(
     urteil = classify(text, settings, context=context, ask=ask)
     if not urteil or not urteil[0]:
         return False, ""
-    gesperrt = guard.note(user_id, urteil[1], detail=urteil[1], chat=chat)
+    darf_bannen = not bool(getattr(account, "ultra", False))
+    gesperrt = guard.note(user_id, urteil[1], detail=urteil[1], chat=chat, enforce=darf_bannen)
     return (True, BANNED_MESSAGE) if gesperrt else (False, "")

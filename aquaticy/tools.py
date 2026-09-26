@@ -987,6 +987,8 @@ WORK_TOOLS: dict[str, str] = {
     "web_search": "suche", "search_news": "suche", "local_places": "suche",
     "find_profiles": "suche", "weather": "suche", "github": "suche",
     "fetch_page": "seite", "inspect_public_visual": "seite", "read_feeds": "seite",
+    "news_tagesschau": "suche", "wikipedia": "suche", "currency": "suche",
+    "holidays": "suche",
     "vm_run": "werkstatt", "blender_run": "werkstatt",
     "vm_write": "datei", "vm_read": "datei", "vm_files": "datei",
     "desktop_look": "desktop", "desktop_click": "desktop", "desktop_type": "desktop",
@@ -1000,6 +1002,7 @@ WORK_TOOLS: dict[str, str] = {
 UNTRUSTED_SOURCES = frozenset({
     "web_search", "search_news", "fetch_page", "inspect_public_visual", "find_profiles",
     "local_places", "github", "weather", "read_feeds", "mail_search", "mail_read",
+    "news_tagesschau", "wikipedia", "currency", "holidays",
     "calendar_events", "desktop_look", "desktop_windows", "research_subtasks",
     # Seit 9.5.16: was in der Werkstatt ausgegeben wird (im User mode mit
     # Internet: curl, heruntergeladene Dateien), und Namen/Zustaende aus Home
@@ -1289,6 +1292,91 @@ FEEDS_SCHEMA: dict[str, Any] = {
 }
 
 
+TAGESSCHAU_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "news_tagesschau",
+        "description": (
+            "Aktuelle Meldungen der Tagesschau. Ohne query: die neuesten, optional nach "
+            "topic (inland, ausland, wirtschaft, sport, wissen, investigativ). Mit query: "
+            "Suche in den Meldungen. Fuer 'was ist heute passiert', 'Nachrichten zu ...'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string"},
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "description": "Hoechstens 20, Standard 10."},
+            },
+        },
+    },
+}
+
+WIKIPEDIA_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "wikipedia",
+        "description": (
+            "Schlaegt einen Begriff in der Wikipedia nach und gibt die Kurzfassung des "
+            "besten Artikels samt Link. Nimm das fuer Definitionen, Personen des oeffentlichen "
+            "Lebens, Orte, Geschichte -- schneller als eine Websuche."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+}
+
+CURRENCY_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "currency",
+        "description": (
+            "Rechnet Waehrungen mit den Tageskursen der EZB um. base und to als "
+            "dreistellige Codes (EUR, USD, CHF, GBP ...); to darf mehrere enthalten "
+            "('USD,GBP'). Ohne to: alle Kurse zur Basis."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "amount": {"type": "number"},
+                "base": {"type": "string"},
+                "to": {"type": "string"},
+            },
+            "required": ["base"],
+        },
+    },
+}
+
+HOLIDAYS_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "holidays",
+        "description": (
+            "Gesetzliche Feiertage eines Landes (country als Code, z.B. DE) fuer ein Jahr. "
+            "region = Bundesland-Code (z.B. BY, NW, HB) zeigt nur die dort geltenden."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "country": {"type": "string"},
+                "year": {"type": "integer"},
+                "region": {"type": "string"},
+            },
+        },
+    },
+}
+
+#: Werkzeugname -> Add-on, zu dem es gehoert.
+ADDON_TOOLS: dict[str, str] = {
+    "github": "github", "weather": "wetter", "read_feeds": "feeds",
+    "news_tagesschau": "nachrichten", "wikipedia": "wikipedia",
+    "currency": "waehrung", "holidays": "feiertage",
+}
+
+
 def addon_schemas_for(settings: Any, pro: bool = True) -> list[dict[str, Any]]:
     """Die Werkzeuge der eingeschalteten Add-ons, die ohne Werkstatt auskommen."""
     from aquaticy import addons
@@ -1303,6 +1391,10 @@ def addon_schemas_for(settings: Any, pro: bool = True) -> list[dict[str, Any]]:
         schemas.append(WEATHER_SCHEMA)
     if "feeds" in aktiv and addons.feeds_of(settings):
         schemas.append(FEEDS_SCHEMA)
+    for addon_id, schema in (("nachrichten", TAGESSCHAU_SCHEMA), ("wikipedia", WIKIPEDIA_SCHEMA),
+                             ("waehrung", CURRENCY_SCHEMA), ("feiertage", HOLIDAYS_SCHEMA)):
+        if addon_id in aktiv:
+            schemas.append(schema)
     return schemas
 
 
@@ -2413,7 +2505,7 @@ class Toolbox:
         """Die Werkzeuge der Add-ons. Ausgeschaltet heisst: gibt es nicht."""
         from aquaticy import addons
 
-        erforderlich = {"github": "github", "weather": "wetter", "read_feeds": "feeds"}[name]
+        erforderlich = ADDON_TOOLS[name]
         if not addons.active(self.settings, erforderlich):
             return {"error": (
                 f"Das Add-on '{addons.CATALOG[erforderlich].name}' ist nicht installiert oder "
@@ -2445,6 +2537,29 @@ class Toolbox:
                         "Ort eingetragen (Einstellungen -> Ort)."
                     )}
             return addons.weather(ort, arguments.get("days") or 3)
+        if name == "news_tagesschau":
+            try:
+                gewuenscht = int(str(arguments.get("limit") or rechte["menge"]))
+            except ValueError:
+                gewuenscht = int(rechte["menge"])
+            return addons.news(str(arguments.get("topic") or ""),
+                               str(arguments.get("query") or ""),
+                               max(1, min(gewuenscht, int(rechte["menge"]))))
+        if name == "wikipedia":
+            return addons.wikipedia(str(arguments.get("query") or ""), rechte["sprache"])
+        if name == "currency":
+            basis = str(arguments.get("base") or "EUR")
+            ziel = str(arguments.get("to") or "")
+            if rechte["waehrungen"] == "euro" and "EUR" not in (basis + "," + ziel).upper():
+                return {"error": "Der Nutzer hat den Währungsrechner auf 'Nur von oder nach "
+                                 "Euro' gestellt -- rechne über EUR."}
+            return addons.currency(arguments.get("amount"), basis, ziel)
+        if name == "holidays":
+            land = str(arguments.get("country") or "DE")
+            if rechte["land"] == "de" and land.strip().upper() != "DE":
+                return {"error": "Der Nutzer hat die Feiertage auf 'Nur Deutschland' gestellt."}
+            return addons.holidays(land, arguments.get("year"),
+                                   str(arguments.get("region") or ""))
         grenze = int(rechte["menge"])
         try:
             gewuenscht = int(str(arguments.get("limit") or 15))
@@ -2733,7 +2848,7 @@ class Toolbox:
             return self.create_image(
                 str(arguments.get("prompt") or ""), str(arguments.get("format") or "quadrat")
             )
-        if name in ("github", "weather", "read_feeds"):
+        if name in ADDON_TOOLS:
             return self._addon_call(name, arguments)
         if name == "blender_run":
             return self.blender_run(

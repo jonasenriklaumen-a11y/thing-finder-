@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from aquaticy.uistate import (
+    DESIGN_KEYS,
     EFFORTS,
     FIELDS,
     MODES,
@@ -18,9 +19,28 @@ from aquaticy.uistate import (
     THEMES,
     UIState,
     clean,
+    clean_design,
     clean_flag,
     defaults,
 )
+
+
+def test_the_own_design_only_keeps_real_colours() -> None:
+    gut = clean_design({"accent": "#3D7D55", "bg": "#ffffff", "sidebar": "#123abc"})
+    assert gut == {"accent": "#3d7d55", "bg": "#ffffff", "sidebar": "#123abc"}
+    # Unfug faellt weg -- nur ein sauberes #rrggbb bleibt stehen.
+    schlecht = clean_design({"accent": "rot", "bg": "#fff", "sidebar": "javascript:1"})
+    assert schlecht == {"accent": "", "bg": "", "sidebar": ""}
+    assert clean_design("kein dict") == {key: "" for key in DESIGN_KEYS}
+
+
+def test_the_design_rides_along_in_the_state() -> None:
+    stand = clean({"palette": "custom", "design": {"accent": "#0000ff"}})
+    assert stand["palette"] == "custom"
+    assert stand["design"]["accent"] == "#0000ff"
+    assert stand["design"]["bg"] == "" and stand["design"]["sidebar"] == ""
+    # Standard hat ein leeres eigenes Design.
+    assert defaults()["design"] == {key: "" for key in DESIGN_KEYS}
 
 
 def test_the_default_state_is_complete() -> None:

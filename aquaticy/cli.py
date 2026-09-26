@@ -499,7 +499,7 @@ def list_users_command() -> None:
         table.add_row(
             account.username,
             account.email,
-            "Pro" if account.pro else "Normal",
+            account.plan_label,
             adresse,
             sitzung,
             woche,
@@ -585,6 +585,15 @@ def pro_code_command() -> None:
 
     settings = get_settings()
     console.print(pro_code_for(settings.data_dir))
+
+
+@app.command("ultra-code")
+def ultra_code_command() -> None:
+    """Zeigt den geheimen 14-stelligen Code fuer neue Ultra-Konten."""
+    from aquaticy.auth import ultra_code_for
+
+    settings = get_settings()
+    console.print(ultra_code_for(settings.data_dir))
 
 
 # ---------------------------------------------------------------------------

@@ -378,9 +378,11 @@ def test_a_normal_account_keeps_the_guard_whatever_its_file_says(tmp_path: Path)
     assert _konto(tmp_path, "normal", "AQUATICY_LEGAL_GUARD=false").legal_guard is True
 
 
-def test_a_pro_account_may_switch_it_off(tmp_path: Path) -> None:
-    assert _konto(tmp_path, "pro", "AQUATICY_LEGAL_GUARD=false").legal_guard is False
-    assert _konto(tmp_path / "b", "pro", "AQUATICY_LEGAL_GUARD=an").legal_guard is True
+def test_only_an_ultra_account_may_switch_it_off(tmp_path: Path) -> None:
+    # Seit 9.5.17 hält auch Pro die Leitplanken -- abschalten kann nur Ultra.
+    assert _konto(tmp_path, "pro", "AQUATICY_LEGAL_GUARD=false").legal_guard is True
+    assert _konto(tmp_path / "u", "ultra", "AQUATICY_LEGAL_GUARD=false").legal_guard is False
+    assert _konto(tmp_path / "u2", "ultra", "AQUATICY_LEGAL_GUARD=an").legal_guard is True
 
 
 @pytest.fixture
@@ -397,15 +399,20 @@ def sitzung(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> web.ChatSession:
     return frisch
 
 
-def test_only_pro_may_save_it_off(sitzung: web.ChatSession, tmp_path: Path) -> None:
+def test_only_ultra_may_save_it_off(sitzung: web.ChatSession, tmp_path: Path) -> None:
     sitzung.account = web.Account("n", "n@example.org", "normal", 0)
-    with pytest.raises(ValueError, match="Pro-Konto"):
+    with pytest.raises(ValueError, match="Ultra-Konto"):
         web.save_values({"AQUATICY_LEGAL_GUARD": "false"})
     assert not (tmp_path / ".env").exists(), "abgelehnt heisst: nichts geschrieben"
     # An bleibt fuer jeden erlaubt.
     web.save_values({"AQUATICY_LEGAL_GUARD": "true"})
 
+    # Seit 9.5.17 darf auch Pro es nicht mehr abschalten.
     sitzung.account = web.Account("p", "p@example.org", "pro", 0)
+    with pytest.raises(ValueError, match="Ultra-Konto"):
+        web.save_values({"AQUATICY_LEGAL_GUARD": "aus"})
+
+    sitzung.account = web.Account("u", "u@example.org", "ultra", 0)
     web.save_values({"AQUATICY_LEGAL_GUARD": "aus"})
     assert "AQUATICY_LEGAL_GUARD=false" in (tmp_path / ".env").read_text()
 

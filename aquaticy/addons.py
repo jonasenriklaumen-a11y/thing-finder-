@@ -39,7 +39,7 @@ Was wohin kommt:
   offiziellen Servern, geprueft gegen die veroeffentlichte Pruefsumme
   (docker/desktop/aquaticy-addons).
 
-Werkstatt-Add-ons brauchen den User mode -- und damit ein Pro-Konto. Aus dem
+Werkstatt-Add-ons brauchen den User mode -- und damit ein Ultra-Konto. Aus dem
 Chat heraus laesst sich keins installieren, einschalten oder anmelden.
 """
 
@@ -168,6 +168,41 @@ CATALOG: dict[str, AddOn] = {
             hinweis="Abgerufen wird höflich: robots.txt zählt, eine Anfrage je Sekunde und "
             "Server, ehrliche Kennung.",
         ),
+        # -- Neu in 9.5.17: vier kostenlose Dienste ohne Schlüssel -------------
+        AddOn(
+            "nachrichten", "Tagesschau", "🗞️", "Dienste",
+            "Die aktuellen Meldungen der Tagesschau — nach Thema (Inland, Ausland, "
+            "Wirtschaft, Sport …) oder als Suche. Ohne Anmeldung.",
+            login="keine", vorschlag=True,
+            anmelden="Keine Anmeldung nötig.",
+            hinweis="Nur für den privaten Gebrauch. Die Tagesschau erlaubt höchstens 60 "
+            "Abrufe pro Stunde — Aquaticy hält sich daran.",
+        ),
+        AddOn(
+            "wikipedia", "Wikipedia", "📚", "Dienste",
+            "Schnell nachschlagen: Artikel finden und die Kurzfassung lesen — ohne Umweg "
+            "über eine Websuche.",
+            login="keine", vorschlag=True,
+            anmelden="Keine Anmeldung nötig.",
+            hinweis="Nur dein Suchbegriff geht an Wikipedia. Texte stehen unter CC BY-SA.",
+        ),
+        AddOn(
+            "waehrung", "Währungsrechner", "💱", "Dienste",
+            "Tageskurse der Europäischen Zentralbank für gut 30 Währungen — umrechnen, "
+            "ohne zu suchen.",
+            login="keine", vorschlag=True,
+            anmelden="Keine Anmeldung nötig.",
+            hinweis="Die Kurse kommen einmal pro Werktag gegen 16 Uhr (Frankfurter, "
+            "Referenzkurse der EZB). Für Überweisungen gilt der Kurs deiner Bank.",
+        ),
+        AddOn(
+            "feiertage", "Feiertage", "📅", "Dienste",
+            "Gesetzliche Feiertage für Deutschland und über 100 andere Länder — auch, "
+            "welche nur in einzelnen Bundesländern gelten.",
+            login="keine", vorschlag=True,
+            anmelden="Keine Anmeldung nötig.",
+            hinweis="Daten von Nager.Date. Nur Jahr und Land gehen raus.",
+        ),
     )
 }
 
@@ -218,6 +253,19 @@ RIGHTS: dict[str, tuple[Recht, ...]] = {
     ),
     "feeds": (
         Recht("menge", "Einträge je Abruf", (("10", "10"), ("20", "20"), ("40", "40")), "20"),
+    ),
+    "nachrichten": (
+        Recht("menge", "Meldungen je Abruf", (("5", "5"), ("10", "10"), ("20", "20")), "10"),
+    ),
+    "wikipedia": (
+        Recht("sprache", "Sprache", (("de", "Deutsch"), ("en", "Englisch")), "de"),
+    ),
+    "waehrung": (
+        Recht("waehrungen", "Welche Währungen",
+              (("alle", "Alle"), ("euro", "Nur von oder nach Euro")), "alle"),
+    ),
+    "feiertage": (
+        Recht("land", "Länder", (("alle", "Jedes Land"), ("de", "Nur Deutschland")), "alle"),
     ),
 }
 
@@ -324,6 +372,10 @@ GITHUB_TOKEN_KEY = "AQUATICY_GITHUB_TOKEN"
 GITHUB_API = "https://api.github.com"
 OPEN_METEO_GEO = "https://geocoding-api.open-meteo.com/v1/search"
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+TAGESSCHAU = "https://www.tagesschau.de/api2u"
+WIKIPEDIA = "https://{sprache}.wikipedia.org"
+FRANKFURTER = "https://api.frankfurter.dev/v1/latest"
+NAGER = "https://date.nager.at/api/v3/PublicHolidays/{jahr}/{land}"
 
 STATE_FILE = "addons.json"
 _locks: dict[str, threading.Lock] = {}
@@ -415,7 +467,7 @@ def usable(addon: AddOn, settings: Any, pro: bool) -> tuple[bool, str]:
     if not addon.werkstatt:
         return True, ""
     if not pro:
-        return False, "Braucht den User mode — und der gehört zu Pro."
+        return False, "Braucht den User mode — und der gehört zu Ultra."
     if not getattr(settings, "vm_user_mode", False):
         return False, "Wirkt erst mit eingeschaltetem User mode (Einstellungen → Werkstatt)."
     return True, ""
@@ -548,7 +600,7 @@ def installing(settings: Any, addon_id: str) -> bool:
 def _check_allowed(addon: AddOn, settings: Any, pro: bool) -> None:
     if addon.werkstatt and not pro:
         raise AddOnError(
-            f"{addon.name} läuft in der Werkstatt im User mode — das gehört zu Pro."
+            f"{addon.name} läuft in der Werkstatt im User mode — das gehört zu Ultra."
         )
 
 
@@ -1206,6 +1258,210 @@ def weather(place: str, days: Any = 3, *, client: httpx.Client | None = None) ->
         "tage": tage_liste,
         "quelle": "Open-Meteo (open-meteo.com), Daten u. a. vom DWD — CC BY 4.0",
     }
+
+
+# -- Dienste ohne Schluessel (9.5.17) -------------------------------------------
+#: Die Tagesschau erlaubt hoechstens 60 Abrufe pro Stunde -- fuer den ganzen
+#: Server zusammen, nicht je Konto. Hier stehen die Zeitpunkte der letzten.
+TAGESSCHAU_PER_HOUR = 60
+_tagesschau_abrufe: list[float] = []
+_tagesschau_lock = threading.Lock()
+
+#: Die Themen der Tagesschau, wie der Nutzer sie nennt -> wie die API sie nennt.
+RESSORTS = {
+    "": "", "alle": "", "inland": "inland", "ausland": "ausland",
+    "wirtschaft": "wirtschaft", "sport": "sport", "video": "video",
+    "investigativ": "investigativ", "wissen": "wissen",
+}
+
+
+def _tagesschau_erlaubt(jetzt: float | None = None) -> bool:
+    """Zaehlt einen Abruf -- oder sagt, dass die Stunde voll ist."""
+    jetzt = time.time() if jetzt is None else jetzt
+    with _tagesschau_lock:
+        _tagesschau_abrufe[:] = [t for t in _tagesschau_abrufe if jetzt - t < 3600]
+        if len(_tagesschau_abrufe) >= TAGESSCHAU_PER_HOUR:
+            return False
+        _tagesschau_abrufe.append(jetzt)
+        return True
+
+
+def _eigener_client(client: httpx.Client | None) -> tuple[httpx.Client, bool]:
+    if client is not None:
+        return client, False
+    return httpx.Client(timeout=15, headers={"User-Agent": user_agent()}), True
+
+
+def news(topic: str = "", query: str = "", limit: Any = 10, *,
+         client: httpx.Client | None = None) -> dict[str, Any]:
+    """Meldungen der Tagesschau: nach Thema oder als Suche."""
+    try:
+        menge = max(1, min(20, int(str(limit or 10))))
+    except ValueError:
+        menge = 10
+    thema = str(topic or "").strip().lower()
+    if thema not in RESSORTS:
+        return {"error": "Unbekanntes Thema. Moeglich: " + ", ".join(k for k in RESSORTS if k)}
+    suche = " ".join(str(query or "").split())[:120]
+    if not _tagesschau_erlaubt():
+        return {"error": "Die Tagesschau erlaubt 60 Abrufe pro Stunde -- die sind gerade "
+                         "aufgebraucht. In ein paar Minuten geht es wieder."}
+    client, eigener = _eigener_client(client)
+    try:
+        _takt("tagesschau.de")
+        if suche:
+            antwort = client.get(f"{TAGESSCHAU}/search/",
+                                 params={"searchText": suche, "pageSize": menge})
+        else:
+            antwort = client.get(f"{TAGESSCHAU}/news/",
+                                 params={"ressort": RESSORTS[thema]} if RESSORTS[thema] else {})
+        antwort.raise_for_status()
+        daten = antwort.json() or {}
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"error": f"Tagesschau nicht erreichbar ({type(exc).__name__})."}
+    finally:
+        if eigener:
+            client.close()
+    roh = daten.get("searchResults") if suche else daten.get("news")
+    meldungen = []
+    for eintrag in (roh or [])[:menge]:
+        if not isinstance(eintrag, dict):
+            continue
+        meldungen.append({
+            "titel": _kurz(eintrag.get("title"), 200),
+            "oberzeile": _kurz(eintrag.get("topline"), 120),
+            "anriss": _kurz(eintrag.get("firstSentence"), 400),
+            "datum": eintrag.get("date"),
+            "thema": eintrag.get("ressort"),
+            "link": eintrag.get("shareURL") or eintrag.get("detailsweb"),
+        })
+    return {"meldungen": meldungen, "thema": thema or "alle", "suche": suche,
+            "quelle": "tagesschau.de (ARD-aktuell) — nur privater Gebrauch"}
+
+
+def wikipedia(query: str, lang: str = "de", *,
+              client: httpx.Client | None = None) -> dict[str, Any]:
+    """Sucht einen Artikel und gibt die Kurzfassung des besten Treffers."""
+    begriff = " ".join(str(query or "").split())[:200]
+    if not begriff:
+        return {"error": "Wonach nachschlagen? (query)"}
+    sprache = lang if lang in ("de", "en") else "de"
+    basis = WIKIPEDIA.format(sprache=sprache)
+    client, eigener = _eigener_client(client)
+    try:
+        _takt("wikipedia.org")
+        suche = client.get(f"{basis}/w/rest.php/v1/search/page",
+                           params={"q": begriff, "limit": 5})
+        suche.raise_for_status()
+        seiten = (suche.json() or {}).get("pages") or []
+        if not seiten:
+            return {"error": f"Zu '{begriff}' gibt es keinen Wikipedia-Artikel ({sprache})."}
+        schluessel = str(seiten[0].get("key") or seiten[0].get("title") or "")
+        _takt("wikipedia.org")
+        zusammenfassung = client.get(f"{basis}/api/rest_v1/page/summary/"
+                                     + quote(schluessel, safe=""))
+        zusammenfassung.raise_for_status()
+        artikel = zusammenfassung.json() or {}
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"error": f"Wikipedia nicht erreichbar ({type(exc).__name__})."}
+    finally:
+        if eigener:
+            client.close()
+    link = ((artikel.get("content_urls") or {}).get("desktop") or {}).get("page")
+    return {
+        "titel": artikel.get("title") or schluessel,
+        "beschreibung": _kurz(artikel.get("description"), 200),
+        "zusammenfassung": _kurz(artikel.get("extract"), 2500),
+        "link": link or f"{basis}/wiki/{quote(schluessel)}",
+        "weitere": [str(s.get("title")) for s in seiten[1:5] if s.get("title")],
+        "quelle": f"Wikipedia ({sprache}) — CC BY-SA 4.0",
+    }
+
+
+_WAEHRUNG = re.compile(r"^[A-Z]{3}$")
+
+
+def currency(amount: Any = 1, base: str = "EUR", to: str = "",
+             *, client: httpx.Client | None = None) -> dict[str, Any]:
+    """Rechnet mit den Tageskursen der EZB (ueber Frankfurter) um."""
+    von = str(base or "EUR").strip().upper()
+    ziele = [z.strip().upper() for z in str(to or "").replace(";", ",").split(",") if z.strip()]
+    if not _WAEHRUNG.match(von) or any(not _WAEHRUNG.match(z) for z in ziele):
+        return {"error": "Waehrungen bitte als dreistelligen Code, z.B. EUR, USD, CHF."}
+    try:
+        betrag = float(str(amount if amount not in (None, "") else 1).replace(",", "."))
+    except ValueError:
+        return {"error": "Der Betrag ist keine Zahl."}
+    if not 0 < betrag < 1e12:
+        return {"error": "Der Betrag muss groesser als 0 sein."}
+    params: dict[str, Any] = {"base": von}
+    if ziele:
+        params["symbols"] = ",".join(ziele[:10])
+    client, eigener = _eigener_client(client)
+    try:
+        _takt("frankfurter.dev")
+        antwort = client.get(FRANKFURTER, params=params)
+        if antwort.status_code == 404:
+            return {"error": f"Die EZB fuehrt keinen Kurs fuer {von} oder {', '.join(ziele)}."}
+        antwort.raise_for_status()
+        daten = antwort.json() or {}
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"error": f"Kurse nicht erreichbar ({type(exc).__name__})."}
+    finally:
+        if eigener:
+            client.close()
+    kurse = daten.get("rates") or {}
+    return {
+        "betrag": betrag, "von": von, "stand": daten.get("date"),
+        "ergebnis": {code: round(betrag * float(kurs), 4) for code, kurs in kurse.items()
+                     if isinstance(kurs, (int, float))},
+        "kurs": {code: kurs for code, kurs in kurse.items()},
+        "quelle": "Referenzkurse der EZB über frankfurter.dev",
+    }
+
+
+def holidays(country: str = "DE", year: Any = None, region: str = "",
+             *, client: httpx.Client | None = None) -> dict[str, Any]:
+    """Gesetzliche Feiertage eines Landes (und optional eines Bundeslandes)."""
+    land = str(country or "DE").strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", land):
+        return {"error": "Land bitte als zweistelligen Code, z.B. DE, AT, CH."}
+    try:
+        jahr = int(str(year)) if year not in (None, "") else time.localtime().tm_year
+    except ValueError:
+        return {"error": "Das Jahr ist keine Zahl."}
+    if not 1990 <= jahr <= 2100:
+        return {"error": "Nur Jahre von 1990 bis 2100."}
+    bundesland = str(region or "").strip().upper()
+    if bundesland and not bundesland.startswith(f"{land}-"):
+        bundesland = f"{land}-{bundesland}"
+    client, eigener = _eigener_client(client)
+    try:
+        _takt("date.nager.at")
+        antwort = client.get(NAGER.format(jahr=jahr, land=land))
+        if antwort.status_code == 404:
+            return {"error": f"Fuer '{land}' kennt Nager.Date keine Feiertage."}
+        antwort.raise_for_status()
+        daten = antwort.json() or []
+    except (httpx.HTTPError, ValueError) as exc:
+        return {"error": f"Feiertage nicht erreichbar ({type(exc).__name__})."}
+    finally:
+        if eigener:
+            client.close()
+    tage = []
+    for tag in daten if isinstance(daten, list) else []:
+        if not isinstance(tag, dict):
+            continue
+        gebiete = tag.get("counties") or []
+        if bundesland and not tag.get("global") and bundesland not in gebiete:
+            continue
+        tage.append({
+            "datum": tag.get("date"), "name": tag.get("localName") or tag.get("name"),
+            "ueberall": bool(tag.get("global")),
+            "nur_in": [] if tag.get("global") else list(gebiete),
+        })
+    return {"land": land, "jahr": jahr, "bundesland": bundesland, "feiertage": tage,
+            "quelle": "Nager.Date (date.nager.at)"}
 
 
 # -- RSS-Feeds -----------------------------------------------------------------

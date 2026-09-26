@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from aquaticy.config import Settings
 
 #: Stand der Regeln. Aendert sich eine Regel, gilt kein altes Urteil mehr.
-RULES_VERSION = "2026-09-23"
+RULES_VERSION = "2026-09-26"
 
 #: Der Name des Schalters in der `.env`.
 SETTING_KEY = "AQUATICY_LEGAL_GUARD"
@@ -93,15 +93,22 @@ RULES: tuple[Rule, ...] = (
         "persoenlichkeit",
         "Persönlichkeitsrecht und informationelle Selbstbestimmung",
         "Art. 2 Abs. 1 i. V. m. Art. 1 Abs. 1 GG, § 823 Abs. 1 BGB",
-        "Keine Dossiers über Privatpersonen (verstreute Angaben zu einem Menschen "
-        "zusammentragen) und keine Ermittlung ihrer Wohnanschrift, privaten "
-        "Telefonnummer, ihres Aufenthaltsorts oder privater Lebensumstände. Personen "
-        "des öffentlichen Lebens nur in ihrer öffentlichen Rolle.",
-        "Wenn du jemanden erreichen willst, geht das über öffentliche Kontaktwege wie "
-        "Impressum, Firmen- oder Vereinsseite — und bei berechtigtem Interesse über "
-        "eine einfache Melderegisterauskunft beim Einwohnermeldeamt.",
-        "keine Dossiers über Privatpersonen, keine Ermittlung ihrer Anschrift, Nummer, "
-        "Aufenthaltsorte oder privaten Lebensumstände",
+        "Nach einer Person zu suchen ist in Ordnung: öffentlich zugängliche Angaben "
+        "zusammentragen — was jemand selbst veröffentlicht hat, berufliche Rolle, "
+        "Firmen- oder Vereinsseite, öffentliche Profile, ein Impressum, veröffentlichte "
+        "Kontaktwege. Nicht in Ordnung ist das heimliche Ausforschen des Privaten: die "
+        "private Wohnanschrift oder Handynummer ermitteln, den aktuellen Aufenthaltsort "
+        "aufspüren, private Lebensumstände (Gesundheit, Beziehungen, Finanzen) "
+        "nachverfolgen oder ein überwachungsartiges Dossier anlegen, das genau solche "
+        "privaten Details zusammenzieht. Personen des öffentlichen Lebens in ihrer "
+        "öffentlichen Rolle sind ohnehin frei recherchierbar.",
+        "Die öffentlichen Angaben trage ich dir gern zusammen. Willst du jemanden "
+        "privat erreichen, geht das über öffentliche Kontaktwege wie Impressum, Firmen- "
+        "oder Vereinsseite — und bei berechtigtem Interesse über eine einfache "
+        "Melderegisterauskunft beim Einwohnermeldeamt.",
+        "eine Person darf man öffentlich recherchieren; nicht aber ihre private "
+        "Anschrift, Handynummer, ihren aktuellen Aufenthaltsort oder private "
+        "Lebensumstände ausforschen oder ein überwachungsartiges Dossier anlegen",
     ),
     Rule(
         "gleichheit",

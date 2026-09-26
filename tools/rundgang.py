@@ -314,21 +314,22 @@ def anmelden(pg: Any, port: int) -> None:
     """Legt ein Konto an und geht durch die Tuer.
 
     Seit der Mehrbenutzer-Version steht vor der Oberflaeche eine Einwilligung
-    und eine Anmeldung. Der Rundgang legt sich dafuer ein Pro-Konto an: nur
-    damit ist wirklich jeder Teil der Oberflaeche zu sehen, den er abgeht.
+    und eine Anmeldung. Der Rundgang legt sich dafuer ein Ultra-Konto an: nur
+    damit ist wirklich jeder Teil der Oberflaeche zu sehen, den er abgeht
+    (seit 9.5.17 gehoeren Netz-Features und User mode zu Ultra).
     """
-    from aquaticy.auth import pro_code_for
+    from aquaticy.auth import ultra_code_for
     from aquaticy.config import get_settings
 
     pg.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
     pg.wait_for_selector("#consent-card:not([hidden])", timeout=10_000)
     pg.click("#consent-yes")
     pg.wait_for_selector("#login-card:not([hidden])", timeout=10_000)
-    pg.check('input[name="plan"][value="pro"]')
+    pg.check('input[name="plan"][value="ultra"]')
     pg.fill("#auth-username", "Rundgang")
     pg.fill("#auth-email", "rundgang@example.org")
     pg.fill("#auth-password", "rundgang-geheim")
-    pg.fill("#auth-pro-code", pro_code_for(get_settings().data_dir))
+    pg.fill("#auth-pro-code", ultra_code_for(get_settings().data_dir))
     pg.check("#auth-terms")
     pg.click("#auth-submit")
     # Nach dem Anlegen laedt die Seite selbst neu; dann ist die Tuer zu.
@@ -391,11 +392,24 @@ def normales_konto(browser: Any, port: int, log: Protokoll, fehler: list[str]) -
                f"im Konto steht Prozent: {pg.inner_text('#account-tokens')!r}")
     log.pruefe(not pg.inner_text("#zaehler").strip(),
                "Tokenzahlen sieht ein normales Konto nicht")
-    # 9.5.14 Seashell: eigene API-Schluessel -- nur dieses Konto, nie im Browser.
-    pg.click('#secnav button:has-text("API-Schlüssel")')
-    pg.wait_for_timeout(700)
+    # 9.5.17: "Eigene Modelle" -- erst da, wenn man oben selbst etwas hinzufuegt.
+    # Die Schluessel bleiben dabei nur bei diesem Konto und nie im Browser.
+    log.pruefe(pg.is_hidden("#sec-schluessel"),
+               "Eigene Modelle ist nicht da, solange nichts Eigenes eingetragen ist")
+    log.pruefe(pg.locator('#secnav button[data-section="sec-schluessel"]').is_hidden(),
+               "und hat oben auch keine Sprungmarke")
+    pg.click('#secnav button:has-text("Modell")')
+    pg.wait_for_timeout(500)
+    pg.select_option("#provider", "mistral")
+    pg.wait_for_timeout(600)
+    log.pruefe(pg.is_visible("#sec-schluessel"),
+               "nach der Wahl eines Anbieters erscheint „Eigene Modelle“")
+    sichtbar = pg.eval_on_selector_all(
+        "#keys .key-row", "es => es.filter(e => !e.hidden).map(e => e.dataset.name)")
+    log.pruefe(sichtbar == ["MISTRAL_API_KEY"], f"nur der passende Schlüssel steht da: {sichtbar}")
+    pg.locator("#sec-schluessel").scroll_into_view_if_needed()
     log.pruefe(pg.inner_text("#keys-summary") == "Du hast keinen API-Schlüssel hinzugefügt.",
-               "API-Schlüssel: darunter steht, dass noch keiner hinterlegt ist")
+               "darunter steht, dass noch keiner hinterlegt ist")
     log.pruefe("nicht in dein Limit" in pg.inner_text("#keys-quota"),
                "und dass eigene Schlüssel nicht ins Limit zählen")
     zeile = pg.locator('#keys .key-row[data-name="MISTRAL_API_KEY"]')
@@ -425,7 +439,7 @@ def normales_konto(browser: Any, port: int, log: Protokoll, fehler: list[str]) -
     pg.wait_for_selector("#guardbox.open", state="visible")
     pg.wait_for_timeout(300)
     log.pruefe(
-        "nicht für das normale Konto verfügbar" in pg.inner_text("#guard-title"),
+        "nur mit einem Ultra-Konto" in pg.inner_text("#guard-title"),
         f"beim Draufdruecken kommt der Hinweis: {pg.inner_text('#guard-title')[:60]!r}",
     )
     log.pruefe(not pg.is_visible("#guard-cancel"), "dort gibt es nichts abzubrechen")
@@ -447,7 +461,7 @@ def normales_konto(browser: Any, port: int, log: Protokoll, fehler: list[str]) -
         }"""
     )
     log.pruefe(
-        not antwort.get("ok") and "Pro" in str(antwort.get("error", "")),
+        not antwort.get("ok") and "Ultra" in str(antwort.get("error", "")),
         f"am Formular vorbei lehnt der Server ab: {str(antwort.get('error'))[:60]!r}",
     )
     werte = pg.evaluate("async () => (await (await fetch('/api/config')).json()).values")
@@ -465,7 +479,7 @@ def normales_konto(browser: Any, port: int, log: Protokoll, fehler: list[str]) -
                "User mode: der Schalter ist aus und nicht ausgegraut")
     pg.click("#usermode")
     pg.wait_for_selector("#guardbox.open", state="visible")
-    log.pruefe("nicht für das normale Konto verfügbar" in pg.inner_text("#guard-title"),
+    log.pruefe("nur mit einem Ultra-Konto" in pg.inner_text("#guard-title"),
                "beim Draufdruecken kommt der Pro-Hinweis")
     pg.click("#guard-ok")
     pg.wait_for_selector("#guardbox", state="hidden")
@@ -482,7 +496,7 @@ def normales_konto(browser: Any, port: int, log: Protokoll, fehler: list[str]) -
           return await r.json();
         }"""
     )
-    log.pruefe(not antwort.get("ok") and "Pro" in str(antwort.get("error", "")),
+    log.pruefe(not antwort.get("ok") and "Ultra" in str(antwort.get("error", "")),
                "am Formular vorbei lehnt der Server eine eigene Adresse ab")
     antwort = pg.evaluate(
         """async () => {
@@ -492,14 +506,14 @@ def normales_konto(browser: Any, port: int, log: Protokoll, fehler: list[str]) -
           return await r.json();
         }"""
     )
-    log.pruefe(not antwort.get("ok") and "Pro" in str(antwort.get("error", "")),
+    log.pruefe(not antwort.get("ok") and "Ultra" in str(antwort.get("error", "")),
                "am Formular vorbei lehnt der Server den User mode ab")
     pg.click("#btn-addons")
     pg.wait_for_selector("#addon-list .addon", timeout=10_000)
     pg.wait_for_timeout(400)
     pg.locator('.addon[data-id="whatsapp"] button', has_text="Installieren").click()
     pg.wait_for_selector("#guardbox.open", state="visible")
-    log.pruefe("nicht für das normale Konto verfügbar" in pg.inner_text("#guard-title"),
+    log.pruefe("nur mit einem Ultra-Konto" in pg.inner_text("#guard-title"),
                "WhatsApp installieren: Hinweis statt Installation")
     pg.click("#guard-ok")
     pg.wait_for_selector("#guardbox", state="hidden")
@@ -511,7 +525,7 @@ def normales_konto(browser: Any, port: int, log: Protokoll, fehler: list[str]) -
           return await r.json();
         }"""
     )
-    log.pruefe(not antwort.get("ok") and "Pro" in str(antwort.get("error", "")),
+    log.pruefe(not antwort.get("ok") and "Ultra" in str(antwort.get("error", "")),
                "am Fenster vorbei lehnt der Server Werkstatt-Add-ons ab")
     pg.locator('.addon[data-id="feeds"] button', has_text="Installieren").click()
     pg.wait_for_selector('.addon[data-id="feeds"] textarea', timeout=10_000)
@@ -850,7 +864,7 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         log.pruefe(pg.is_visible("#recheck"), "Gegenprüfen gibt es auch hier")
         # Derselbe Schalter, andere Bedeutung -- und genau das steht dran.
         erklaerung = pg.inner_text('label[for="recheck"]')
-        log.pruefe("vier Prüfer" in erklaerung,
+        log.pruefe("Vier Prüfer" in erklaerung,
                    f"und es steht dran, was er hier heißt ({erklaerung[:60]!r})")
         log.pruefe("doppelt so lang" not in erklaerung,
                    "die Erklärung aus dem Standardmodus ist weg")
@@ -1290,8 +1304,8 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
             "der User mode steht bei der Werkstatt",
         )
         log.pruefe(not pg.is_checked("#usermode"), "und ist ab Werk aus")
-        log.pruefe("Vision-Modell" in pg.inner_text("#usermode-note"),
-                   "der Hinweis nennt, was er braucht")
+        log.pruefe("Bilder" in pg.inner_text("#usermode-note"),
+                   "der Hinweis nennt, was er braucht (ein Modell, das Bilder versteht)")
         # Dev settings: der Schalter fuer die Rechts-Leitplanken, nur mit Pro.
         log.pruefe(
             pg.locator('#secnav button:has-text("Dev settings")').count() == 1,
@@ -1347,34 +1361,81 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
         log.pruefe(not pg.is_visible("#overlay.open"), "das Fenster geht wieder zu")
 
     if dran("aussehen"):
-        log.abschnitt("8. Erscheinungsbild")
+        log.abschnitt("8. Design")
         pg.click("#btn-theme")
         pg.wait_for_selector("#themebox.open", state="visible")
-        karten = pg.locator("#palettes .pal").count()
-        log.pruefe(karten >= 8, f"{karten} Farbschemata zur Auswahl")
-        log.pruefe(pg.locator(".pal >> nth=0").inner_text().startswith("Standard"),
-                   "Standard steht vorn")
-        ids = pg.eval_on_selector_all(
-            "#palettes .pal", "es => es.map(e => e.dataset.palette)"
-        )
+        log.pruefe(pg.inner_text("#theme-title") == "Design", "das Fenster heißt Design")
+        namen = pg.eval_on_selector_all("#palettes .pal .pname", "es => es.map(e => e.textContent)")
+        log.pruefe(namen == ["Standard", "Schlicht", "Design selber erstellen"],
+                   f"nur Standard, Schlicht und der eigene Designer: {namen}")
+        # Standard und Schlicht, jeweils hell und dunkel: vier verschiedene Untergründe.
         farben = set()
         for modus in ("light", "dark"):
             pg.click(f'[data-tmode="{modus}"]')
             pg.wait_for_timeout(150)
-            for pid in ids:
+            for pid in ("", "mono"):
                 pg.click(f'.pal[data-palette="{pid}"]')
-                pg.wait_for_timeout(90)
+                pg.wait_for_timeout(120)
                 gesetzt = pg.get_attribute("html", "data-palette") or ""
                 if gesetzt != pid:
-                    log.pruefe(False, f"Schema {pid or 'standard'} wird nicht gesetzt")
+                    log.pruefe(False, f"Design {pid or 'standard'} wird nicht gesetzt")
                 farben.add(
                     pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
                 )
-        log.pruefe(len(farben) >= len(ids), f"{len(farben)} verschiedene Untergründe")
-        foto("08-aussehen")
+        log.pruefe(len(farben) == 4, f"{len(farben)} verschiedene Untergründe")
+        # Schlicht: hell weiß mit schwarzer Schrift, dunkel genau umgekehrt.
+        pg.click('[data-tmode="light"]')
+        pg.click('.pal[data-palette="mono"]')
+        pg.wait_for_timeout(400)
+        hell = pg.eval_on_selector("body", "e => [getComputedStyle(e).backgroundColor,"
+                                           " getComputedStyle(e).color]")
+        log.pruefe(hell == ["rgb(255, 255, 255)", "rgb(0, 0, 0)"],
+                   f"Schlicht hell: weiß mit schwarzer Schrift {hell}")
+        pg.click('[data-tmode="dark"]')
+        pg.wait_for_timeout(400)
+        dunkel = pg.eval_on_selector("body", "e => [getComputedStyle(e).backgroundColor,"
+                                             " getComputedStyle(e).color]")
+        log.pruefe(dunkel == ["rgb(0, 0, 0)", "rgb(255, 255, 255)"],
+                   f"Schlicht dunkel: genau umgekehrt {dunkel}")
+        # Der eigene Designer.
+        pg.click('[data-tmode="light"]')
+        pg.click('.pal[data-palette="custom"]')
+        pg.wait_for_selector("#designer:not([hidden])", timeout=5_000)
+        log.pruefe(True, "Design selber erstellen öffnet die Farbwahl")
+        pg.fill("#dz-accent", "#1e5bd6")
+        pg.fill("#dz-bg", "#ffffff")
+        pg.fill("#dz-sidebar", "#2b2b2b")
+        pg.wait_for_timeout(600)
+        log.pruefe(pg.get_attribute("html", "data-palette") == "custom", "das eigene Design gilt")
+        akzent = pg.eval_on_selector(
+            "html", "e => getComputedStyle(e).getPropertyValue('--accent').trim()")
+        log.pruefe(akzent == "#1e5bd6", f"der Akzent ist blau statt grün ({akzent})")
+        leiste = pg.eval_on_selector("aside", "e => [getComputedStyle(e).backgroundColor,"
+                                               " getComputedStyle(e).color]")
+        log.pruefe(leiste[0] == "rgb(43, 43, 43)", f"die Seitenleiste ist dunkelgrau {leiste}")
+        log.pruefe(leiste[1] == "rgb(255, 255, 255)",
+                   "und ihre Schrift wird hell, damit man sie lesen kann")
+        grund = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
+        log.pruefe(grund == "rgb(255, 255, 255)", f"der Hintergrund ist weiß ({grund})")
+        pg.wait_for_timeout(500)
+        gemerkt = pg.evaluate("async () => (await (await fetch('/api/prefs')).json())")
+        log.pruefe(gemerkt.get("palette") == "custom"
+                   and gemerkt.get("design", {}).get("sidebar") == "#2b2b2b",
+                   "und beim Konto gespeichert")
+        foto("08-design")
+        pg.reload(wait_until="networkidle")
+        pg.wait_for_timeout(500)
+        nachher = pg.eval_on_selector(
+            "html", "e => getComputedStyle(e).getPropertyValue('--accent').trim()")
+        log.pruefe(nachher == "#1e5bd6", "nach dem Neuladen ist es noch da")
+        pg.click("#btn-theme")
+        pg.wait_for_selector("#themebox.open", state="visible")
         pg.click("#theme-reset")
         pg.wait_for_timeout(300)
         log.pruefe(pg.get_attribute("html", "data-palette") is None, "Standard kommt zurück")
+        akzent = pg.eval_on_selector(
+            "html", "e => getComputedStyle(e).getPropertyValue('--accent').trim()")
+        log.pruefe(akzent in ("#3d7d55", "#7cb894"), f"und mit ihm das Grün ({akzent})")
         pg.keyboard.press("Escape")
         pg.wait_for_timeout(400)
         log.pruefe(not pg.is_visible("#themebox.open"), "Escape schließt")
@@ -1393,8 +1454,22 @@ def rundgang(pg: Any, log: Protokoll, agent: FakeAgent, bilder: Path | None,
 
     if dran("befehle"):
         log.abschnitt("10. Slash-Befehle")
+        pg.fill("#input", "Hallo")
+        log.pruefe(not pg.eval_on_selector("#input", "e => e.classList.contains('is-command')"),
+                   "normaler Text leuchtet nicht")
+        pg.fill("#input", "/max")
+        farbe = pg.eval_on_selector("#input", "e => [e.classList.contains('is-command'),"
+                                              " getComputedStyle(e).color,"
+                                              " getComputedStyle(e).textShadow]")
+        akzent = pg.eval_on_selector(
+            "html", "e => getComputedStyle(e).getPropertyValue('--accent-text').trim()")
+        log.pruefe(farbe[0] and farbe[2] != "none",
+                   f"ein /Befehl leuchtet im Akzentton ({farbe[1]}, Akzent {akzent})")
         pg.fill("#input", "/help")
         pg.click("#send")
+        pg.wait_for_timeout(300)
+        log.pruefe(not pg.eval_on_selector("#input", "e => e.classList.contains('is-command')"),
+                   "nach dem Absenden leuchtet die leere Zeile nicht mehr")
         pg.wait_for_timeout(900)
         log.pruefe("/clear" in pg.inner_text("#thread"), "/help zeigt die Befehle")
         # 9.5.13: /export kommt als Download im Browser an -- nicht als Pfad

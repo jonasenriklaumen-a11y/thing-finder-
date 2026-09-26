@@ -25,6 +25,7 @@ Abgelegt wird als eine einzige Zeile in derselben Datenbank wie der Rest.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -32,19 +33,37 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-#: Die Farbschemata. Muessen mit denen in `webui.html` uebereinstimmen --
-#: ein Test haelt beide Listen zusammen. Der leere Name ist das Standard-
-#: schema; es setzt kein Attribut und braucht deshalb keinen Namen.
+#: Die Designs. Muessen mit denen in `webui.html` uebereinstimmen -- ein Test
+#: haelt beide Listen zusammen. Der leere Name ist Standard (setzt kein
+#: Attribut). "mono" ist das schlichte Schwarz-Weiss; "custom" nimmt die
+#: Farben, die man sich unter "Design selber erstellen" zusammenstellt.
 PALETTES = (
     "",
-    "nord",
-    "catppuccin",
-    "gruvbox",
-    "tokyonight",
-    "solarized",
-    "dracula",
-    "rosepine",
+    "mono",
+    "custom",
 )
+
+#: Die drei Farben, die man beim eigenen Design waehlen kann.
+DESIGN_KEYS = ("accent", "bg", "sidebar")
+
+#: Ein leeres eigenes Design -- nichts gewaehlt, also gilt Standard.
+DEFAULT_DESIGN: dict[str, str] = {key: "" for key in DESIGN_KEYS}
+
+#: Eine Farbe ist genau ein #rrggbb. Alles andere faellt weg -- so kommt aus
+#: dem Browser nie etwas anderes als eine Farbe in die Seite.
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def clean_design(value: Any) -> dict[str, str]:
+    """Macht aus dem Vorschlag ein sauberes Design: nur bekannte Farbwerte."""
+    design = dict(DEFAULT_DESIGN)
+    if not isinstance(value, dict):
+        return design
+    for key in DESIGN_KEYS:
+        farbe = str(value.get(key) or "").strip().lower()
+        if _HEX.match(farbe):
+            design[key] = farbe
+    return design
 
 #: Hell, dunkel oder das, was das Betriebssystem sagt.
 THEMES = ("light", "dark", "system")
@@ -65,6 +84,7 @@ AGENT_COUNTS = range(1, 51)
 FIELDS: dict[str, tuple[Any, Any]] = {
     "theme": ("system", THEMES),
     "palette": ("", PALETTES),
+    "design": (DEFAULT_DESIGN, dict),
     "mode": ("normal", MODES),
     "effort": ("medium", EFFORTS),
     "structured": (False, bool),
@@ -95,7 +115,10 @@ CREATE TABLE IF NOT EXISTS uistate (
 
 def defaults() -> dict[str, Any]:
     """Der Zustand, mit dem eine frische Oberflaeche startet."""
-    return {name: standard for name, (standard, _) in FIELDS.items()}
+    return {
+        name: (dict(standard) if isinstance(standard, dict) else standard)
+        for name, (standard, _) in FIELDS.items()
+    }
 
 
 def clean_flag(value: Any, standard: bool) -> bool:
@@ -134,6 +157,8 @@ def clean(raw: Any, *, base: dict[str, Any] | None = None) -> dict[str, Any]:
         wert = raw[name]
         if erlaubt is bool:
             stand[name] = clean_flag(wert, bool(stand.get(name, standard)))
+        elif erlaubt is dict:
+            stand[name] = clean_design(wert)
         elif isinstance(erlaubt, range):
             try:
                 zahl = int(wert)

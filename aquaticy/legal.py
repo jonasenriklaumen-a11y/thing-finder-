@@ -30,11 +30,19 @@ Installation entscheidet, wo sie läuft und welche optionalen Dienste eingeschal
   <li><strong>Missbrauchsschutz (Ai-guard):</strong> zum Anlass eines Verdachts der Zeitpunkt,
     die Art, der Chat und deine zuletzt genutzte IP-Adresse. Nur für den Missbrauchsschutz,
     nicht für Werbung oder Profile.</li>
+  <li><strong>Ein Konto pro Anschluss:</strong> die IP-Adresse, von der aus ein Konto angelegt
+    wurde, damit von derselben Adresse kein zweites Konto entsteht. Nur dafür und für den
+    Missbrauchsschutz.</li>
+  <li><strong>Design:</strong> die Farben eines selbst erstellten Designs, damit es auf jedem
+    deiner Geräte gleich aussieht.</li>
 </ul>
 <h2>Externe Dienste</h2>
 <p>Eine Frage kann an den ausgewählten Modellanbieter gehen. Suchbegriffe können an das
 gewählte Suchsystem gehen; Ortsanfragen nutzen OpenStreetMap-Dienste. Google, Home Assistant,
 LAN-Suche, Lager und die Werkstatt laufen nur, wenn der Betreiber oder Nutzer sie einschaltet.
+Installierte Add-ons ohne Anmeldung (Wetter, Tagesschau, Wikipedia, Währungsrechner, Feiertage)
+schicken nur das Nötige an den jeweiligen Dienst: den Ort, den Suchbegriff, die Währung oder
+Land und Jahr.
 Die Einstellungsseite zeigt die aktive Auswahl. Für externe Anbieter gelten zusätzlich deren
 eigene Datenschutzhinweise.</p>
 <p>Aquaticy enthält keine Werbe-, Analyse- oder Tracking-SDKs und verkauft keine Nutzerdaten.</p>

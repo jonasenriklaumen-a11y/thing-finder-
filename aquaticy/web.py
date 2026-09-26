@@ -845,17 +845,20 @@ def _profile_settings(profile: Path, plan: str, account: Account | None = None) 
     # Den Such-Schluessel des Betreibers teilt ein normales Konto nur bei der
     # Suchmaschine, die der Betreiber selbst gewaehlt hat (seit 9.5.16).
     settings.operator_search_backends = (
-        None if plan == "pro" else frozenset({(base.search_backend or "").lower()}))
+        None if plan == "ultra" else frozenset({(base.search_backend or "").lower()}))
     # Eine Modell-Adresse, die das Konto selbst eingetragen hat (nur Pro, s.u.).
     eigene_adresse = raw.get("AQUATICY_API_BASE", "").strip()
     settings.own_api_base = (
-        eigene_adresse if plan == "pro" and eigene_adresse
+        eigene_adresse if plan == "ultra" and eigene_adresse
         and eigene_adresse != (base.api_base or "") else ""
     )
     # Die Adresse des Betreibers gilt fuer SEIN Modell, nicht fuer das, das
     # dieses Konto waehlt (Settings.route).
     settings.api_base_for = base.model
-    if plan != "pro":
+    if plan != "ultra":
+        # Netz-Features (Heimnetz, Home Assistant, Lager, Werkstatt-Desktop)
+        # gehören seit 9.5.17 nur noch zu Ultra -- Normal UND Pro sind hier
+        # gleich beschränkt. Der Unterschied ist das Kontingent (Pro doppelt).
         settings.lan_enabled = False
         settings.ha_url = ""
         settings.ha_token = ""
@@ -866,28 +869,18 @@ def _profile_settings(profile: Path, plan: str, account: Account | None = None) 
         settings.vm_cpus = 1
         settings.vm_memory_mb = 1024
         settings.vm_disk_gb = 4
-        # Die Rechts-Leitplanken lassen sich nur mit Pro abschalten. Steht in
-        # der .env eines normalen Kontos trotzdem "aus" -- von Hand
-        # eingetragen, aus einer Zeit als Pro-Konto, oder vom Server geerbt
-        # --, gilt hier trotzdem "an".
+        # Die Rechts-Leitplanken lassen sich nur mit Ultra abschalten (seit
+        # 9.5.17 auch Pro nicht mehr). Steht in der .env trotzdem "aus", gilt
+        # hier "an".
         settings.legal_guard = True
-        # Der User mode gibt der Werkstatt Internet und einen Desktop -- das
-        # gehoert zu Pro. Ein "an" in der .env eines normalen Kontos zaehlt
-        # hier nicht.
         settings.vm_user_mode = False
-        # Das Kontingent gilt fuer jeden Modellaufruf, nicht nur vor der
-        # Anfrage (aquaticy/metering.py): 5-Stunden-Sitzung und Woche,
-        # gespeichert am Konto in der Kontendatenbank (aquaticy/quota.py).
+        # 5-Stunden-Sitzung und Woche, am Konto gespeichert (aquaticy/quota.py).
+        # Pro bekommt über AUTH.quota() den doppelten Faktor.
         settings.quota = account_quota(profile, account)
-        # Wohin der Server Anfragen schickt, bestimmt bei normalen Konten der
-        # Betreiber: eine eigene Modell- oder SearXNG-Adresse wuerde Anfragen
-        # (samt Schluessel des Betreibers) an beliebige Rechner lenken -- auch
-        # ins Heimnetz, das normalen Konten sonst verschlossen ist.
+        # Wohin der Server Anfragen schickt, bestimmt der Betreiber -- eine
+        # eigene Modell- oder SearXNG-Adresse gibt es nur mit Ultra.
         settings.api_base = base.api_base
         settings.searxng_url = base.searxng_url
-        # Das Kontextfenster eines lokalen Modells belegt Arbeitsspeicher auf
-        # dem Rechner des Betreibers -- zwei Millionen Token wuerden ihn
-        # sprengen. Normale Konten bleiben im ueblichen Rahmen.
         obergrenze = max(int(base.context_tokens or 0), NORMAL_CONTEXT_CAP)
         settings.context_tokens = min(int(settings.context_tokens or 0), obergrenze)
     else:
@@ -953,11 +946,18 @@ class ChatSession:
 
     @property
     def plan(self) -> str:
-        return self.account.plan if self.account is not None else "pro"
+        # Ohne Konto (eigener Rechner) hat man vollen Zugriff -- wie Ultra.
+        return self.account.plan if self.account is not None else "ultra"
 
     @property
     def pro(self) -> bool:
-        return self.plan == "pro"
+        """Erhöhte Stufe -- Pro ODER Ultra (Nutzungsanzeige, Add-ons, Pro-Modus)."""
+        return self.plan in ("pro", "ultra")
+
+    @property
+    def ultra(self) -> bool:
+        """Die Vollstufe: alle Netz-Features und das Abschalten der Leitplanken."""
+        return self.plan == "ultra"
 
     def agent(self) -> Any:
         from aquaticy.agent import Agent
@@ -1719,6 +1719,36 @@ def ui_state() -> Any:
 SCHEDULER: Any = None
 
 
+#: Die Modellfelder mit ihrem Namen fuer "Eigene Modelle" (9.5.17).
+OWN_MODEL_FIELDS = (
+    ("AQUATICY_MODEL", "model", "Hauptmodell"),
+    ("AQUATICY_VISION_MODEL", "vision_model", "Bilder"),
+    ("AQUATICY_SUBAGENT_MODEL", "subagent_model", "Helfer"),
+    ("AQUATICY_CODE_MODEL", "code_model", "Code"),
+)
+
+
+def own_models(settings: Any) -> list[dict[str, str]]:
+    """Die Modelle, die ein Konto selbst eingetragen hat -- nicht die des Betreibers.
+
+    Grundlage fuer den Abschnitt "Eigene Modelle": er zeigt nur, was der
+    Nutzer oben selbst hinzugefuegt hat. Ohne Konten gibt es keinen
+    Unterschied zwischen "eigen" und "gestellt" -- dann ist die Liste leer.
+    """
+    if getattr(SESSION, "account", None) is None:
+        return []
+    try:
+        basis = get_settings()
+    except Exception:  # pragma: no cover - ohne Grundeinstellung nichts vergleichen
+        return []
+    eigene = []
+    for feld, attr, name in OWN_MODEL_FIELDS:
+        wert = str(getattr(settings, attr, "") or "")
+        if wert and wert != str(getattr(basis, attr, "") or ""):
+            eigene.append({"field": feld, "label": name, "model": wert})
+    return eigene
+
+
 def current_values() -> dict[str, str]:
     """Aktuelle Einstellungen als Formularwerte."""
     settings = SESSION.settings()
@@ -1909,34 +1939,34 @@ def save_values(payload: dict[str, Any]) -> Path:
         )
     )
     plus_workshop = str(payload.get("AQUATICY_VM_SIZE", "")).strip() == "plus"
-    if not session.pro and (pro_integration or plus_workshop):
+    if not session.ultra and (pro_integration or plus_workshop):
         raise ValueError(
-            "LAN-Suche, Home Assistant, Lagerverwaltung und die Plus-Werkstatt "
-            "brauchen ein Pro-Konto."
+            "Heimnetz-Suche, Home Assistant, Lagerverwaltung und die große Werkstatt "
+            "gibt es nur mit einem Ultra-Konto."
         )
-    if not session.pro:
+    if not session.ultra:
         base = get_settings()
         for key, erlaubt in (("AQUATICY_API_BASE", base.api_base),
                              ("AQUATICY_SEARXNG_URL", base.searxng_url)):
             if key in payload and str(payload.get(key) or "").strip() != (erlaubt or ""):
                 raise ValueError(
-                    "Eigene Adressen für Modell oder SearXNG brauchen ein Pro-Konto — bei "
-                    "normalen Konten legt sie der Betreiber fest."
+                    "Eigene Adressen für Modell oder Suche gibt es nur mit einem Ultra-Konto — "
+                    "sonst legt sie der Betreiber fest."
                 )
     guard_off = "AQUATICY_LEGAL_GUARD" in payload and not guard_on(
         str(payload.get("AQUATICY_LEGAL_GUARD", ""))
     )
-    if guard_off and not session.pro:
+    if guard_off and not session.ultra:
         raise ValueError(
             "Die Rechts-Leitplanken (Grundgesetz und BGB) lassen sich nur mit einem "
-            "Pro-Konto abschalten."
+            "Ultra-Konto abschalten."
         )
     user_mode_on = "AQUATICY_VM_USER_MODE" in payload and str(
         payload.get("AQUATICY_VM_USER_MODE", "")
     ).strip().lower() in {"1", "true", "yes", "on", "ja"}
-    if user_mode_on and not session.pro:
+    if user_mode_on and not session.ultra:
         raise ValueError(
-            "Der User mode (Werkstatt mit Desktop und Internet) braucht ein Pro-Konto."
+            "Der User mode (Werkstatt mit Desktop und Internet) braucht ein Ultra-Konto."
         )
     values = {
         key: str(payload.get(key, "")).strip() for key in SETTING_KEYS if key in payload
@@ -2070,7 +2100,7 @@ def keys_view(session: Any) -> dict[str, Any]:
             "im Browser angezeigt — auch dir nicht, nur die letzten vier Zeichen — und für "
             "kein anderes Konto sichtbar oder benutzbar. Sie gehen nur an den Anbieter selbst"
             + (" oder an eine Modell-Adresse, die du selbst eingetragen hast."
-               if getattr(session, "pro", False) else ".")
+               if getattr(session, "ultra", False) else ".")
             if session.profile is not None else
             "Lokal ohne Konten stehen die Schlüssel in deiner .env auf diesem Rechner."
         ),
@@ -2217,7 +2247,7 @@ def addon_action(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
             )}, 409
         hinweis = ""
         if action == "install":
-            addons.install(settings, addon.id, session.pro,
+            addons.install(settings, addon.id, session.ultra,
                            on_done=lambda: session.reload(workshop=True))
             if not addon.programm:
                 session.reload(workshop=True)
@@ -2229,7 +2259,7 @@ def addon_action(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
             session.reload(workshop=True)
             hinweis = "Deinstalliert — Programm und Anmeldung sind gelöscht."
         elif action in ("enable", "disable"):
-            addons.set_enabled(settings, addon.id, action == "enable", session.pro)
+            addons.set_enabled(settings, addon.id, action == "enable", session.ultra)
             session.reload(workshop=True)
             hinweis = "Eingeschaltet." if action == "enable" else "Ausgeschaltet."
         elif action == "token":
@@ -2266,7 +2296,7 @@ def addon_action(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
         return {"ok": False, "error": str(exc)}, 400
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}, 500
-    view = addons.public_view(session.settings(), session.pro)
+    view = addons.public_view(session.settings(), session.ultra)
     return {"ok": True, "message": hinweis, **view}, 200
 
 
@@ -2278,10 +2308,10 @@ def _addon_login(session: Any, addon: Any) -> str:
     settings = session.settings()
     if addon.login != "qr":
         raise addons.AddOnError(f"{addon.name} braucht keine Anmeldung in der Werkstatt.")
-    ok, warum = addons.usable(addon, settings, session.pro)
+    ok, warum = addons.usable(addon, settings, session.ultra)
     if not ok:
         raise addons.AddOnError(warum)
-    if not addons.active(settings, addon.id, session.pro):
+    if not addons.active(settings, addon.id, session.ultra):
         raise addons.AddOnError(f"{addon.name} ist nicht installiert oder ausgeschaltet.")
     box = werkstatt.shared(settings)
     fertig = box.desktop("open", addons.APP_OF[addon.id], timeout=90)
@@ -2320,8 +2350,9 @@ def workshop_input(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
     from aquaticy.desktop import HEIGHT, WIDTH
 
     session = SESSION.current() if isinstance(SESSION, SessionProxy) else SESSION
-    if not session.pro:
-        return {"ok": False, "error": "Der User mode gehört zu Pro."}, 403
+    if not session.ultra:
+        # Seit 9.5.17 gehoert der User mode zu Ultra -- auch Pro kommt nicht dran.
+        return {"ok": False, "error": "Der User mode gehört zu Ultra."}, 403
     settings = session.settings()
     if not getattr(settings, "vm_user_mode", False):
         return {"ok": False, "error": "Der User mode ist aus."}, 400
@@ -2418,6 +2449,30 @@ def chat_markdown(title: str, entries: list[Any]) -> str:
     return "\n".join(zeilen)
 
 
+def _design_style(design: dict[str, Any]) -> str:
+    """Baut aus dem eigenen Design die CSS-Variablen fuer das <html>-Tag.
+
+    Nur die Grundfarben -- den Rest (Kontrast der Knopfschrift, der helle
+    Akzentton, die Schrift auf der Seitenleiste) rechnet das Skript beim
+    Laden aus. Jede Farbe ist bereits geprueft (nur ``#rrggbb``), hier wird
+    zur Sicherheit noch einmal auf genau dieses Muster geachtet.
+    """
+    import re as _re
+
+    hexmuster = _re.compile(r"^#[0-9a-fA-F]{6}$")
+    teile = []
+    accent = str(design.get("accent") or "").strip().lower()
+    bg = str(design.get("bg") or "").strip().lower()
+    sidebar = str(design.get("sidebar") or "").strip().lower()
+    if hexmuster.match(accent):
+        teile += [f"--accent:{accent}", f"--accent-text:{accent}"]
+    if hexmuster.match(bg):
+        teile += [f"--bg:{bg}", f"--surface:{bg}"]
+    if hexmuster.match(sidebar):
+        teile += [f"--sidebar:{sidebar}"]
+    return ";".join(teile)
+
+
 def with_state(html: str) -> str:
     """Gibt der Seite den Zustand gleich mit auf den Weg.
 
@@ -2449,6 +2504,12 @@ def with_state(html: str) -> str:
         attrs += f' data-theme="{stand["theme"]}"'
     if stand.get("palette"):
         attrs += f' data-palette="{stand["palette"]}"'
+    # Beim eigenen Design gleich die Grundfarben ans <html> schreiben, damit
+    # die Seite schon in den richtigen Farben ankommt und nicht kurz aufblitzt.
+    if stand.get("palette") == "custom":
+        stil = _design_style(stand.get("design") or {})
+        if stil:
+            attrs += f' style="{stil}"'
     html = html.replace('<html lang="de">', f'<html lang="de"{attrs}>', 1)
 
     # Die Klassen am Koerper stehen sonst erst, wenn das Skript durch ist.
@@ -2577,7 +2638,8 @@ class Handler(BaseHTTPRequestHandler):
             print(f"  [Fehler] {self.command} {self.path}: {type(exc).__name__}: {exc}")
             if not self.responded:
                 with contextlib.suppress(OSError):
-                    self._json({"error": "Der Server konnte die Anfrage nicht verarbeiten."}, 500)
+                    self._json({"error": "Da ist bei Aquaticy etwas schiefgelaufen. "
+                                         "Versuch es gleich noch einmal."}, 500)
         finally:
             if previous is None:
                 with contextlib.suppress(AttributeError):
@@ -3008,8 +3070,9 @@ class Handler(BaseHTTPRequestHandler):
                     "email": account.email,
                     "username": account.username,
                     "plan": account.plan,
-                    "pro": account.pro,
-                    "plan_label": "Pro" if account.pro else "Normal",
+                    "pro": account.elevated,
+                    "ultra": account.ultra,
+                    "plan_label": account.plan_label,
                     "usage": usage_view(SESSION.settings()),
                 }
             )
@@ -3027,9 +3090,11 @@ class Handler(BaseHTTPRequestHandler):
                             "username": SESSION.account.username,
                             "plan": SESSION.plan,
                             "pro": SESSION.pro,
+                            "ultra": SESSION.ultra,
                         }
                         if SESSION.account is not None
-                        else {"email": "lokal", "username": "", "plan": "pro", "pro": True}
+                        else {"email": "lokal", "username": "", "plan": "ultra",
+                              "pro": True, "ultra": True}
                     ),
                     "values": current_values(),
                     "key_name": api_key_name_for(settings.model),
@@ -3055,6 +3120,8 @@ class Handler(BaseHTTPRequestHandler):
                     "header": header_for(settings),
                     "providers": webview.provider_view(),
                     "search_key_hints": webview.search_key_hints(SEARCH_BACKEND_KEYS),
+                    # "Eigene Modelle" zeigt nur, was das Konto selbst eingetragen hat.
+                    "own_models": own_models(settings),
                 }
             )
         elif route == "/api/header":
@@ -3120,7 +3187,7 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/addons":
             from aquaticy import addons
 
-            self._json(addons.public_view(SESSION.settings(), SESSION.pro))
+            self._json(addons.public_view(SESSION.settings(), SESSION.ultra))
         elif route == "/api/keys":
             # Nur, was hinterlegt ist -- nie ein Schluessel selbst.
             self._json(keys_view(SESSION.current() if isinstance(SESSION, SessionProxy)
@@ -3278,6 +3345,7 @@ class Handler(BaseHTTPRequestHandler):
                         username=str(payload.get("username", "")),
                         terms_accepted=True,
                         terms_version=LEGAL_VERSION,
+                        ip=self._client_ip(),
                     )
                 except ValueError as exc:
                     self._json({"ok": False, "error": str(exc)}, 400)
@@ -3329,8 +3397,9 @@ class Handler(BaseHTTPRequestHandler):
                 Cache(settings.db_path, settings.cache_ttl_hours).clear_unread(wanted)
             self._json({"ok": True, **SESSION.open_chat(wanted)})
         elif route == "/api/ha":
-            if not SESSION.pro:
-                self._json({"ok": False, "error": "Home Assistant braucht Pro."}, 403)
+            if not SESSION.ultra:
+                self._json({"ok": False, "error": "Home Assistant gibt es nur mit Ultra."},
+                           403)
                 return
             self._json(self._ha_probe(self._read_json()))
         elif route == "/api/probe":
@@ -3338,8 +3407,9 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/google":
             self._json(self._google(self._read_json()))
         elif route == "/api/storage":
-            if not SESSION.pro:
-                self._json({"ok": False, "error": "Die Lagerverwaltung braucht Pro."}, 403)
+            if not SESSION.ultra:
+                self._json({"ok": False,
+                            "error": "Die Lagerverwaltung gibt es nur mit Ultra."}, 403)
                 return
             self._json(self._storage_probe(self._read_json()))
         elif route == "/api/addons":
@@ -3624,9 +3694,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         model = fix_model_id(str(payload.get("AQUATICY_MODEL", "")).strip()) or settings.model
         getippt = str(payload.get(API_KEY_FIELD, "")).strip()
         api_base = str(payload.get("AQUATICY_API_BASE", settings.api_base) or "").strip()
-        if not SESSION.pro:
-            # Normale Konten testen gegen die Adressen des Betreibers -- nicht
-            # gegen eine eingetippte (siehe _profile_settings).
+        if not SESSION.ultra:
+            # Normale und Pro-Konten testen gegen die Adressen des Betreibers --
+            # nicht gegen eine eingetippte (siehe _profile_settings).
             api_base = settings.api_base
         if api_base and not base_fits(api_base, model):
             # Dieselbe Regel wie im Betrieb -- sonst testet man etwas anderes,
@@ -3647,7 +3717,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
             # etwas anderes, als spaeter laeuft.
             vorschau = replace(
                 settings, model=model, api_base=api_base,
-                own_api_base=(api_base if konto and SESSION.pro and api_base
+                own_api_base=(api_base if konto and SESSION.ultra and api_base
                               and api_base != des_betreibers else ""),
             )
             quelle = vorschau.key_source(model)
@@ -3670,7 +3740,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
             search_key = settings.search_key_for(backend)
         engines = str(payload.get("AQUATICY_SEARCH_ENGINES", settings.search_engines) or "").strip()
         instance = str(payload.get("AQUATICY_SEARXNG_URL", settings.searxng_url) or "").strip()
-        if not SESSION.pro:
+        if not SESSION.ultra:
             instance = settings.searxng_url
 
         # Mit eigenem Schluessel (getippt oder im Schluesselbund) zaehlt der
@@ -3732,7 +3802,7 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                 "gespeicherte geht nur an die gespeicherte Adresse."
             )}
         if not url or not token:
-            return {"ok": False, "error": "Adresse und Token werden beide gebraucht."}
+            return {"ok": False, "error": "Bitte trag die Adresse und den Zugangsschlüssel ein."}
         client = HomeAssistant(url, token)
         try:
             hello = client.ping()
@@ -3915,7 +3985,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
                     anlass = "Missbrauch: " + str(payload.get("art") or "")
                 if anlass:
                     with contextlib.suppress(Exception):
-                        if AIGUARD.note(konto.id, anlass, detail=anlass, chat=session.chat_id()):
+                        if AIGUARD.note(konto.id, anlass, detail=anlass,
+                                        chat=session.chat_id(),
+                                        enforce=not getattr(konto, "ultra", False)):
                             lauf.add({"type": "banned"})
             if kind == "done":
                 seen_done.set()
@@ -4178,12 +4250,16 @@ def serve(
     TOKEN = token
     data_dir = get_settings().data_dir
     code = pro_code_for(data_dir)
-    AUTH = AuthStore(data_dir, code)
+    from aquaticy.auth import ultra_code_for
+
+    ultra = ultra_code_for(data_dir)
+    AUTH = AuthStore(data_dir, code, ultra)
     global AIGUARD
     from aquaticy.aiguard import guard_for
 
     AIGUARD = guard_for(data_dir)
-    print(f"  Pro-Code: {code} (9 Zeichen, geheim halten)")
+    print(f"  Pro-Code:   {code} (9 Zeichen, geheim halten)")
+    print(f"  Ultra-Code: {ultra} (14 Zeichen, geheim halten)")
     # Ein harter Abbruch kann eine Werkstatt zurueckgelassen haben. Sie belegt
     # Speicher und hat nichts mehr zu tun -- also weg damit, bevor es losgeht.
     try:

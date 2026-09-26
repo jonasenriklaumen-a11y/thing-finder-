@@ -125,12 +125,24 @@ def reset_text(ts: float, now: float) -> str:
 class Quota:
     """Das Kontingent eines Kontos -- gespeichert in der Kontendatenbank."""
 
-    def __init__(self, db_path: Path | str, account_id: str, created_at: float) -> None:
+    def __init__(self, db_path: Path | str, account_id: str, created_at: float,
+                 factor: float = 1.0) -> None:
         self.db_path = Path(db_path)
         self.account_id = str(account_id)
         self.created_at = float(created_at or 0.0)
+        # Der Tarif skaliert das Kontingent (seit 9.5.17): Normal = 1, Pro = 2.
+        # Ultra hat gar keins (dort wird kein Quota-Objekt angelegt).
+        self.factor = max(1.0, float(factor or 1.0))
         self._lock = _lock_for(self.db_path)
         self._setup()
+
+    @property
+    def session_tokens(self) -> int:
+        return int(SESSION_TOKENS * self.factor)
+
+    @property
+    def week_tokens(self) -> int:
+        return int(WEEK_TOKENS * self.factor)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -244,8 +256,8 @@ class Quota:
                         "ON CONFLICT(account_id) DO UPDATE SET started_at = excluded.started_at",
                         (self.account_id, start),
                     )
-                frei = min(SESSION_TOKENS - self._sum(conn, start),
-                           WEEK_TOKENS - self._sum(conn, woche_anfang))
+                frei = min(self.session_tokens - self._sum(conn, start),
+                           self.week_tokens - self._sum(conn, woche_anfang))
                 zeile = None
                 # Nur, wenn der GANZE Bedarf passt (seit 9.5.16). Bis dahin
                 # wurde reserviert, was noch frei war, der Aufruf lief trotzdem,
@@ -288,7 +300,7 @@ class Quota:
             abzug = int(zeile["tokens"]) if zeile is not None else 0
         sitzung = (self._sum(conn, start) - abzug) if start is not None else 0
         woche = self._sum(conn, woche_anfang) - abzug
-        return max(0, min(SESSION_TOKENS - sitzung, WEEK_TOKENS - woche))
+        return max(0, min(self.session_tokens - sitzung, self.week_tokens - woche))
 
     def settle(self, reservation: int, tokens: int, model: str = "") -> None:
         """Ersetzt eine Reservierung durch den echten Verbrauch (0 = freigeben).
@@ -323,8 +335,8 @@ class Quota:
             start = self._session_start(conn, now)
             sitzung = self._sum(conn, start) if start is not None else 0
             woche = self._sum(conn, woche_anfang)
-        sitzung_prozent = _prozent(sitzung, SESSION_TOKENS)
-        woche_prozent = _prozent(woche, WEEK_TOKENS)
+        sitzung_prozent = _prozent(sitzung, self.session_tokens)
+        woche_prozent = _prozent(woche, self.week_tokens)
         return {
             "limited": True,
             "session": {
@@ -338,7 +350,7 @@ class Quota:
                     reset_text(start + SESSION_SECONDS, now) if start is not None
                     else "beginnt mit deiner nächsten Nachricht"
                 ),
-                "exhausted": sitzung >= SESSION_TOKENS,
+                "exhausted": sitzung >= self.session_tokens,
             },
             "week": {
                 "label": "Diese Woche",
@@ -350,7 +362,7 @@ class Quota:
                 "started_at": woche_anfang,
                 "resets_at": woche_ende,
                 "resets_text": reset_text(woche_ende, now),
-                "exhausted": woche >= WEEK_TOKENS,
+                "exhausted": woche >= self.week_tokens,
             },
             "_used": {"session": sitzung, "week": woche},
         }
@@ -358,21 +370,22 @@ class Quota:
     def remaining(self, now: float | None = None) -> int:
         """Was hoechstens noch geht -- das Kleinere aus Sitzung und Woche."""
         stand = self.status(now)
-        return max(0, min(SESSION_TOKENS - stand["_used"]["session"],
-                          WEEK_TOKENS - stand["_used"]["week"]))
+        return max(0, min(self.session_tokens - stand["_used"]["session"],
+                          self.week_tokens - stand["_used"]["week"]))
 
     def check(self, need: int = 0, now: float | None = None) -> None:
         """Wirft ``QuotaExceeded``, wenn Sitzung oder Woche nichts mehr hergeben."""
         now = time.time() if now is None else now
         stand = self.status(now)
         benutzt = stand["_used"]
-        if benutzt["week"] >= WEEK_TOKENS or WEEK_TOKENS - benutzt["week"] < need:
+        if benutzt["week"] >= self.week_tokens or self.week_tokens - benutzt["week"] < need:
             raise QuotaExceeded(
                 "Dein Wochenkontingent ist aufgebraucht. Es setzt sich "
                 f"{when_phrase(stand['week']['resets_text'])} zurück. Mit einem Pro-Konto gibt es "
                 "kein Limit.", "week", public(stand))
         if stand["session"]["active"] and (
-            benutzt["session"] >= SESSION_TOKENS or SESSION_TOKENS - benutzt["session"] < need
+            benutzt["session"] >= self.session_tokens
+            or self.session_tokens - benutzt["session"] < need
         ):
             raise QuotaExceeded(
                 "Das Kontingent dieser 5-Stunden-Sitzung ist aufgebraucht. Es setzt sich "

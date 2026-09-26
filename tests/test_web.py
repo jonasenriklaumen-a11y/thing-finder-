@@ -436,6 +436,10 @@ def test_ui_file_offers_every_setting() -> None:
     # Schluessel stehen seit 9.5.14 Seashell im eigenen Abschnitt -- ohne
     # Formularnamen, damit sie nie mit dem allgemeinen Speichern mitgehen.
     assert 'id="sec-schluessel"' in html and 'id="keys-summary"' in html
+    # 9.5.17: heisst jetzt "Eigene Modelle" und ist zunaechst verborgen -- er
+    # taucht erst auf, wenn oben ein eigenes Modell oder ein Schluessel steht.
+    assert "Eigene Modelle" in html
+    assert '<fieldset id="sec-schluessel" hidden>' in html
     assert f'name="{web.API_KEY_FIELD}"' not in html
 
 
@@ -464,6 +468,10 @@ def test_every_palette_keeps_small_text_at_wcag_aa_contrast() -> None:
     checked = 0
     for match in re.finditer(r"([^{}]+)\{([^{}]*--text-3:[^{}]*)\}", css):
         values = dict(re.findall(r"(--[\w-]+):\s*(#[0-9a-fA-F]{6})", match.group(2)))
+        # Das eigene Design setzt die Schrift der Seitenleiste ueber var(...)
+        # -- ohne feste Hex-Werte gibt es hier nichts zu pruefen.
+        if not {"--surface", "--text-2", "--text-3"} <= values.keys():
+            continue
         background = luminance(values["--surface"])
         for key in ("--text-2", "--text-3"):
             foreground = luminance(values[key])
@@ -472,7 +480,8 @@ def test_every_palette_keeps_small_text_at_wcag_aa_contrast() -> None:
             )
             assert contrast >= 4.5, f"{match.group(1).strip()} {key}: {contrast:.2f}:1"
             checked += 1
-    assert checked == 16 * 2
+    # Standard hell/dunkel und Schlicht hell/dunkel -- vier Bloecke, je zwei Werte.
+    assert checked == 4 * 2
 
 
 # -- Slash-Befehle --------------------------------------------------------
@@ -773,7 +782,7 @@ def test_consent_registration_and_account_isolation(
     )
     assert status == 200 and json.loads(body)["account"]["pro"] is False
     status, _, payload = json_request(port, "POST", "/api/ha", {}, cookies)
-    assert status == 403 and "Pro" in payload["error"]
+    assert status == 403 and "Ultra" in payload["error"]
 
 
 def test_legal_pages_are_available_before_account_login(port: int) -> None:
@@ -1053,7 +1062,7 @@ def test_a_broken_route_answers_500_instead_of_dying(
     monkeypatch.setattr(web, "current_values", boom)
     status, _, body = raw_request(port, "GET", "/api/config")
     assert status == 500
-    assert json.loads(body)["error"] == "Der Server konnte die Anfrage nicht verarbeiten."
+    assert json.loads(body)["error"].startswith("Da ist bei Aquaticy etwas schiefgelaufen.")
     assert "RuntimeError: kaputt" in capfd.readouterr().out
     assert "Traceback" not in capfd.readouterr().err
     # Der Server lebt weiter.
@@ -1369,7 +1378,7 @@ def test_ha_discovery_reports_what_it_found(client, monkeypatch: pytest.MonkeyPa
 def test_ha_test_needs_both_pieces(client) -> None:
     _, body = client("POST", "/api/ha", {"url": "http://x:8123", "token": ""})
     assert json.loads(body)["ok"] is False
-    assert "beide" in json.loads(body)["error"]
+    assert "Zugangsschlüssel" in json.loads(body)["error"]
 
 
 def test_ha_test_reports_success(client, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1574,6 +1583,29 @@ def test_the_appearance_window_offers_modes_and_palettes() -> None:
     assert "aquaticy-palette" not in html
     assert "merkeZustand({ palette })" in html
     assert "prefers-color-scheme" in html    # "wie das System" folgt dem System
+
+
+def test_the_design_window_has_only_standard_and_a_own_designer() -> None:
+    """9.5.17: Nur Standard und Schlicht bleiben -- der Rest ist der eigene Designer."""
+    html = web.UI_FILE.read_text(encoding="utf-8")
+    # Umbenannt und entruempelt.
+    assert ">Design</h2>" in html and "◐ Design" in html
+    for fort in ("nord", "catppuccin", "gruvbox", "tokyonight", "dracula", "rosepine"):
+        assert f'data-palette="{fort}"' not in html
+    # Schlicht (Schwarz-Weiss) und das eigene Design sind da.
+    assert '[data-palette="mono"]' in html
+    assert '[data-palette="custom"]' in html
+    assert 'id="designer"' in html and "Design selber erstellen" in html
+    for feld in ("dz-accent", "dz-bg", "dz-sidebar"):
+        assert f'id="{feld}"' in html
+
+
+def test_a_saved_own_design_reaches_the_page_without_a_flash() -> None:
+    """Steht ein eigenes Design im Zustand, kommen die Farben schon am <html> an."""
+    stil = web._design_style({"accent": "#0055aa", "bg": "#ffffff", "sidebar": "#223344"})
+    assert "--accent:#0055aa" in stil and "--bg:#ffffff" in stil and "--sidebar:#223344" in stil
+    # Unfug wird gar nicht erst eingebaut.
+    assert web._design_style({"accent": "rot", "bg": "#fff"}) == ""
 
 
 def test_no_element_hardcodes_a_colour() -> None:
@@ -2042,7 +2074,7 @@ def test_the_search_engine_key_can_be_set_in_the_browser(client) -> None:
     plaetze = {slot["name"] for slot in json.loads(client("GET", "/api/keys")[1])["slots"]}
     assert {"BRAVE_API_KEY", "TAVILY_API_KEY"} <= plaetze
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert 'id="search-keyname"' in html and "API-Schlüssel" in html
+    assert 'id="search-keyname"' in html and "Eigene Modelle" in html
 
 
 def test_saving_stores_the_search_key_under_the_right_name(
@@ -2430,8 +2462,8 @@ def test_the_storage_is_set_up_in_the_network_section() -> None:
 def test_the_settings_say_that_read_only_is_no_lock() -> None:
     """Der Server selbst kennt keine Anmeldung -- das darf nicht verschwiegen werden."""
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "keine Anmeldung" in html
-    assert "kein Schloss am" in html
+    assert "bremst nur Aquaticy" in html
+    assert "weiterhin alles ändern" in html
 
 
 def test_the_storage_probe_reports_what_it_found(
@@ -2788,7 +2820,7 @@ def test_the_picker_offers_the_structure_switch_and_the_effort() -> None:
     picker = picker[: picker.index("picker-foot")]
     assert 'id="structure"' in picker
     assert "Strukturieren" in picker
-    assert "Gedacht wird immer" in picker
+    assert "in kleine Teilfragen" in picker
     for stufe in ("low", "medium", "high"):
         assert f'data-effort="{stufe}"' in picker, stufe
     assert "Denktiefe" in picker
@@ -2912,7 +2944,7 @@ def test_the_picker_offers_the_web_switch() -> None:
     picker = picker[: picker.index("picker-foot")]
     assert 'id="online"' in picker
     assert "Im Web suchen" in picker
-    assert "angehängten Dateien" in picker
+    assert "was du angehängt hast" in picker
     assert "ohne Web" in _kopf({"online": False})["status"], "die Kopfzeile sagt es"
     assert "ohne Web" not in _kopf({"online": False, "mode": "code"})["status"], (
         "im Code-Modus wird immer nachgeschlagen")
@@ -2931,7 +2963,7 @@ def test_the_workshop_switch_belongs_to_the_code_mode() -> None:
     picker = html[html.index('id="picker-models"') :]
     picker = picker[: picker.index("picker-foot")]
     assert 'id="werkstatt"' in picker
-    assert "Virtual Environment" in picker
+    assert "Code wirklich ausprobieren" in picker
     # Der Werkstatt-Schalter steht im Code-Modus, die beiden anderen daneben.
     werkstatt = picker[picker.index('id="werkstatt"') - 200 : picker.index('id="werkstatt"')]
     assert "only-code" in werkstatt
@@ -2997,7 +3029,7 @@ def test_the_recheck_switch_sits_under_the_structure_switch() -> None:
     picker = picker[: picker.index("picker-foot")]
     assert picker.index('id="structure"') < picker.index('id="recheck"')
     assert "Gegenprüfen" in picker
-    assert "nicht dran waren" in picker
+    assert "ganz anderen Seiten" in picker
 
 
 def test_the_recheck_reaches_the_agent(
@@ -3411,7 +3443,7 @@ def test_reading_along_does_not_show_the_thoughts() -> None:
 
 def test_the_reading_along_text_says_where_the_thoughts_are() -> None:
     html = web.UI_FILE.read_text(encoding="utf-8")
-    assert "Die Denkschritte gehören nicht dazu" in html
+    assert "Gedanken selbst siehst du mit" in html
 
 
 # ---------------------------------------------------------------------------
@@ -3491,7 +3523,8 @@ def test_normal_account_cannot_select_plus_workshop(
     session.account = web.Account("normal", "normal@example.org", "normal", 0)
     status, data = client("POST", "/api/config", {"AQUATICY_VM_SIZE": "plus"})
     assert status == 400
-    assert "Plus-Werkstatt" in json.loads(data)["error"]
+    # Die große Werkstatt gehört seit 9.5.17 zu Ultra.
+    assert "Ultra" in json.loads(data)["error"]
     assert client("POST", "/api/config", {"AQUATICY_VM_SIZE": "normal"})[0] == 200
 
 
@@ -3563,12 +3596,12 @@ def test_the_state_does_not_believe_everything(client) -> None:
 
 def test_the_page_carries_its_state_along(client) -> None:
     """Damit nichts blinkt und der Browser nichts zu entscheiden hat."""
-    client("POST", "/api/prefs", {"theme": "dark", "palette": "nord", "mode": "code"})
+    client("POST", "/api/prefs", {"theme": "dark", "palette": "mono", "mode": "code"})
     status, body = client("GET", "/")
     html = body.decode("utf-8")
     assert status == 200
     assert 'data-theme="dark"' in html
-    assert 'data-palette="nord"' in html
+    assert 'data-palette="mono"' in html
     assert "code-mode" in html[: html.index("</head>") + 200] or 'class="start code-mode"' in html
     assert "window.__AQUATICY_STATE__" in html
 
@@ -3676,7 +3709,7 @@ def test_the_recheck_explains_itself_per_mode() -> None:
     label = label[: label.index("</label>")]
     assert "only-normal" in label, "im Code-Modus zaehlt die Werkstatt"
     assert '"why only-standard"' in label and '"why only-pro"' in label
-    assert "vier Prüfer" in label
+    assert "Vier Prüfer" in label
     assert "body.pro-mode .only-standard{display:none}" in html
     assert "body:not(.pro-mode) .only-pro{display:none}" in html
 
