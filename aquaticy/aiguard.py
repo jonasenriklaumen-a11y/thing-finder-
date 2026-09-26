@@ -210,6 +210,11 @@ def classify(
     text = (text or "").strip()
     if len(text) < MIN_LENGTH:
         return False, ""
+    from aquaticy import smalltalk
+
+    if smalltalk.art_von(text) is not None:
+        # "Wer hat dich erschaffen?" -- eine Standardantwort, kein Anlass zur Pruefung.
+        return False, ""
     schluessel = hashlib.sha256(
         "\x1f".join((GUARD_VERSION, context, text)).encode("utf-8", "replace")
     ).hexdigest()

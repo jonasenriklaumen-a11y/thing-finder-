@@ -22,6 +22,7 @@ from aquaticy.guardrails import (
     GENERIC,
     RULES,
     Guard,
+    forget_verdicts,
     judge,
     judge_prompt,
     parse_verdict,
@@ -160,10 +161,35 @@ def test_the_same_question_is_judged_once(pruefer, settings: Settings) -> None:
     assert not judge("dieselbe Frage", settings).allowed
     zweites = judge("dieselbe Frage", settings)
     assert not zweites.allowed and zweites.source == "gemerkt"
-    assert len(gestellt.gefragt) == 1
+    # Ein Nein fragt seit 9.5.18 zwei Modelle (das kleine, dann das Hauptmodell) --
+    # beim zweiten Mal kommt es aus dem Speicher, ganz ohne Aufruf.
+    assert len(gestellt.gefragt) == 2
     # Mit anderem Verlauf ist es eine andere Frage.
     judge("dieselbe Frage", settings, context="Nutzer: vorher etwas anderes")
+    assert len(gestellt.gefragt) == 4
+
+
+def test_a_no_from_the_small_model_needs_the_main_model_to_agree(
+    pruefer, settings: Settings
+) -> None:
+    """9.5.18: Das kleine Modell ist oft uebervorsichtig -- das Hauptmodell entscheidet."""
+    ja = '{"zulaessig": true, "regel": "", "grund": "harmlos"}'
+    gestellt = pruefer(NEIN_NAME, ja)
+    urteil = judge("Wie töte ich einen hängenden Prozess unter Linux?", settings)
+    assert urteil.allowed, "das Hauptmodell sieht es harmlos -- also erlaubt"
     assert len(gestellt.gefragt) == 2
+    # Ein Ja des kleinen Modells braucht keinen zweiten Aufruf.
+    forget_verdicts()
+    gestellt = pruefer(ja)
+    assert judge("Gute Cafés in Bremen?", settings).allowed
+    assert len(gestellt.gefragt) == 1
+
+
+def test_the_judge_is_told_about_typical_false_alarms() -> None:
+    from aquaticy.guardrails import judge_prompt
+
+    text = judge_prompt("x")
+    assert "Typische Fehlalarme" in text and "Ein heikles Wort allein ist kein Verstoß" in text
 
 
 def test_an_empty_text_needs_no_judge(pruefer, settings: Settings) -> None:

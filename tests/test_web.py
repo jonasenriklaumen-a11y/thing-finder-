@@ -3993,7 +3993,7 @@ def test_an_image_job_stores_the_picture_privately(client, session: web.ChatSess
     from aquaticy.media import load_snapshot
 
     session.settings().vision_model = "ollama_chat/gemma4:12b"
-    png = base64.b64encode(b"das-bild").decode()
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\ndas-bild").decode()
     status, body = client("POST", "/api/jobs", {
         "action": "add", "kind": "image", "question": "Handy gesucht",
         "rhythm": "hourly", "image_data": png, "image_type": "image/png",
@@ -4003,7 +4003,8 @@ def test_an_image_job_stores_the_picture_privately(client, session: web.ChatSess
     assert payload["ok"] is True, payload.get("error")
     media_id = payload["job"]["image_id"]
     assert media_id
-    assert load_snapshot(session.settings().data_dir, media_id) == (b"das-bild", "image/png")
+    assert load_snapshot(session.settings().data_dir, media_id) == (
+        b"\x89PNG\r\n\x1a\ndas-bild", "image/png")
 
 
 def test_p2_deleting_an_image_job_removes_its_picture(client, session: web.ChatSession) -> None:
@@ -4014,7 +4015,7 @@ def test_p2_deleting_an_image_job_removes_its_picture(client, session: web.ChatS
 
     session.settings().vision_model = "ollama_chat/gemma4:12b"
     for weg in ("DELETE", "POST"):
-        png = base64.b64encode(b"das-bild").decode()
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\ndas-bild").decode()
         payload = json.loads(client("POST", "/api/jobs", {
             "action": "add", "kind": "image", "question": "Handy gesucht",
             "rhythm": "hourly", "image_data": png, "image_type": "image/png",
@@ -4059,7 +4060,7 @@ def test_a_rejected_image_job_removes_its_permanent_snapshot(
 
     _, body = client("POST", "/api/jobs", {
         "action": "add", "kind": "image", "question": "Handy gesucht",
-        "rhythm": "hourly", "image_data": base64.b64encode(b"bild").decode(),
+        "rhythm": "hourly", "image_data": base64.b64encode(b"\x89PNG\r\n\x1a\nbild").decode(),
         "image_type": "image/png",
     })
     payload = json.loads(body)
@@ -4099,7 +4100,8 @@ def test_database_failure_removes_uploaded_job_image(
     monkeypatch.setattr("aquaticy.jobs.JobStore.add", fail)
     status, body = client("POST", "/api/jobs", {
         "kind": "image", "question": "Handy gesucht",
-        "image_data": base64.b64encode(b"bild").decode(), "image_type": "image/png",
+        "image_data": base64.b64encode(b"\x89PNG\r\n\x1a\nbild").decode(),
+        "image_type": "image/png",
     })
     assert status == 200 and json.loads(body)["ok"] is False
     assert len(saved) == 1
@@ -4234,3 +4236,57 @@ def test_the_probe_counts_for_a_normal_account(
     antwort = json.loads(client("POST", "/api/probe", {})[1])
     assert antwort["llm"]["ok"] is False and "Kontingent" in antwort["llm"]["message"]
     assert len(gefragt) == 1, "am Limit fragt der Test das Modell nicht mehr"
+
+
+# -- 9.5.18 Sunflower: XSS-Schutz und gesperrte Uploads -----------------------------
+def test_the_page_runs_scripts_only_with_its_nonce(port: int) -> None:
+    import re as _re
+
+    status, headers, body = raw_request(port, "GET", "/")
+    csp = headers["Content-Security-Policy"]
+    assert status == 200 and "'unsafe-inline'" not in csp.split("style-src")[0]
+    nonce = _re.search(r"'nonce-([^']+)'", csp).group(1)
+    assert len(nonce) >= 16
+    html = body.decode("utf-8")
+    skripte = _re.findall(r"<script([^>]*)>", html)
+    assert skripte and all(f'nonce="{nonce}"' in attr for attr in skripte)
+    assert "object-src 'none'" in csp and "script-src-attr 'none'" in csp
+    # Jede Seite bekommt eine neue Nonce.
+    _, headers2, _ = raw_request(port, "GET", "/")
+    assert _re.search(r"'nonce-([^']+)'", headers2["Content-Security-Policy"]).group(1) != nonce
+    assert headers["Cross-Origin-Opener-Policy"] == "same-origin"
+
+
+def test_json_answers_allow_no_scripts_at_all(port: int) -> None:
+    _, headers, _ = raw_request(port, "GET", "/api/auth/status")
+    assert "script-src 'none'" in headers["Content-Security-Policy"]
+
+
+@pytest.mark.parametrize("name", ["shell.php", "SHELL.PHP5", "x.phtml", "a.phar", "seite.jsp",
+                                  "b.jspx", "bild.php.png", "logo.jsp.jpg", "c.PhP"])
+def test_php_and_jsp_uploads_are_blocked(name: str) -> None:
+    assert web.blocked_upload(name), name
+
+
+@pytest.mark.parametrize("name", ["foto.png", "notiz.txt", "phpinfo-erklaerung.md",
+                                  "jsp-vs-php.pdf", "daten.json", "graphs.csv"])
+def test_normal_uploads_are_fine(name: str) -> None:
+    assert not web.blocked_upload(name), name
+
+
+def test_the_chat_refuses_a_php_attachment(client) -> None:
+    status, body = client("POST", "/api/chat", {
+        "message": "Was macht das?",
+        "attachments": [{"name": "boese.php", "data": base64.b64encode(b"<?php x ?>").decode()}],
+    })
+    assert status == 400
+    antwort = json.loads(body)
+    assert antwort["code"] == "blocked_upload" and "PHP" in antwort["error"]
+
+
+def test_a_fake_image_is_not_accepted() -> None:
+    assert web.looks_like_image(b"\x89PNG\r\n\x1a\n" + b"0" * 20)
+    assert web.looks_like_image(b"\xff\xd8\xff\xe0" + b"0" * 20)
+    assert web.looks_like_image(b"RIFF\x00\x00\x00\x00WEBPVP8 ")
+    assert not web.looks_like_image(b"<?php system($_GET['c']); ?>")
+    assert not web.looks_like_image(b"<svg onload=alert(1)>")

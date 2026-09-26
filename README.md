@@ -63,12 +63,18 @@ $ aquaticy
 - **Öffentliche Webcams und Satellitenbilder** auf Wunsch einbeziehen.
 - Funktioniert auch ohne Internetsuche — dann aus eigenem Wissen, mit Hinweis, wo es veraltet
   sein könnte.
+- **Sofortantworten ohne Modell:** Einfache Nachrichten wie „Hallo“, „Danke“, „Wie geht’s?“,
+  „Wer bist du?“ oder „Wer hat dich erschaffen?“ beantwortet Aquaticy sofort und kostenlos —
+  mit vielen wechselnden Formulierungen (bei den häufigen je 25), zufällig gewählt und Wort für
+  Wort ausgegeben wie vom Modell. Alles, was Suche oder Nachdenken braucht, geht wie gewohnt an
+  das Modell.
 
 **Arbeitsweisen**
 - **Normal** — ein ganz normales Gespräch, gesucht wird, wenn es nötig ist.
-- **Pro** — für große Fragen: das stärkste Modell und bis zu 50 Helfer.
+- **Pro** — für große Fragen: das stärkste Modell und bis zu 50 Helfer. Der Master plant
+  schon, während die Rechtsprüfung läuft — losgeschickt wird erst nach dem OK.
 - **Code** — schreibt Code statt langer Texte und probiert ihn in einer abgeschotteten
-  **Werkstatt** wirklich aus.
+  **Werkstatt** wirklich aus. Die Werkstatt fährt schon hoch, während das Modell nachdenkt.
 
 **Oberfläche**
 - Terminal-Chat, Weboberfläche im Browser, Zugriff vom Handy im eigenen Netz.
@@ -92,6 +98,9 @@ $ aquaticy
 - Rechts-Leitplanken nach Grundgesetz und BGB, Ai-guard gegen Missbrauch.
 - Keine Bezahlschranken, Logins oder Captchas umgehen; `robots.txt` wird beachtet.
 - Konten sauber getrennt, Zugangsdaten verschlüsselt, ein Konto pro IP-Adresse.
+- XSS-Schutz: strenge Content-Security-Policy (Skripte nur mit Einmal-Schlüssel je Seite),
+  alles Fremde wird maskiert; PHP- und JSP-Dateien lassen sich nicht hochladen, und
+  angebliche Bilder müssen echte Bilder sein.
 
 ---
 
@@ -472,15 +481,18 @@ Nur mit einem **Ultra-Konto**.
 - ins Heimnetz nur private Adressen, Webseiten nie ins Heimnetz;
 - im Haus nur nach Rückfrage schalten; bei Google nie senden, nie löschen;
 - Zugangsdaten nie an den Browser und nie an das Modell;
-- nur verteidigende Sicherheitsthemen.
+- nur verteidigende Sicherheitsthemen;
+- keine PHP- oder JSP-Dateien als Upload (auch nicht als `bild.php.png`).
 
 **Rechts-Leitplanken.** Bevor Aquaticy etwas tut, prüft es, ob das mit Grundgesetz und BGB
 vereinbar ist — bei jeder Frage, jeder Personensuche, jedem Kamerabild und jedem Mail-Entwurf.
 Die Regeln stehen unter *Einstellungen → Dev settings → Welche Regeln gelten?*. Nach einer
 Person suchen ist erlaubt (öffentliche Angaben, berufliche Rolle, veröffentlichte Kontaktwege);
 nicht erlaubt ist, private Anschrift, Handynummer oder Aufenthaltsort auszuforschen oder ein
-überwachungsartiges Dossier anzulegen. Abschalten lassen sich die Leitplanken nur mit einem
-Ultra-Konto und nie aus dem Chat heraus.
+überwachungsartiges Dossier anzulegen. Harmloses wird nicht blockiert: Alltag, Technik,
+Geschichte, Geschichten, Humor oder Kritik sind frei, und ein Nein des schnellen Prüfmodells
+zählt erst, wenn auch das Hauptmodell es so sieht. Abschalten lassen sich die Leitplanken nur mit
+einem Ultra-Konto und nie aus dem Chat heraus.
 
 **Ai-guard** läuft auf jedem Konto und erkennt über mehrere Chats hinweg, wenn jemand versucht,
 Aquaticy für Angriffe oder Rechtsbrüche zu missbrauchen (z. B. Schadsoftware, DDoS-Anleitungen).

@@ -2703,9 +2703,17 @@ function readFile(file){
   });
 }
 
+// PHP- und JSP-Dateien nimmt Aquaticy nicht an -- auch nicht als "bild.php.png".
+// Der Server prüft dasselbe noch einmal; hier gibt es nur gleich die Meldung.
+const GESPERRTE_ENDUNG = /\.(php[2-8]?|phtml|pht|phps|phar|jsp[xfa]?|jsw|jsv)(\.|$)/i;
 async function addFiles(list){
   for (const file of Array.from(list)){
     if (pending.length >= MAX_FILES){ alert(`Höchstens ${MAX_FILES} Dateien.`); break; }
+    if (GESPERRTE_ENDUNG.test(file.name)){
+      toast(`${file.name}: PHP- und JSP-Dateien lassen sich nicht hochladen. `
+        + "Füg den Code lieber als Text in die Nachricht ein.");
+      continue;
+    }
     if (file.size > MAX_BYTES){
       alert(`${file.name} ist zu groß (${prettySize(file.size)}, erlaubt sind 25 MB).`);
       continue;

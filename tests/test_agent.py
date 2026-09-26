@@ -1034,19 +1034,14 @@ def test_small_talk_skips_planning_without_any_llm_call(
 
 
 @pytest.mark.parametrize(
-    ("question", "answer"),
+    ("question", "art"),
     [
-        ("Hallo!", "Hallo! Schön, dass du da bist. Wobei kann ich dir helfen?"),
-        ("Wie geht es dir?", "Mir geht’s gut, danke! Was möchtest du heute herausfinden?"),
-        (
-            "Wer bin ich?",
-            "Du bist die Person, mit der ich gerade schreibe. Mehr über dich weiß ich "
-            "nur, wenn du es mir erzählt hast und mein Speicher eingeschaltet ist.",
-        ),
-        (
-            "Wer bist du?",
-            "Ich bin Aquaticy, ein KI-Assistent von Jonas. Wobei kann ich dir helfen?",
-        ),
+        ("Hallo!", "begruessung"),
+        ("Wie geht es dir?", "wie_gehts"),
+        ("Wer bin ich?", "wer_bin_ich"),
+        ("Wer bist du?", "identitaet"),
+        ("Wer hat dich erschaffen?", "schoepfer"),
+        ("Was kannst du alles?", "faehigkeiten"),
     ],
 )
 def test_common_personal_questions_have_a_natural_standard_answer(
@@ -1054,8 +1049,11 @@ def test_common_personal_questions_have_a_natural_standard_answer(
     settings: Settings,
     toolbox: Toolbox,
     question: str,
-    answer: str,
+    art: str,
 ) -> None:
+    from aquaticy import smalltalk
+
+    moegliche = next(a for a in smalltalk.ARTEN if a.name == art).antworten
     monkeypatch.setattr(
         "litellm.completion",
         lambda **kwargs: pytest.fail("eine Standardantwort darf kein Modell brauchen"),
@@ -1068,8 +1066,8 @@ def test_common_personal_questions_have_a_natural_standard_answer(
         on_event=lambda name, payload: events.append((name, payload)),
     )
     result = agent.ask(question, stream=False)
-    assert result.answer == answer
-    assert ("answer_chunk", {"text": answer}) in events
+    assert result.answer in moegliche
+    assert ("answer_chunk", {"text": result.answer}) in events
     assert events[-1][0] == "done"
 
 
@@ -1092,7 +1090,9 @@ def test_standard_answers_work_in_every_mode_without_starting_extra_work(
     )
     agent = Agent(settings, cache=None, toolbox=toolbox)
     result = agent.ask("Hallo", stream=False, mode=mode, sandbox=True)
-    assert result.answer.startswith("Hallo!")
+    from aquaticy import smalltalk
+
+    assert result.answer in next(a for a in smalltalk.ARTEN if a.name == "begruessung").antworten
 
 
 def test_ambiguous_messages_ask_the_small_model_with_a_time_limit(
@@ -3032,7 +3032,9 @@ def test_nothing_read_means_nothing_to_check(
 
     agent = Agent(settings, cache=None, toolbox=toolbox)
     result = agent.ask("Hallo", stream=False, recheck=True)
-    assert result.answer == "Hallo! Schön, dass du da bist. Wobei kann ich dir helfen?"
+    from aquaticy import smalltalk
+
+    assert result.answer in next(a for a in smalltalk.ARTEN if a.name == "begruessung").antworten
     assert result.rechecked is False
     assert llm.calls == []
 

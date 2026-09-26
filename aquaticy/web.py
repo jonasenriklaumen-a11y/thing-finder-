@@ -354,6 +354,40 @@ MAX_BODY_BYTES = MAX_UPLOAD_BYTES * MAX_UPLOADS * 4 // 3 + 1_000_000
 #: Endungen, die als Bild ans Vision-Modell gehen.
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 
+#: Server-Skripte werden nie angenommen (seit 9.5.18) -- auch nicht als
+#: "bild.php.png" oder in einer Schreibweise wie ".PhP5". Aquaticy fuehrt sie
+#: zwar nie aus, aber sie haben in einem Upload nichts verloren: landen sie
+#: spaeter auf einem Webserver, laufen sie dort.
+BLOCKED_UPLOAD_SUFFIXES = frozenset({
+    ".php", ".php2", ".php3", ".php4", ".php5", ".php6", ".php7", ".php8", ".phtml",
+    ".pht", ".phps", ".phar", ".inc.php",
+    ".jsp", ".jspx", ".jspf", ".jsw", ".jsv", ".jspa",
+})
+BLOCKED_UPLOAD_MESSAGE = (
+    "PHP- und JSP-Dateien lassen sich nicht hochladen. Wenn du Hilfe mit dem Code "
+    "brauchst, füg ihn einfach als Text in die Nachricht ein."
+)
+
+
+def blocked_upload(name: str) -> bool:
+    """Ist *name* ein PHP- oder JSP-Skript -- auch hinter einer zweiten Endung?"""
+    basis = Path(str(name or "").replace("\\", "/")).name.lower().strip()
+    teile = basis.split(".")[1:]
+    return any(f".{teil.strip()}" in BLOCKED_UPLOAD_SUFFIXES for teil in teile)
+
+
+#: Die ersten Bytes echter Bilddateien. Eine "Bild"-Datei ohne sie ist keine.
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"BM")
+
+
+def looks_like_image(data: bytes) -> bool:
+    """Beginnt *data* wirklich wie ein PNG, JPEG, GIF, WebP oder BMP?"""
+    head = bytes(data[:16])
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return True
+    return any(head.startswith(magie) for magie in _IMAGE_MAGIC)
+
+
 #: Endungen, deren Inhalt direkt als Text taugt.
 TEXT_TYPES = {".txt", ".md", ".csv", ".json", ".log", ".yaml", ".yml"}
 
@@ -1238,6 +1272,10 @@ class ChatSession:
         """
         blocks: list[str] = []
         for item in attachments[:MAX_UPLOADS]:
+            if blocked_upload(str(item.get("name") or "")):
+                blocks.append(f"[Anhang {safe_name(str(item.get('name') or 'datei'))}: "
+                              "PHP- und JSP-Dateien werden nicht angenommen]")
+                continue
             name = safe_name(str(item.get("name") or "datei"))
             try:
                 data = base64.b64decode(str(item.get("data") or ""), validate=True)
@@ -1312,6 +1350,9 @@ class ChatSession:
         )
 
         if suffix in IMAGE_TYPES:
+            if not looks_like_image(data):
+                # Eine Datei, die sich nur als Bild ausgibt (z. B. Skript mit .png).
+                return f"[Bild {name}: keine gültige Bilddatei -- nicht angenommen]"
             try:
                 path = self._store(name, data)
             except OSError as exc:
@@ -2473,7 +2514,7 @@ def _design_style(design: dict[str, Any]) -> str:
     return ";".join(teile)
 
 
-def with_state(html: str) -> str:
+def with_state(html: str, *, nonce: str = "") -> str:
     """Gibt der Seite den Zustand gleich mit auf den Weg.
 
     Zwei Gruende, das hier zu tun und nicht im Browser:
@@ -2536,7 +2577,9 @@ def with_state(html: str) -> str:
         # Vorschlaege, Begruessungen, Beschriftungen -- vom Server (9.5.14).
         f"window.__AQUATICY_TEXTS__ = {texte};"
     )
-    return html.replace("<script>", f"<script>{boot}</script>\n<script>", 1)
+    marke = f' nonce="{nonce}"' if nonce else ""
+    html = html.replace("<script>", f"<script{marke}>{boot}</script>\n<script{marke}>", 1)
+    return html
 
 
 def safe_name(name: str) -> str:
@@ -2581,16 +2624,28 @@ class Handler(BaseHTTPRequestHandler):
         super().send_response(code, message)
 
     def end_headers(self) -> None:
-        """Sicherheitskopfzeilen gelten fuer HTML, JSON, Downloads und SSE."""
+        """Sicherheitskopfzeilen gelten fuer HTML, JSON, Downloads und SSE.
+
+        XSS-Schutz (seit 9.5.18 strenger): Skripte laufen nur mit der Nonce
+        dieser einen Antwort -- ein eingeschleustes ``<script>`` oder ein
+        ``onerror=`` wird vom Browser nicht ausgefuehrt, selbst wenn es
+        irgendwo durch die Maskierung rutschen sollte. Ohne Seite (JSON, SSE,
+        Downloads) gibt es gar keine erlaubten Skripte.
+        """
+        nonce = getattr(self, "_csp_nonce", "")
+        skripte = f"'self' 'nonce-{nonce}'" if nonce else "'none'"
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            f"default-src 'self'; script-src {skripte}; script-src-attr 'none'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
-            "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "base-uri 'none'; form-action 'self'",
         )
         super().end_headers()
 
@@ -2847,6 +2902,9 @@ class Handler(BaseHTTPRequestHandler):
             return "", "Das Bild konnte nicht gelesen werden."
         if not data:
             return "", "Für die Bildsuche fehlt das Bild."
+        if not looks_like_image(data) or blocked_upload(str(payload.get("image_name") or "")):
+            return "", ("Das Bildformat stimmt nicht: Es gehen nur echte PNG-, JPEG-, "
+                        "GIF- oder WebP-Bilder.")
         if len(data) > MAX_UPLOAD_BYTES:
             return "", (
                 f"Das Bild ist zu groß (erlaubt sind "
@@ -3823,7 +3881,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
         So braucht nur der erste Aufruf die lange Adresse; danach kennt der
         Browser das Wort von selbst.
         """
-        body = with_state(UI_FILE.read_text(encoding="utf-8")).encode("utf-8")
+        self._csp_nonce = secrets.token_urlsafe(18)
+        body = with_state(UI_FILE.read_text(encoding="utf-8"),
+                          nonce=self._csp_nonce).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -3877,6 +3937,9 @@ p{{margin:0 0 8px;color:#57534a}}</style></head><body><main>
             if isinstance(raw, list)
             else []
         )
+        if any(blocked_upload(str(item.get("name") or "")) for item in attachments):
+            self._json({"error": BLOCKED_UPLOAD_MESSAGE, "code": "blocked_upload"}, 400)
+            return
         # Arbeitsweise, Struktur und Denktiefe gehoeren zur einzelnen Frage,
         # nicht zur Sitzung: dieselbe Person will mal eine ausfuehrliche
         # Recherche und im naechsten Satz nur den Code.

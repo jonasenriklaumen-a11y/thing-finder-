@@ -7,6 +7,7 @@ Settings). Danach gibt er den Zwischenstand aus.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import threading
@@ -522,33 +523,28 @@ SMALL_TALK_RE = re.compile(
 )
 
 
-def standard_chat_reply(question: str) -> str:
-    """Eine kurze, verlaessliche Antwort auf eindeutige Alltagsnachrichten.
+def standard_chat_reply(question: str, *, frage_offen: bool = False) -> str:
+    """Eine kurze Antwort auf eindeutige Alltagsnachrichten -- ganz ohne Modell.
 
-    Dafuer braucht es weder Anbieter noch Modell. Die Muster gelten nur fuer
-    die vollstaendige Nachricht; ein angehaengtes echtes Anliegen wird daher
-    weiterhin normal beantwortet.
+    Die Antworten stehen in `aquaticy.smalltalk`: viele je Art, zufaellig
+    gewaehlt. Die Muster gelten nur fuer die vollstaendige Nachricht; ein
+    angehaengtes echtes Anliegen wird weiterhin normal beantwortet. Mit
+    *frage_offen* (Aquaticy hat zuletzt selbst gefragt) bleibt ein "ok" eine
+    Antwort im Gespraech und geht an das Modell.
     """
-    text = " ".join((question or "").strip().lower().split())
-    text = re.sub(r"[\s!?.,:;)~-]+$", "", text)
-    if re.fullmatch(r"wie\s+geht('?s|\s+es)(\s+dir)?", text):
-        return "Mir geht’s gut, danke! Was möchtest du heute herausfinden?"
-    if re.fullmatch(r"wer\s+bin\s+ich", text):
-        return (
-            "Du bist die Person, mit der ich gerade schreibe. Mehr über dich weiß ich "
-            "nur, wenn du es mir erzählt hast und mein Speicher eingeschaltet ist."
-        )
-    if re.fullmatch(r"(wer|was)\s+bist\s+du|wie\s+hei(ss|ß)t\s+du", text):
-        return "Ich bin Aquaticy, ein KI-Assistent von Jonas. Wobei kann ich dir helfen?"
-    if re.fullmatch(r"hallo|hi|hey|moin|servus|guten\s+(morgen|tag|abend)", text):
-        return "Hallo! Schön, dass du da bist. Wobei kann ich dir helfen?"
-    if re.fullmatch(r"danke(\s+(dir|schoen|schön|sehr))?|vielen\s+dank|thx|thanks", text):
-        return "Sehr gern! Wenn noch etwas offen ist, sag einfach Bescheid."
-    if re.fullmatch(r"tsch(ue|ü)ss|bye|ciao|bis\s+(dann|morgen|spaeter|später)|gute\s+nacht", text):
-        return "Bis bald! Pass auf dich auf."
-    if SMALL_TALK_RE.fullmatch(question.strip()):
-        return "Alles klar. Was möchtest du als Nächstes machen?"
-    return ""
+    from aquaticy import smalltalk
+
+    return smalltalk.antwort(question, frage_offen=frage_offen)
+
+
+#: Wie lange eine Standardantwort je Wort "tippt" -- kurz genug, dass es
+#: flott wirkt, lang genug, dass sie wie vom Modell geschrieben erscheint.
+STANDARD_TYPING_SECONDS = 0.018
+
+#: So lange wartet ein Turn hoechstens auf die Suche nach dem staerksten Modell,
+#: die parallel zur Rechtspruefung laeuft. Danach geht es mit dem eingestellten
+#: Modell weiter -- die Suche darf nie eine Antwort aufhalten.
+STRONG_LOOKUP_WAIT = 8.0
 
 TRIAGE_PROMPT = (
     "Entscheide, ob die folgende Nutzernachricht eine Web-Recherche braucht oder nur "
@@ -1128,6 +1124,11 @@ class Agent:
         #: gemerkt -- die Suche danach fragt bei Ollama nach und soll nicht
         #: vor jeder Frage neu laufen. "" heisst "nichts gefunden".
         self._code_model: dict[str, str] = {}
+        # Die Suche nach dem staerksten Modell kann seit 9.5.18 parallel laufen
+        # (neben der Rechtspruefung) -- zwei gleichzeitige Fragen suchen einmal.
+        self._strong_lock = threading.Lock()
+        # Die vorgezogene Master-Planung des Pro-Modus (siehe `_prefetch_plan`).
+        self._vorplan: dict[str, Any] | None = None
         #: Gibt es ueberhaupt Agenten? Steht vor dem Werkzeugkasten, weil der
         #: Systemtext es wissen muss -- und der wird gleich darunter gebaut.
         self.use_subagents = settings.max_subagents > 0
@@ -1403,15 +1404,17 @@ class Agent:
         limit = max(1, self.agent_limit)
         strong = self.strong_count
         self._emit("planning", question=question)
-        mission = plan_mission(
-            question,
-            self.settings,
-            model=self.active_model,
-            context=self._planner_context(),
-            limit=limit,
-            strong=strong,
-            forced=self.max_run,
-        )
+        mission = self._take_prefetched_plan(question, limit, strong)
+        if mission is None:
+            mission = plan_mission(
+                question,
+                self.settings,
+                model=self.active_model,
+                context=self._planner_context(),
+                limit=limit,
+                strong=strong,
+                forced=self.max_run,
+            )
         if mission.fallback:
             # Der Master kam nicht durch (Zeitlimit, Ausfall). Dann plant der
             # kleine Planer wie im Standardmodus -- eine Recherche ohne
@@ -1514,6 +1517,91 @@ class Agent:
         box = getattr(self.toolbox, "_sandbox_box", None)
         if box is not None and getattr(box, "alive", False):
             box.touch()
+
+    def _prefetch_plan(self, question: str) -> None:
+        """Pro-Modus: der Master plant schon, WAEHREND die Rechtspruefung laeuft.
+
+        Tempo (9.5.18): Planung und Pruefung sind zwei Modellaufrufe, die
+        vorher nacheinander liefen. Die Planung fuehrt nichts aus -- sie
+        verteilt nur Auftraege. Losgeschickt wird erst nach dem OK der
+        Pruefung; lehnt sie ab, wird der Plan verworfen. So spart jede
+        Pro-Recherche die Wartezeit eines ganzen Aufrufs.
+        """
+        self._vorplan = None
+        if not (self.pro_mode and self.structured and self.online and question
+                and self._auto_subagents_wanted() and not SMALL_TALK_RE.match(question)):
+            return
+        from aquaticy.master import plan_mission
+
+        # Der Kontext ist derselbe, den der Planer spaeter saehe: jetzt steht
+        # die neue Frage noch nicht im Verlauf, also gehoert die letzte
+        # Nachricht (die vorige Antwort) dazu.
+        kontext = self._recent_context(include_last=True)
+        if self.settings.location:
+            kontext = f"[Ortsfilter: {self.settings.location}]\n{kontext}".strip()
+        eintrag: dict[str, Any] = {"question": question, "limit": max(1, self.agent_limit),
+                                   "strong": self.strong_count, "forced": self.max_run}
+
+        def planen() -> None:
+            try:
+                eintrag["model"] = self._strongest_model() or self.settings.model
+                eintrag["mission"] = plan_mission(
+                    question, self.settings, model=eintrag["model"], context=kontext,
+                    limit=eintrag["limit"], strong=eintrag["strong"], forced=eintrag["forced"],
+                )
+            except Exception:
+                eintrag["mission"] = None
+
+        faden = threading.Thread(target=planen, daemon=True, name="aquaticy-vorplanung")
+        eintrag["thread"] = faden
+        self._vorplan = eintrag
+        faden.start()
+
+    def _take_prefetched_plan(self, question: str, limit: int, strong: int) -> Any:
+        """Der vorgezogene Plan -- wenn er zu genau dieser Frage und Lage passt."""
+        eintrag, self._vorplan = self._vorplan, None
+        if not eintrag or eintrag.get("question") != question:
+            return None
+        faden = eintrag.get("thread")
+        if faden is not None:
+            faden.join(timeout=max(30.0, float(self.settings.planner_timeout) * 3))
+            if faden.is_alive():
+                return None
+        passt = (eintrag.get("limit") == limit and eintrag.get("strong") == strong
+                 and eintrag.get("forced") == self.max_run
+                 and eintrag.get("model") == self.active_model)
+        return eintrag.get("mission") if passt else None
+
+    def _warm_workshop(self) -> None:
+        """Startet die Werkstatt schon im Hintergrund (Code-Modus, 9.5.18).
+
+        Bis das Modell seinen ersten Befehl schickt, vergehen einige Sekunden
+        -- genug, um den Behaelter hochzufahren. Sonst beginnt die Wartezeit
+        fuer den Start erst mit dem ersten Befehl. Laeuft sie schon, passiert
+        nichts; ein Fehlschlag bleibt still, denn der erste Befehl startet sie
+        ohnehin selbst und meldet dann, was nicht geht. Nur mit einer
+        Abschottung (Podman/Docker) und nur, wenn das Kontingent noch reicht.
+        """
+        if self.stopped:
+            return
+        try:
+            from aquaticy import metering
+            from aquaticy import sandbox as werkstatt
+
+            if werkstatt.find_runtime() is None:
+                return
+            metering.check_work(self.settings, "werkstatt")
+            box = self.toolbox._sandbox()
+            if getattr(box, "alive", False):
+                return
+        except Exception:
+            return
+
+        def hochfahren() -> None:
+            with contextlib.suppress(Exception):
+                box.ensure()
+
+        threading.Thread(target=hochfahren, daemon=True, name="aquaticy-werkstatt-start").start()
 
     def _fresh_hits(self, question: str) -> str:
         """Sucht fuer die Gegenprobe selbst -- nur auf noch ungelesenen Seiten.
@@ -1830,16 +1918,19 @@ class Agent:
         wie umgekehrt -- also wird je Zweck getrennt gesucht und gemerkt.
         """
         zweck = purpose or ("code" if clean_mode(self.mode) == "code" else "work")
-        if zweck not in self._code_model:
-            from aquaticy.system import strongest_model
+        if zweck in self._code_model:
+            return self._code_model[zweck]
+        with self._strong_lock:
+            if zweck not in self._code_model:
+                from aquaticy.system import strongest_model
 
-            try:
-                self._code_model[zweck] = strongest_model(self.settings, purpose=zweck)
-            except Exception:
-                # Die Suche darf nie eine Antwort verhindern -- notfalls
-                # bleibt es beim eingestellten Modell.
-                self._code_model[zweck] = ""
-        return self._code_model[zweck]
+                try:
+                    self._code_model[zweck] = strongest_model(self.settings, purpose=zweck)
+                except Exception:
+                    # Die Suche darf nie eine Antwort verhindern -- notfalls
+                    # bleibt es beim eingestellten Modell.
+                    self._code_model[zweck] = ""
+            return self._code_model[zweck]
 
     def _apply_mode(self, mode: str) -> None:
         """Tauscht den Antwortteil des Systemprompts fuer diesen Turn.
@@ -2277,7 +2368,7 @@ class Agent:
         # diesen einen Turn. Ausserhalb des Pro-Modus wird es abgetrennt und
         # ignoriert -- ohne Master gibt es nichts zu erzwingen.
         question, gewuenscht_max = strip_max(question)
-        standard = standard_chat_reply(question)
+        standard = standard_chat_reply(question, frage_offen=self._last_reply_asks())
         if standard:
             self.max_run = False
             self._stop.clear()
@@ -2285,7 +2376,7 @@ class Agent:
             self._emit("triage", decision="chat", source="standardantwort")
             self.messages.append({"role": "user", "content": question})
             self.messages.append({"role": "assistant", "content": standard})
-            self._emit("answer_chunk", text=standard)
+            self._type_out(standard, stream)
             return self._finish(AgentResult(answer=standard), question)
         if effort:
             self.effort = clean_effort(effort)
@@ -2329,15 +2420,31 @@ class Agent:
             result.answer = ""
             return result
 
+        # Tempo (9.5.18): Im Code- und Pro-Modus wird das staerkste Modell
+        # gesucht, WAEHREND die Rechtspruefung laeuft -- beides braucht eine
+        # Weile, keines haengt vom anderen ab, und die Suche selbst fasst die
+        # Frage nicht an (sie schaut nur nach, welche Modelle erreichbar sind).
+        stark_suche: threading.Thread | None = None
+        if clean_mode(self.mode) in ("code", "pro"):
+            stark_suche = threading.Thread(target=self._strongest_model, daemon=True,
+                                           name="aquaticy-staerkstes-modell")
+            stark_suche.start()
+        self._prefetch_plan(question)
+
         abgelehnt = self._legal_check(question)
         if abgelehnt is not None:
             return abgelehnt
 
         if self.workshop_on:
             self._touch_workshop()
+            self._warm_workshop()
         self._auto_choose(question)
         if clean_mode(self.mode) in ("code", "pro"):
-            picked = self._strongest_model()
+            if stark_suche is not None:
+                stark_suche.join(timeout=STRONG_LOOKUP_WAIT)
+            # Haengt die Suche noch, nicht ein zweites Mal suchen und warten.
+            picked = "" if stark_suche is not None and stark_suche.is_alive() else (
+                self._strongest_model())
             if picked and picked != self.settings.model:
                 self._emit("code_model", model=picked)
 
@@ -2982,6 +3089,35 @@ class Agent:
             )
             result.answer = (result.answer or "").rstrip() + nachtrag
             self._emit("answer_chunk", text=nachtrag)
+
+    def _last_reply_asks(self) -> bool:
+        """Hat Aquaticy zuletzt selbst eine Frage gestellt?
+
+        Dann ist ein kurzes "ok" oder "passt" die Antwort darauf -- und keine
+        Standardantwort, sondern Sache des Modells.
+        """
+        for message in reversed(self.messages):
+            if message.get("role") == "assistant":
+                inhalt = str(message.get("content") or "").rstrip()
+                return inhalt.endswith("?")
+            if message.get("role") == "user":
+                continue
+        return False
+
+    def _type_out(self, text: str, stream: bool) -> None:
+        """Gibt eine Standardantwort aus -- beim Streamen Wort fuer Wort.
+
+        So kommt sie so an wie eine Antwort vom Modell. Ohne Streaming (Tests,
+        Auftraege) in einem Stueck, ohne jede Wartezeit.
+        """
+        if not stream:
+            self._emit("answer_chunk", text=text)
+            return
+        for stueck in re.findall(r"\S+\s*", text):
+            if self.stopped:
+                break
+            self._emit("answer_chunk", text=stueck)
+            time.sleep(STANDARD_TYPING_SECONDS)
 
     def _finish(self, result: AgentResult, question: str = "") -> AgentResult:
         stats = self.toolbox.stats
